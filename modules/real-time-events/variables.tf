@@ -7,15 +7,6 @@ variable "region" {
 }
 
 ################################################################################
-# Stream Security general variables
-################################################################################
-
-variable "host" {
-  description = "The host name for the Stream.Security API. EXAMPLE: app.streamsec.io"
-  type        = string
-}
-
-################################################################################
 # Stream Security real time events lambda
 ################################################################################
 

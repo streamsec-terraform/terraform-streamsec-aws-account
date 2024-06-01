@@ -1,5 +1,6 @@
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
+data "streamsec_host" "this" {}
 
 locals {
   lambda_source_code_bucket = "${var.lambda_source_code_bucket_prefix}-${data.aws_region.current.name}"
@@ -115,7 +116,7 @@ resource "aws_lambda_function" "streamsec_real_time_events_lambda" {
   environment {
     variables = {
       SECRET_NAME = aws_secretsmanager_secret.streamsec_collection_secret.name
-      API_URL     = "https://${var.host}"
+      API_URL     = data.streamsec_host.this.url
       ENV         = "prod"
       NODE_ENV    = "prod"
     }
