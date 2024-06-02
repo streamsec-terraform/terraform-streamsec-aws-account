@@ -31,7 +31,7 @@ resource "aws_iam_role" "lambda_execution_role" {
   tags = merge(var.tags, var.lambda_iam_role_tags)
 }
 
-resource "aws_iam_policy" "lambda_secret_manager_policy" {
+resource "aws_iam_policy" "lambda_exec_policy" {
   name        = var.lambda_policy_use_name_prefix ? null : "${var.lambda_policy_name}"
   name_prefix = var.lambda_policy_use_name_prefix ? "${var.lambda_policy_name}" : null
   description = var.lambda_policy_description
@@ -82,8 +82,8 @@ resource "aws_iam_role_policy_attachment" "lambda_flowlogs_execution_role_policy
   role       = aws_iam_role.lambda_execution_role.name
 }
 
-resource "aws_iam_role_policy_attachment" "lambda_flowlogs_secret_manager_policy_attachment" {
-  policy_arn = aws_iam_policy.lambda_secret_manager_policy.arn
+resource "aws_iam_role_policy_attachment" "lambda_flowlogs_exec_policy_attachment" {
+  policy_arn = aws_iam_policy.lambda_exec_policy.arn
   role       = aws_iam_role.lambda_execution_role.name
 }
 
