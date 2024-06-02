@@ -106,13 +106,25 @@ variable "cloudtrail_name" {
 variable "cloudtrail_bucket_name" {
   description = "The name of the S3 bucket to store CloudTrail logs in"
   type        = string
-  default = null
+  default     = null
 }
 
 variable "cloudtrail_bucket_force_destroy" {
   description = "A boolean that indicates all objects should be deleted from the bucket so that the bucket can be destroyed without error"
   type        = bool
   default     = true
+}
+
+variable "cloudtrail_bucket_tags" {
+  description = "tags for cloudtrail bucket"
+  type        = map(string)
+  default     = {}
+}
+
+variable "cloudtrail_tags" {
+  description = "tags for cloudtrail"
+  type        = map(string)
+  default     = {}
 }
 
 ################################################################################

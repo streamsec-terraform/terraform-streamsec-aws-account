@@ -94,6 +94,8 @@ resource "streamsec_aws_account_ack" "this" {
 resource "aws_s3_bucket" "streamsec_cloudtrail_bucket" {
   bucket        = try(var.cloudtrail_bucket_name, "streamsec-cloudtrail-logs-${data.aws_caller_identity.current.account_id}")
   force_destroy = var.cloudtrail_bucket_force_destroy
+
+  tags = merge(var.tags, var.cloudtrail_bucket_tags)
 }
 
 resource "aws_cloudtrail" "streamsec_cloudtrail" {
@@ -102,6 +104,8 @@ resource "aws_cloudtrail" "streamsec_cloudtrail" {
   s3_key_prefix                 = "prefix"
   include_global_service_events = true
   is_multi_region_trail         = true
+
+  tags = merge(var.tags, var.cloudtrail_tags)
 }
 
 resource "aws_s3_bucket_policy" "s3_cloudtrail_policy_attachment" {
