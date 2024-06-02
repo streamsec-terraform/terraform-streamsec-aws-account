@@ -53,6 +53,24 @@ resource "aws_iam_policy" "lambda_secret_manager_policy" {
         ],
         Effect   = "Allow",
         Resource = "arn:aws:secretsmanager:*:${data.aws_caller_identity.current.account_id}:secret:${var.collection_flowlogs_token_secret_name}*"
+      },
+      # s3 permissions
+      {
+        Action = [
+          "s3:GetObject",
+        ],
+        Effect = "Allow",
+        Resource = [
+          data.aws_s3_bucket.flowlogs_bucket.arn,
+          "${data.aws_s3_bucket.flowlogs_bucket.arn}/*"
+        ]
+      },
+      {
+        Action = [
+          "ec2:DescribeFlowLogs",
+        ],
+        Effect   = "Allow",
+        Resource = "*"
       }
     ]
 
@@ -139,7 +157,7 @@ data "aws_s3_bucket" "flowlogs_bucket" {
 }
 
 resource "aws_s3_bucket" "streamsec_flowlogs_bucket" {
-  count = var.create_flowlogs_bucket ? 1 : 0
+  count         = var.create_flowlogs_bucket ? 1 : 0
   bucket        = var.flowlogs_bucket_use_name_prefix ? null : var.flowlogs_bucket_name
   bucket_prefix = var.flowlogs_bucket_use_name_prefix ? var.flowlogs_bucket_name : null
   force_destroy = var.flowlogs_bucket_force_destroy
@@ -148,7 +166,7 @@ resource "aws_s3_bucket" "streamsec_flowlogs_bucket" {
 }
 
 resource "aws_flow_log" "streamsec_flowlogs" {
-  count               = var.create_flowlogs_bucket ? length(var.vpc_ids) : 0
+  count                = var.create_flowlogs_bucket ? length(var.vpc_ids) : 0
   log_destination      = data.aws_s3_bucket.flowlogs_bucket.arn
   log_destination_type = "s3"
   traffic_type         = "ALL"
@@ -163,12 +181,12 @@ resource "aws_s3_bucket_notification" "flowlogs_s3_lambda_trigger" {
     events              = ["s3:ObjectCreated:*"]
   }
 
-  depends_on = [ aws_lambda_permission.streamsec_flowlogs_allow_s3_invoke ]
+  depends_on = [aws_lambda_permission.streamsec_flowlogs_allow_s3_invoke]
 }
 
 resource "aws_s3_bucket_lifecycle_configuration" "flowlogs_bucket_config" {
-  count = var.create_flowlogs_bucket ? 1 : 0
-  bucket     = data.aws_s3_bucket.flowlogs_bucket.id
+  count  = var.create_flowlogs_bucket ? 1 : 0
+  bucket = data.aws_s3_bucket.flowlogs_bucket.id
   rule {
     id = var.flowlogs_bucket_lifecycle_rule[0].id
     expiration {
