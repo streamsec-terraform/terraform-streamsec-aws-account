@@ -59,7 +59,7 @@ resource "aws_iam_policy" "lambda_secret_manager_policy" {
   })
 }
 
-resource "aws_iam_policy_attachment" "lambda_flowlogs_basic_execution_role_policy_attachment" {
+resource "aws_iam_policy_attachment" "lambda_basic_execution_role_policy_attachment" {
   name       = "AWSLambdaBasicExecutionRole"
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
   roles      = [aws_iam_role.lambda_execution_role.name]
