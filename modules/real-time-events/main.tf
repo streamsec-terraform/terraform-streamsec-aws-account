@@ -65,16 +65,14 @@ resource "aws_iam_policy" "lambda_secret_manager_policy" {
   })
 }
 
-resource "aws_iam_policy_attachment" "lambda_basic_execution_role_policy_attachment" {
-  name       = "AWSLambdaBasicExecutionRole"
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-  roles      = [aws_iam_role.lambda_execution_role.name]
+resource "aws_iam_role_policy_attachment" "lambda_basic_execution_role_policy_attachment" {
+    policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+    role       = aws_iam_role.lambda_execution_role.name
 }
 
-resource "aws_iam_policy_attachment" "lambda_secret_manager_policy_attachment" {
-  name       = "AWSLambdaBasicExecutionRole"
-  policy_arn = aws_iam_policy.lambda_secret_manager_policy.arn
-  roles      = [aws_iam_role.lambda_execution_role.name]
+resource "aws_iam_role_policy_attachment" "lambda_secret_manager_policy_attachment" {
+    policy_arn = aws_iam_policy.lambda_secret_manager_policy.arn
+    role       = aws_iam_role.lambda_execution_role.name
 }
 
 resource "aws_secretsmanager_secret" "streamsec_collection_secret" {
