@@ -94,8 +94,14 @@ variable "iam_policy_tags" {
 }
 
 ################################################################################
-# Stream Security real time cloudtrail
+# Stream Security cloudtrail
 ################################################################################
+
+variable "create_cloudtrail" {
+    description = "Whether to create a CloudTrail for the AWS account"
+    type        = bool
+    default     = false
+}
 
 variable "cloudtrail_name" {
   description = "Name of the CloudTrail to create"
