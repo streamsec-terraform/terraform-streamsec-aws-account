@@ -5,7 +5,7 @@
 variable "collection_iam_activity_token_secret_name" {
   description = "The name of the secret to use for the lambda function"
   type        = string
-  default     = "streamsec-collection-token-iam_activity"
+  default     = "streamsec-collection-token-iam-activity"
 }
 
 variable "lambda_collection_token" {
@@ -16,7 +16,7 @@ variable "lambda_collection_token" {
 variable "lambda_name" {
   description = "Name of the lambda function"
   type        = string
-  default     = "streamsec-iam_activity-lambda"
+  default     = "streamsec-iam-activity-lambda"
 }
 
 variable "lambda_cloudwatch_memory_size" {
@@ -50,7 +50,7 @@ variable "lambda_cloudwatch_s3_source_code_key" {
 variable "lambda_layer_name" {
   description = "The name of the lambda layer"
   type        = string
-  default     = "streamsec-iam_activity-layer"
+  default     = "streamsec-iam-activity-layer"
 }
 
 variable "lambda_layer_s3_source_code_key" {
@@ -92,7 +92,7 @@ variable "lambda_cloudwatch_max_retry" {
 variable "lambda_iam_role_name" {
   description = "Name to use on IAM role created"
   type        = string
-  default     = "streamsec-iam_activity-execution-role"
+  default     = "streamsec-iam-activity-execution-role"
 }
 
 variable "lambda_iam_role_description" {
@@ -122,7 +122,7 @@ variable "lambda_iam_role_tags" {
 variable "lambda_policy_name" {
   description = "Name to use on IAM policy created"
   type        = string
-  default     = "streamsec-iam_activity-policy"
+  default     = "streamsec-iam-activity-policy"
 }
 
 variable "lambda_policy_description" {
