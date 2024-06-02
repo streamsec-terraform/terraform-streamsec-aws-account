@@ -106,7 +106,13 @@ variable "cloudtrail_name" {
 variable "cloudtrail_bucket_name" {
   description = "The name of the S3 bucket to store CloudTrail logs in"
   type        = string
-  default     = null
+  default     = "streamsec-cloudtrail"
+}
+
+variable "cloudtrail_bucket_use_name_prefix" {
+  description = "Determines whether the CloudTrail bucket name (`cloudtrail_bucket_name`) is used as a prefix"
+  type        = bool
+  default     = true
 }
 
 variable "cloudtrail_bucket_force_destroy" {

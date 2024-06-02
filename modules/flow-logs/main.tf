@@ -59,7 +59,7 @@ resource "aws_iam_policy" "lambda_secret_manager_policy" {
   })
 }
 
-resource "aws_iam_policy_attachment" "lambda_basic_execution_role_policy_attachment" {
+resource "aws_iam_policy_attachment" "lambda_flowlogs_basic_execution_role_policy_attachment" {
   name       = "AWSLambdaBasicExecutionRole"
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
   roles      = [aws_iam_role.lambda_execution_role.name]
@@ -142,7 +142,8 @@ data "aws_s3_bucket" "flowlogs_bucket" {
 
 resource "aws_s3_bucket" "streamsec_flowlogs_bucket" {
   count = var.create_flowlogs_bucket ? 1 : 0
-  bucket        = try(var.flowlogs_bucket_name, "streamsec-flowlogs-${data.aws_caller_identity.current.account_id}")
+  bucket        = var.flowlogs_bucket_use_name_prefix ? null : var.flowlogs_bucket_name
+  bucket_prefix = var.flowlogs_bucket_use_name_prefix ? var.flowlogs_bucket_name : null
   force_destroy = var.flowlogs_bucket_force_destroy
 
   tags = merge(var.tags, var.flowlogs_bucket_tags)
@@ -158,7 +159,6 @@ resource "aws_flow_log" "streamsec_flowlogs" {
 }
 
 resource "aws_s3_bucket_notification" "flowlogs_s3_lambda_trigger" {
-  count = var.create_flowlogs_bucket ? 1 : 0
   bucket = data.aws_s3_bucket.flowlogs_bucket.id
   lambda_function {
     lambda_function_arn = aws_lambda_function.streamsec_flowlogs_lambda.arn
@@ -166,23 +166,17 @@ resource "aws_s3_bucket_notification" "flowlogs_s3_lambda_trigger" {
   }
 }
 
-resource "aws_s3_bucket_acl" "flowlogs_bucket_acl" {
-  count = var.create_flowlogs_bucket ? 1 : 0
-  bucket     = data.aws_s3_bucket.flowlogs_bucket.id
-  acl        = "private"
-}
-
 resource "aws_s3_bucket_lifecycle_configuration" "flowlogs_bucket_config" {
   count = var.create_flowlogs_bucket ? 1 : 0
   bucket     = data.aws_s3_bucket.flowlogs_bucket.id
   rule {
-    id = var.flow_logs_bucket_lifecycle_rule[0].id
+    id = var.flowlogs_bucket_lifecycle_rule[0].id
     expiration {
-      days = var.flow_logs_bucket_lifecycle_rule[0].days
+      days = var.flowlogs_bucket_lifecycle_rule[0].days
     }
     filter {
-      prefix = var.flow_logs_bucket_lifecycle_rule[0].prefix
+      prefix = var.flowlogs_bucket_lifecycle_rule[0].prefix
     }
-    status = var.flow_logs_bucket_lifecycle_rule[0].status
+    status = var.flowlogs_bucket_lifecycle_rule[0].status
   }
 }

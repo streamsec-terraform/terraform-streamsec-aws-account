@@ -155,7 +155,13 @@ variable "create_flowlogs_bucket" {
 variable "flowlogs_bucket_name" {
   description = "The name of the S3 bucket to store the flow logs"
   type        = string
-  default     = null
+  default     = "streamsec-flowlogs"
+}
+
+variable "flowlogs_bucket_use_name_prefix" {
+  description = "Whether to use a prefix for the bucket name"
+  type        = bool
+  default     = true
 }
 
 variable "flowlogs_bucket_force_destroy" {
@@ -176,7 +182,7 @@ variable "flowlogs_bucket_tags" {
   default     = {}
 }
 
-variable "flow_logs_bucket_lifecycle_rule" {
+variable "flowlogs_bucket_lifecycle_rule" {
   type = list(object({
     id     = string
     prefix = string
