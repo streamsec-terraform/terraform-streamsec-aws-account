@@ -164,6 +164,8 @@ resource "aws_s3_bucket_notification" "flowlogs_s3_lambda_trigger" {
     lambda_function_arn = aws_lambda_function.streamsec_flowlogs_lambda.arn
     events              = ["s3:ObjectCreated:*"]
   }
+
+  depends_on = [ aws_lambda_permission.streamsec_flowlogs_allow_s3_invoke ]
 }
 
 resource "aws_s3_bucket_lifecycle_configuration" "flowlogs_bucket_config" {

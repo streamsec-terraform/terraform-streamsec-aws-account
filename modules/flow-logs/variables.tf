@@ -92,7 +92,7 @@ variable "lambda_cloudwatch_max_retry" {
 variable "lambda_iam_role_name" {
   description = "Name to use on IAM role created"
   type        = string
-  default     = "streamsec-events-lambda-execution-role"
+  default     = "streamsec-flowlogs-execution-role"
 }
 
 variable "lambda_iam_role_description" {
@@ -122,7 +122,7 @@ variable "lambda_iam_role_tags" {
 variable "lambda_policy_name" {
   description = "Name to use on IAM policy created"
   type        = string
-  default     = "streamsec-events-lambda-policy"
+  default     = "streamsec-flowlogs-policy"
 }
 
 variable "lambda_policy_description" {
