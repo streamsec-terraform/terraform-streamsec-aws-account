@@ -2,10 +2,10 @@
 # Stream Security FlowLogs lambda
 ################################################################################
 
-variable "collection_flowlogs_token_secret_name" {
+variable "collection_iam_activity_token_secret_name" {
   description = "The name of the secret to use for the lambda function"
   type        = string
-  default     = "streamsec-collection-token-flowlogs"
+  default     = "streamsec-collection-token-iam_activity"
 }
 
 variable "lambda_collection_token" {
@@ -16,7 +16,7 @@ variable "lambda_collection_token" {
 variable "lambda_name" {
   description = "Name of the lambda function"
   type        = string
-  default     = "streamsec-flowlogs-lambda"
+  default     = "streamsec-iam_activity-lambda"
 }
 
 variable "lambda_cloudwatch_memory_size" {
@@ -50,7 +50,7 @@ variable "lambda_cloudwatch_s3_source_code_key" {
 variable "lambda_layer_name" {
   description = "The name of the lambda layer"
   type        = string
-  default     = "streamsec-flowlogs-layer"
+  default     = "streamsec-iam_activity-layer"
 }
 
 variable "lambda_layer_s3_source_code_key" {
@@ -92,7 +92,7 @@ variable "lambda_cloudwatch_max_retry" {
 variable "lambda_iam_role_name" {
   description = "Name to use on IAM role created"
   type        = string
-  default     = "streamsec-flowlogs-execution-role"
+  default     = "streamsec-iam_activity-execution-role"
 }
 
 variable "lambda_iam_role_description" {
@@ -122,13 +122,13 @@ variable "lambda_iam_role_tags" {
 variable "lambda_policy_name" {
   description = "Name to use on IAM policy created"
   type        = string
-  default     = "streamsec-flowlogs-policy"
+  default     = "streamsec-iam_activity-policy"
 }
 
 variable "lambda_policy_description" {
   description = "Description to use on IAM policy created"
   type        = string
-  default     = "Stream Security IAM Policy for flowlogs lambda"
+  default     = "Stream Security IAM Policy for iam_activity lambda"
 }
 
 variable "lambda_policy_use_name_prefix" {
@@ -144,59 +144,12 @@ variable "lambda_policy_path" {
 }
 
 ################################################################################
-# FlowLogs S3
+# IAM Activity S3
 ################################################################################
 
-variable "create_flowlogs_bucket" {
-  description = "Whether to create an S3 bucket to store the flow logs"
-  default     = false
-}
-
-variable "flowlogs_bucket_name" {
-  description = "The name of the S3 bucket to store the flow logs"
+variable "iam_activity_bucket_name" {
+  description = "The name of the S3 bucket to store the iam activity logs"
   type        = string
-  default     = "streamsec-flowlogs"
-}
-
-variable "flowlogs_bucket_use_name_prefix" {
-  description = "Whether to use a prefix for the bucket name"
-  type        = bool
-  default     = true
-}
-
-variable "flowlogs_bucket_force_destroy" {
-  description = "A boolean that indicates all objects should be deleted from the bucket so that the bucket can be destroyed without error"
-  type        = bool
-  default     = true
-}
-
-variable "vpc_ids" {
-  description = "The VPC IDs to use for the flow logs"
-  type        = list(string)
-  default     = []
-}
-
-variable "flowlogs_bucket_tags" {
-  description = "A map of additional tags to add to the S3 bucket created"
-  type        = map(string)
-  default     = {}
-}
-
-variable "flowlogs_bucket_lifecycle_rule" {
-  type = list(object({
-    id     = string
-    prefix = string
-    status = string
-    days   = number
-  }))
-  default = [
-    {
-      id     = "purge"
-      prefix = "AWSLogs/"
-      status = "Enabled"
-      days   = 360
-    }
-  ]
 }
 
 ################################################################################

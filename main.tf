@@ -92,6 +92,7 @@ resource "streamsec_aws_account_ack" "this" {
 ################################################################################
 
 resource "aws_s3_bucket" "streamsec_cloudtrail_bucket" {
+  count         = var.create_cloudtrail ? 1 : 0
   bucket        = var.cloudtrail_bucket_use_name_prefix ? null : var.cloudtrail_bucket_name
   bucket_prefix = var.cloudtrail_bucket_use_name_prefix ? var.cloudtrail_bucket_name : null
   force_destroy = var.cloudtrail_bucket_force_destroy
@@ -100,8 +101,9 @@ resource "aws_s3_bucket" "streamsec_cloudtrail_bucket" {
 }
 
 resource "aws_cloudtrail" "streamsec_cloudtrail" {
+  count                         = var.create_cloudtrail ? 1 : 0
   name                          = var.cloudtrail_name
-  s3_bucket_name                = aws_s3_bucket.streamsec_cloudtrail_bucket.bucket
+  s3_bucket_name                = aws_s3_bucket.streamsec_cloudtrail_bucket[0].bucket
   s3_key_prefix                 = "prefix"
   include_global_service_events = true
   is_multi_region_trail         = true
@@ -110,7 +112,8 @@ resource "aws_cloudtrail" "streamsec_cloudtrail" {
 }
 
 resource "aws_s3_bucket_policy" "s3_cloudtrail_policy_attachment" {
-  bucket = aws_s3_bucket.streamsec_cloudtrail_bucket.id
+  count = var.create_cloudtrail ? 1 : 0
+  bucket = aws_s3_bucket.streamsec_cloudtrail_bucket[0].id
   policy = <<POLICY
 {
     "Version": "2012-10-17",
@@ -122,7 +125,7 @@ resource "aws_s3_bucket_policy" "s3_cloudtrail_policy_attachment" {
               "Service": "cloudtrail.amazonaws.com"
             },
             "Action": "s3:GetBucketAcl",
-            "Resource": "arn:aws:s3:::${aws_s3_bucket.streamsec_cloudtrail_bucket.id}"
+            "Resource": "arn:aws:s3:::${aws_s3_bucket.streamsec_cloudtrail_bucket[0].id}"
         },
         {
             "Sid": "AWSCloudTrailWrite20150319",
@@ -131,7 +134,7 @@ resource "aws_s3_bucket_policy" "s3_cloudtrail_policy_attachment" {
               "Service": "cloudtrail.amazonaws.com"
             },
             "Action": "s3:PutObject",
-            "Resource": "arn:aws:s3:::${aws_s3_bucket.streamsec_cloudtrail_bucket.id}/prefix/AWSLogs/${data.aws_caller_identity.current.account_id}/*",
+            "Resource": "arn:aws:s3:::${aws_s3_bucket.streamsec_cloudtrail_bucket[0].id}/prefix/AWSLogs/${data.aws_caller_identity.current.account_id}/*",
             "Condition": {
                 "StringEquals": {
                     "s3:x-amz-acl": "bucket-owner-full-control"
