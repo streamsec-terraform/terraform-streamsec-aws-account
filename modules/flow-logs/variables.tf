@@ -16,7 +16,7 @@ variable "lambda_collection_token" {
 variable "lambda_name" {
   description = "Name of the lambda function"
   type        = string
-  default     = "streamsec-real-time-events-lambda"
+  default     = "streamsec-flowlogs-lambda"
 }
 
 variable "lambda_cloudwatch_memory_size" {
@@ -50,7 +50,7 @@ variable "lambda_cloudwatch_s3_source_code_key" {
 variable "lambda_layer_name" {
   description = "The name of the lambda layer"
   type        = string
-  default     = "streamsec-real-time-events-layer"
+  default     = "streamsec-flowlogs-layer"
 }
 
 variable "lambda_layer_s3_source_code_key" {
@@ -128,7 +128,7 @@ variable "lambda_policy_name" {
 variable "lambda_policy_description" {
   description = "Description to use on IAM policy created"
   type        = string
-  default     = "Stream Security IAM Policy for real time events lambda"
+  default     = "Stream Security IAM Policy for flowlogs lambda"
 }
 
 variable "lambda_policy_use_name_prefix" {
