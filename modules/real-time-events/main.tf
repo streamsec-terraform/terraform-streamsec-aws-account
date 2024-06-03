@@ -4,7 +4,7 @@ data "streamsec_host" "this" {}
 
 locals {
   lambda_source_code_bucket = "${var.lambda_source_code_bucket_prefix}-${data.aws_region.current.name}"
-  cloudwatch_rules = { for i in range(4) :
+  cloudwatch_rules = { for i in range(length(fileset(path.module, "templates/*.json"))) :
     "streamsec-rule-${i}" => {
       description   = "Cloud Trail for Stream Security real time events Lambda"
       event_pattern = file("${path.module}/templates/CloudWatchEventRule${i}.json")
