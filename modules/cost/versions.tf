@@ -4,7 +4,7 @@ terraform {
   required_providers {
     streamsec = {
       source  = "streamsec-terraform/streamsec"
-      version = ">= 1.6"
+      version = ">= 1.7"
     }
     aws = {
       source  = "hashicorp/aws"

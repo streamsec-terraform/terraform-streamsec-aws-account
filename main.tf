@@ -1,8 +1,6 @@
-provider "aws" {
-  region = var.region
-}
-
 data "aws_caller_identity" "current" {}
+
+data "aws_region" "current" {}
 
 resource "streamsec_aws_account" "this" {
   cloud_account_id = data.aws_caller_identity.current.account_id
@@ -82,7 +80,7 @@ resource "time_sleep" "wait" {
 
 resource "streamsec_aws_account_ack" "this" {
   cloud_account_id = data.aws_caller_identity.current.account_id
-  stack_region     = var.region
+  stack_region     = data.aws_region.current.name
   role_arn         = aws_iam_role.this.arn
   depends_on       = [time_sleep.wait]
 }

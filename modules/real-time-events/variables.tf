@@ -1,12 +1,4 @@
 ################################################################################
-# AWS Provider Variables
-################################################################################
-variable "region" {
-  description = "The AWS region to deploy resources in."
-  type        = string
-}
-
-################################################################################
 # Stream Security real time events lambda
 ################################################################################
 
@@ -14,11 +6,6 @@ variable "lambda_collection_secret_name" {
   description = "The name of the secret to use for the lambda function"
   type        = string
   default     = "streamsec-collection-token"
-}
-
-variable "lambda_collection_token" {
-  description = "The collection token to use for the lambda function"
-  type        = string
 }
 
 variable "lambda_name" {

@@ -85,11 +85,6 @@ variable "collection_cost_token_secret_name" {
   default     = "streamsec-collection-token-cost"
 }
 
-variable "lambda_collection_token" {
-  description = "The collection token to use for the lambda function"
-  type        = string
-}
-
 variable "lambda_name" {
   description = "Name of the lambda function"
   type        = string

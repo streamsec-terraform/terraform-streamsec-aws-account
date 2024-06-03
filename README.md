@@ -6,14 +6,14 @@
 |------|---------|
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.0 |
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | >= 3.0 |
-| <a name="requirement_streamsec"></a> [streamsec](#requirement\_streamsec) | >= 1.5 |
+| <a name="requirement_streamsec"></a> [streamsec](#requirement\_streamsec) | >= 1.7 |
 
 ## Providers
 
 | Name | Version |
 |------|---------|
 | <a name="provider_aws"></a> [aws](#provider\_aws) | >= 3.0 |
-| <a name="provider_streamsec"></a> [streamsec](#provider\_streamsec) | >= 1.5 |
+| <a name="provider_streamsec"></a> [streamsec](#provider\_streamsec) | >= 1.7 |
 | <a name="provider_time"></a> [time](#provider\_time) | n/a |
 
 ## Modules
@@ -34,6 +34,7 @@ No modules.
 | [streamsec_aws_account_ack.this](https://registry.terraform.io/providers/streamsec-terraform/streamsec/latest/docs/resources/aws_account_ack) | resource |
 | [time_sleep.wait](https://registry.terraform.io/providers/hashicorp/time/latest/docs/resources/sleep) | resource |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
+| [aws_region.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/region) | data source |
 
 ## Inputs
 
@@ -58,7 +59,6 @@ No modules.
 | <a name="input_iam_role_path"></a> [iam\_role\_path](#input\_iam\_role\_path) | Cluster IAM role path | `string` | `null` | no |
 | <a name="input_iam_role_tags"></a> [iam\_role\_tags](#input\_iam\_role\_tags) | A map of additional tags to add to the IAM role created | `map(string)` | `{}` | no |
 | <a name="input_iam_role_use_name_prefix"></a> [iam\_role\_use\_name\_prefix](#input\_iam\_role\_use\_name\_prefix) | Determines whether the IAM role name (`iam_role_name`) is used as a prefix | `bool` | `true` | no |
-| <a name="input_region"></a> [region](#input\_region) | The AWS region to deploy resources in. | `string` | n/a | yes |
 | <a name="input_streamsec_account"></a> [streamsec\_account](#input\_streamsec\_account) | The AWS Account ID for the Stream.Security account. | `string` | `"624907860825"` | no |
 | <a name="input_tags"></a> [tags](#input\_tags) | A map of global tags to add to all created resources | `map(string)` | `{}` | no |
 
