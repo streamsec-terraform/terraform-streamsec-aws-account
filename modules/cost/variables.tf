@@ -1,11 +1,88 @@
 ################################################################################
-# Stream Security IAM Activity lambda
+# Stream Security AWS Account Variables
 ################################################################################
 
-variable "collection_iam_activity_token_secret_name" {
+variable "streamsec_account" {
+  description = "The AWS Account ID for the Stream.Security account."
+  type        = string
+  default     = "624907860825"
+}
+
+################################################################################
+# Stream Security IAM Role
+################################################################################
+variable "iam_role_name" {
+  description = "Name to use on IAM role created"
+  type        = string
+  default     = "streamsec-role"
+}
+
+variable "iam_role_description" {
+  description = "Description to use on IAM role created"
+  type        = string
+  default     = "Stream Security IAM Role"
+}
+
+variable "iam_role_use_name_prefix" {
+  description = "Determines whether the IAM role name (`iam_role_name`) is used as a prefix"
+  type        = bool
+  default     = true
+}
+
+variable "iam_role_path" {
+  description = "Cluster IAM role path"
+  type        = string
+  default     = null
+}
+
+variable "iam_role_tags" {
+  description = "A map of additional tags to add to the IAM role created"
+  type        = map(string)
+  default     = {}
+}
+
+################################################################################
+# Stream Security IAM Policies
+################################################################################
+
+variable "iam_policy_name" {
+  description = "Name to use on IAM policy created"
+  type        = string
+  default     = "streamsec-policy"
+}
+
+variable "iam_policy_description" {
+  description = "Description to use on IAM policy created"
+  type        = string
+  default     = "Stream Security IAM Policy"
+}
+
+variable "iam_policy_use_name_prefix" {
+  description = "Determines whether the IAM policy name (`iam_policy_name`) is used as a prefix"
+  type        = bool
+  default     = true
+}
+
+variable "iam_policy_path" {
+  description = "IAM policy path"
+  type        = string
+  default     = null
+}
+
+variable "iam_policy_tags" {
+  description = "A map of additional tags to add to the IAM policy created"
+  type        = map(string)
+  default     = {}
+}
+
+################################################################################
+# Stream Security Cost lambda
+################################################################################
+
+variable "collection_cost_token_secret_name" {
   description = "The name of the secret to use for the lambda function"
   type        = string
-  default     = "streamsec-collection-token-iam-activity"
+  default     = "streamsec-collection-token-cost"
 }
 
 variable "lambda_collection_token" {
@@ -16,7 +93,7 @@ variable "lambda_collection_token" {
 variable "lambda_name" {
   description = "Name of the lambda function"
   type        = string
-  default     = "streamsec-iam-activity-lambda"
+  default     = "streamsec-cost-lambda"
 }
 
 variable "lambda_cloudwatch_memory_size" {
@@ -50,7 +127,7 @@ variable "lambda_cloudwatch_s3_source_code_key" {
 variable "lambda_layer_name" {
   description = "The name of the lambda layer"
   type        = string
-  default     = "streamsec-iam-activity-layer"
+  default     = "streamsec-cost-layer"
 }
 
 variable "lambda_layer_s3_source_code_key" {
@@ -92,7 +169,7 @@ variable "lambda_cloudwatch_max_retry" {
 variable "lambda_iam_role_name" {
   description = "Name to use on IAM role created"
   type        = string
-  default     = "streamsec-iam-activity-execution-role"
+  default     = "streamsec-cost-execution-role"
 }
 
 variable "lambda_iam_role_description" {
@@ -122,13 +199,13 @@ variable "lambda_iam_role_tags" {
 variable "lambda_policy_name" {
   description = "Name to use on IAM policy created"
   type        = string
-  default     = "streamsec-iam-activity-policy"
+  default     = "streamsec-cost-policy"
 }
 
 variable "lambda_policy_description" {
   description = "Description to use on IAM policy created"
   type        = string
-  default     = "Stream Security IAM Policy for iam_activity lambda"
+  default     = "Stream Security IAM Policy for cost lambda"
 }
 
 variable "lambda_policy_use_name_prefix" {
@@ -144,12 +221,59 @@ variable "lambda_policy_path" {
 }
 
 ################################################################################
-# IAM Activity S3
+# Cost S3
 ################################################################################
 
-variable "iam_activity_bucket_name" {
-  description = "The name of the S3 bucket to store the iam activity logs"
+variable "create_cost_bucket" {
+  description = "Whether to create an S3 bucket to store the flow logs"
+  default     = false
+}
+
+variable "cost_bucket_name" {
+  description = "The name of the S3 bucket to store the flow logs"
   type        = string
+  default     = "streamsec-cost"
+}
+
+variable "cost_bucket_use_name_prefix" {
+  description = "Whether to use a prefix for the bucket name"
+  type        = bool
+  default     = true
+}
+
+variable "cost_bucket_force_destroy" {
+  description = "A boolean that indicates all objects should be deleted from the bucket so that the bucket can be destroyed without error"
+  type        = bool
+  default     = true
+}
+
+variable "vpc_ids" {
+  description = "The VPC IDs to use for the flow logs"
+  type        = list(string)
+  default     = []
+}
+
+variable "cost_bucket_tags" {
+  description = "A map of additional tags to add to the S3 bucket created"
+  type        = map(string)
+  default     = {}
+}
+
+variable "cost_bucket_lifecycle_rule" {
+  type = list(object({
+    id     = string
+    prefix = string
+    status = string
+    days   = number
+  }))
+  default = [
+    {
+      id     = "purge"
+      prefix = "AWSLogs/"
+      status = "Enabled"
+      days   = 360
+    }
+  ]
 }
 
 ################################################################################

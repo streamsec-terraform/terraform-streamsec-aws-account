@@ -48,13 +48,6 @@ resource "aws_iam_policy" "lambda_exec_policy" {
     "Statement" : [
       {
         Action = [
-          "kms:Decrypt"
-        ],
-        Effect   = "Allow",
-        Resource = "*"
-      },
-      {
-        Action = [
           "secretsmanager:GetSecretValue"
         ],
         Effect   = "Allow",
@@ -115,8 +108,8 @@ resource "aws_lambda_function" "streamsec_real_time_events_lambda" {
     variables = {
       SECRET_NAME = aws_secretsmanager_secret.streamsec_collection_secret.name
       API_URL     = data.streamsec_host.this.url
-      ENV         = "prod"
-      NODE_ENV    = "prod"
+      ENV         = "production"
+      NODE_ENV    = "production"
     }
   }
 
