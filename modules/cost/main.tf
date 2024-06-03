@@ -293,11 +293,11 @@ resource "aws_cur_report_definition" "cur_report_definition" {
   s3_region                  = "us-east-1"
 }
 
-# resource "streamsec_cost_ack" "this" {
-#   cloud_account_id = data.aws_caller_identity.current.account_id
-#   role_arn         = aws_iam_role.this.arn
-#   external_id      = random_uuid.external_id.result
-#   bucket_arn       = data.aws_s3_bucket.cost_bucket.arn
-#   cur_prefix       = var.create_cost_bucket ? aws_cur_report_definition.cur_report_definition.s3_prefix : var.cur_prefix
-#   depends_on       = [aws_lambda_permission.streamsec_cost_allow_s3_invoke]
-# }
+resource "streamsec_cost_ack" "this" {
+  cloud_account_id = data.aws_caller_identity.current.account_id
+  role_arn         = aws_iam_role.this.arn
+  external_id      = random_uuid.external_id.result
+  bucket_arn       = data.aws_s3_bucket.cost_bucket.arn
+  cur_prefix       = var.create_cost_bucket ? aws_cur_report_definition.cur_report_definition.s3_prefix : var.cur_prefix
+  depends_on       = [aws_lambda_permission.streamsec_cost_allow_s3_invoke]
+}
