@@ -6,11 +6,7 @@ locals {
   lambda_source_code_bucket = "${var.lambda_source_code_bucket_prefix}-${data.aws_region.current.name}"
 }
 
-resource "random_uuid" "external_id" {
-  keepers = {
-    ami_id = data.aws_caller_identity.current.account_id
-  }
-}
+resource "random_uuid" "external_id" {}
 
 ################################################################################
 # IAM Role
@@ -54,8 +50,8 @@ resource "aws_iam_policy" "streamsec_policy" {
     "Version" : "2012-10-17"
     "Statement" : [
       {
-        Action   = "s3:GetObject"
-        Effect   = "Allow",
+        Action = "s3:GetObject"
+        Effect = "Allow",
         Resource = [
           "${data.aws_s3_bucket.cost_bucket.arn}/*"
         ]
@@ -117,14 +113,14 @@ resource "aws_iam_policy" "lambda_exec_policy" {
         Action = [
           "s3:GetObject",
         ],
-        Effect = "Allow",
+        Effect   = "Allow",
         Resource = "${data.aws_s3_bucket.cost_bucket.arn}/*"
       },
       {
         Action = [
           "s3:ListBucket",
         ],
-        Effect = "Allow",
+        Effect   = "Allow",
         Resource = data.aws_s3_bucket.cost_bucket.arn
       }
     ]
@@ -225,35 +221,35 @@ resource "aws_s3_bucket_policy" "s3_cloudtrail_policy_attachment" {
     Version = "2008-10-17"
     Statement = [
       {
-        Effect    = "Allow",
+        Effect = "Allow",
         Principal = {
           Service = "billingreports.amazonaws.com"
         },
-        Action    = [
+        Action = [
           "s3:GetBucketAcl",
           "s3:GetBucketPolicy"
         ],
-        Resource  = aws_s3_bucket.streamsec_cost_bucket[0].arn,
+        Resource = aws_s3_bucket.streamsec_cost_bucket[0].arn,
         Condition = {
           StringEquals = {
-            "aws:SourceAccount": data.aws_caller_identity.current.account_id,
-            "aws:SourceArn"    : "arn:aws:cur:us-east-1:${data.aws_caller_identity.current.account_id}:definition/*"
+            "aws:SourceAccount" : data.aws_caller_identity.current.account_id,
+            "aws:SourceArn" : "arn:aws:cur:us-east-1:${data.aws_caller_identity.current.account_id}:definition/*"
           }
         }
       },
       {
-        Effect    = "Allow",
+        Effect = "Allow",
         Principal = {
           Service = "billingreports.amazonaws.com"
         },
-        Action    = [
+        Action = [
           "s3:PutObject"
         ],
-        Resource  = "${aws_s3_bucket.streamsec_cost_bucket[0].arn}/*",
+        Resource = "${aws_s3_bucket.streamsec_cost_bucket[0].arn}/*",
         Condition = {
           StringEquals = {
-            "aws:SourceAccount": data.aws_caller_identity.current.account_id,
-            "aws:SourceArn"    : "arn:aws:cur:us-east-1:${data.aws_caller_identity.current.account_id}:definition/*"
+            "aws:SourceAccount" : data.aws_caller_identity.current.account_id,
+            "aws:SourceArn" : "arn:aws:cur:us-east-1:${data.aws_caller_identity.current.account_id}:definition/*"
           }
         }
       }
@@ -286,8 +282,22 @@ resource "aws_s3_bucket_lifecycle_configuration" "cost_bucket_config" {
   }
 }
 
-resource "streamsec_cost_ack" "this" {
-  cloud_account_id = data.aws_caller_identity.current.account_id
-  region           = var.region
-  depends_on = [ aws_lambda_permission.streamsec_cost_allow_s3_invoke ]
+resource "aws_cur_report_definition" "cur_report_definition" {
+  count                      = var.create_cost_bucket ? 1 : 0
+  report_name                = var.cur_report_name
+  time_unit                  = var.cur_time_unit
+  format                     = "textORcsv"
+  compression                = "GZIP"
+  additional_schema_elements = ["RESOURCES"]
+  s3_bucket                  = data.aws_s3_bucket.cost_bucket.bucket
+  s3_region                  = "us-east-1"
 }
+
+# resource "streamsec_cost_ack" "this" {
+#   cloud_account_id = data.aws_caller_identity.current.account_id
+#   role_arn         = aws_iam_role.this.arn
+#   external_id      = random_uuid.external_id.result
+#   bucket_arn       = data.aws_s3_bucket.cost_bucket.arn
+#   cur_prefix       = var.create_cost_bucket ? aws_cur_report_definition.cur_report_definition.s3_prefix : var.cur_prefix
+#   depends_on       = [aws_lambda_permission.streamsec_cost_allow_s3_invoke]
+# }

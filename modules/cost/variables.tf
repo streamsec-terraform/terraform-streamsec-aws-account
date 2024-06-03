@@ -14,7 +14,7 @@ variable "streamsec_account" {
 variable "iam_role_name" {
   description = "Name to use on IAM role created"
   type        = string
-  default     = "streamsec-role"
+  default     = "streamsec-cost-role"
 }
 
 variable "iam_role_description" {
@@ -274,6 +274,22 @@ variable "cost_bucket_lifecycle_rule" {
       days   = 360
     }
   ]
+}
+
+################################################################################
+# CUR Report
+################################################################################
+
+variable "cur_report_name" {
+  description = "Whether to create a CUR report"
+  type        = string
+  default     = "streamsec-cost-report"
+}
+
+variable "cur_time_unit" {
+  description = "The time unit for the CUR report"
+  type        = string
+  default     = "DAILY"
 }
 
 ################################################################################
