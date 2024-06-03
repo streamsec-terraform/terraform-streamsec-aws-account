@@ -98,9 +98,9 @@ variable "iam_policy_tags" {
 ################################################################################
 
 variable "create_cloudtrail" {
-    description = "Whether to create a CloudTrail for the AWS account"
-    type        = bool
-    default     = false
+  description = "Whether to create a CloudTrail for the AWS account"
+  type        = bool
+  default     = false
 }
 
 variable "cloudtrail_name" {

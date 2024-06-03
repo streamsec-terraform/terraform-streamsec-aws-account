@@ -11,14 +11,14 @@ variable "region" {
 ################################################################################
 
 variable "lambda_collection_secret_name" {
-    description = "The name of the secret to use for the lambda function"
-    type        = string
-    default     = "streamsec-collection-token"
+  description = "The name of the secret to use for the lambda function"
+  type        = string
+  default     = "streamsec-collection-token"
 }
 
 variable "lambda_collection_token" {
-    description = "The collection token to use for the lambda function"
-    type        = string
+  description = "The collection token to use for the lambda function"
+  type        = string
 }
 
 variable "lambda_name" {
@@ -90,7 +90,7 @@ variable "lambda_cloudwatch_max_event_age" {
 variable "lambda_cloudwatch_max_retry" {
   description = "The maximum number of times to retry when the function returns an error"
   type        = number
-  default = 2
+  default     = 2
 }
 
 variable "lambda_iam_role_name" {

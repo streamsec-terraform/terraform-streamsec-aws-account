@@ -59,13 +59,13 @@ resource "aws_iam_policy" "lambda_exec_policy" {
 }
 
 resource "aws_iam_role_policy_attachment" "lambda_basic_execution_role_policy_attachment" {
-    policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-    role       = aws_iam_role.lambda_execution_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+  role       = aws_iam_role.lambda_execution_role.name
 }
 
 resource "aws_iam_role_policy_attachment" "lambda_exec_policy_attachment" {
-    policy_arn = aws_iam_policy.lambda_exec_policy.arn
-    role       = aws_iam_role.lambda_execution_role.name
+  policy_arn = aws_iam_policy.lambda_exec_policy.arn
+  role       = aws_iam_role.lambda_execution_role.name
 }
 
 resource "aws_secretsmanager_secret" "streamsec_collection_secret" {
@@ -152,5 +152,5 @@ resource "aws_lambda_permission" "streamsec_allow_lambda_cloudwatch_invocation" 
 resource "streamsec_aws_real_time_events_ack" "this" {
   cloud_account_id = data.aws_caller_identity.current.account_id
   region           = var.region
-  depends_on = [ aws_lambda_permission.streamsec_allow_lambda_cloudwatch_invocation ]
+  depends_on       = [aws_lambda_permission.streamsec_allow_lambda_cloudwatch_invocation]
 }

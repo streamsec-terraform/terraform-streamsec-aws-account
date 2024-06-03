@@ -112,7 +112,7 @@ resource "aws_cloudtrail" "streamsec_cloudtrail" {
 }
 
 resource "aws_s3_bucket_policy" "s3_cloudtrail_policy_attachment" {
-  count = var.create_cloudtrail ? 1 : 0
+  count  = var.create_cloudtrail ? 1 : 0
   bucket = aws_s3_bucket.streamsec_cloudtrail_bucket[0].id
   policy = <<POLICY
 {
