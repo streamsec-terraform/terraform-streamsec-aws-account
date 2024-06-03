@@ -289,6 +289,7 @@ resource "aws_cur_report_definition" "cur_report_definition" {
   format                     = "textORcsv"
   compression                = "GZIP"
   additional_schema_elements = ["RESOURCES"]
+  s3_prefix                  = var.cur_prefix
   s3_bucket                  = data.aws_s3_bucket.cost_bucket.bucket
   s3_region                  = "us-east-1"
 }
@@ -298,6 +299,6 @@ resource "streamsec_aws_cost_ack" "this" {
   role_arn         = aws_iam_role.this.arn
   external_id      = random_uuid.external_id.result
   bucket_arn       = data.aws_s3_bucket.cost_bucket.arn
-  cur_prefix       = var.create_cost_bucket ? aws_cur_report_definition.cur_report_definition.s3_prefix : var.cur_prefix
+  cur_prefix       = var.cur_prefix
   depends_on       = [aws_lambda_permission.streamsec_cost_allow_s3_invoke]
 }
