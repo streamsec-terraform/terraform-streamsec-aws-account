@@ -1,6 +1,9 @@
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
 data "streamsec_host" "this" {}
+data "streamsec_aws_account" "this" {
+  cloud_account_id = data.aws_caller_identity.current.account_id
+}
 
 locals {
   lambda_source_code_bucket = "${var.lambda_source_code_bucket_prefix}-${data.aws_region.current.name}"
@@ -81,7 +84,7 @@ resource "aws_secretsmanager_secret" "streamsec_collection_secret" {
 
 resource "aws_secretsmanager_secret_version" "streamsec_collection_secret_version" {
   secret_id     = aws_secretsmanager_secret.streamsec_collection_secret.id
-  secret_string = var.lambda_collection_token
+  secret_string = data.streamsec_aws_account.this.streamsec_collection_token
 }
 
 

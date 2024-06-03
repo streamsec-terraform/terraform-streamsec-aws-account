@@ -10,6 +10,9 @@ crash.log
 crash.*.log
 
 local-tests/
+examples/local
+**.terraform
+**.terraform.lock.hcl
 
 # Exclude all .tfvars files, which are likely to contain sensitive data, such as
 # password, private keys, and other secrets. These should not be part of version 
