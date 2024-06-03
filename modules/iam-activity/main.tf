@@ -42,13 +42,6 @@ resource "aws_iam_policy" "lambda_exec_policy" {
     "Statement" : [
       {
         Action = [
-          "kms:Decrypt"
-        ],
-        Effect   = "Allow",
-        Resource = "*"
-      },
-      {
-        Action = [
           "secretsmanager:GetSecretValue"
         ],
         Effect   = "Allow",
@@ -121,8 +114,8 @@ resource "aws_lambda_function" "streamsec_iam_activity_lambda" {
       SECRET_NAME = var.collection_iam_activity_token_secret_name
       API_URL     = data.streamsec_host.this.url
       BATCH_SIZE  = var.lambda_batch_size
-      ENV         = "prod"
-      NODE_ENV    = "prod"
+      ENV         = "production"
+      NODE_ENV    = "production"
     }
   }
 }
@@ -143,7 +136,7 @@ resource "aws_lambda_permission" "streamsec_iam_activity_allow_s3_invoke" {
 
 
 ################################################################################
-# FlowLogs S3
+# IAM Activity S3
 ################################################################################
 
 data "aws_s3_bucket" "iam_activity_bucket" {

@@ -42,13 +42,6 @@ resource "aws_iam_policy" "lambda_exec_policy" {
     "Statement" : [
       {
         Action = [
-          "kms:Decrypt"
-        ],
-        Effect   = "Allow",
-        Resource = "*"
-      },
-      {
-        Action = [
           "secretsmanager:GetSecretValue"
         ],
         Effect   = "Allow",
@@ -127,8 +120,8 @@ resource "aws_lambda_function" "streamsec_flowlogs_lambda" {
       API_URL     = data.streamsec_host.this.url
       SECRET_NAME = var.collection_flowlogs_token_secret_name
       BATCH_SIZE  = var.lambda_batch_size
-      ENV         = "prod"
-      NODE_ENV    = "prod"
+      ENV         = "production"
+      NODE_ENV    = "production"
     }
   }
 }

@@ -1,5 +1,5 @@
 ################################################################################
-# Stream Security FlowLogs lambda
+# Stream Security IAM Activity lambda
 ################################################################################
 
 variable "collection_iam_activity_token_secret_name" {
