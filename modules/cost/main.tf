@@ -293,7 +293,7 @@ resource "aws_cur_report_definition" "cur_report_definition" {
   s3_region                  = "us-east-1"
 }
 
-resource "streamsec_cost_ack" "this" {
+resource "streamsec_aws_cost_ack" "this" {
   cloud_account_id = data.aws_caller_identity.current.account_id
   role_arn         = aws_iam_role.this.arn
   external_id      = random_uuid.external_id.result
