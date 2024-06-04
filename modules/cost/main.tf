@@ -151,14 +151,6 @@ resource "aws_secretsmanager_secret_version" "streamsec_collection_secret_versio
   secret_string = data.streamsec_aws_account.this.streamsec_collection_token
 }
 
-
-resource "aws_lambda_layer_version" "streamsec_lambda_layer" {
-  s3_bucket           = local.lambda_source_code_bucket
-  s3_key              = var.lambda_layer_s3_source_code_key
-  layer_name          = var.lambda_layer_name
-  compatible_runtimes = ["nodejs20.x"]
-}
-
 resource "aws_lambda_function" "streamsec_cost_lambda" {
   function_name = var.lambda_name
   role          = aws_iam_role.lambda_execution_role.arn
@@ -168,7 +160,6 @@ resource "aws_lambda_function" "streamsec_cost_lambda" {
   timeout       = var.lambda_cloudwatch_timeout
   s3_bucket     = local.lambda_source_code_bucket
   s3_key        = var.lambda_cloudwatch_s3_source_code_key
-  layers        = [aws_lambda_layer_version.streamsec_lambda_layer.arn]
 
   vpc_config {
     subnet_ids         = var.lambda_subnet_ids
@@ -292,7 +283,6 @@ resource "aws_cur_report_definition" "cur_report_definition" {
   format                     = "textORcsv"
   compression                = "GZIP"
   additional_schema_elements = ["RESOURCES"]
-  s3_prefix                  = var.cur_prefix
   s3_bucket                  = data.aws_s3_bucket.cost_bucket.bucket
   s3_region                  = "us-east-1"
 }
