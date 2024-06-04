@@ -15,7 +15,7 @@ locals {
 
 resource "aws_iam_role" "lambda_execution_role" {
   name        = var.lambda_iam_role_use_name_prefix ? null : var.lambda_iam_role_name
-  name_prefix = var.lambda_iam_role_use_name_prefix ? "${var.lambda_iam_role_name}" : null
+  name_prefix = var.lambda_iam_role_use_name_prefix ? var.lambda_iam_role_name : null
   path        = var.lambda_iam_role_path
   description = var.lambda_iam_role_description
 
@@ -35,8 +35,8 @@ resource "aws_iam_role" "lambda_execution_role" {
 }
 
 resource "aws_iam_policy" "lambda_exec_policy" {
-  name        = var.lambda_policy_use_name_prefix ? null : "${var.lambda_policy_name}"
-  name_prefix = var.lambda_policy_use_name_prefix ? "${var.lambda_policy_name}" : null
+  name        = var.lambda_policy_use_name_prefix ? null : var.lambda_policy_name
+  name_prefix = var.lambda_policy_use_name_prefix ? var.lambda_policy_name : null
   description = var.lambda_policy_description
   path        = var.lambda_policy_path
 

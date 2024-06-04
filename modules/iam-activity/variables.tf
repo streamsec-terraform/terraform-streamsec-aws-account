@@ -27,7 +27,9 @@ variable "lambda_cloudwatch_timeout" {
 }
 
 variable "lambda_batch_size" {
-  default = 4000
+  description = "The maximum number of records to include in a single batch"
+  type        = number
+  default     = 4000
 }
 
 variable "lambda_source_code_bucket_prefix" {
@@ -64,12 +66,6 @@ variable "lambda_security_group_ids" {
   description = "The security group IDs to use for the lambda function"
   type        = list(string)
   default     = []
-}
-
-variable "lambda_tags" {
-  description = "A map of additional tags to add to the lambda function created"
-  type        = map(string)
-  default     = {}
 }
 
 variable "lambda_cloudwatch_max_event_age" {

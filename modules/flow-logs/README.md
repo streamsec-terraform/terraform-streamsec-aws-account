@@ -50,11 +50,11 @@ No modules.
 | <a name="input_collection_flowlogs_token_secret_name"></a> [collection\_flowlogs\_token\_secret\_name](#input\_collection\_flowlogs\_token\_secret\_name) | The name of the secret to use for the lambda function | `string` | `"streamsec-collection-token-flowlogs"` | no |
 | <a name="input_create_flowlogs_bucket"></a> [create\_flowlogs\_bucket](#input\_create\_flowlogs\_bucket) | Whether to create an S3 bucket to store the flow logs | `bool` | `false` | no |
 | <a name="input_flowlogs_bucket_force_destroy"></a> [flowlogs\_bucket\_force\_destroy](#input\_flowlogs\_bucket\_force\_destroy) | A boolean that indicates all objects should be deleted from the bucket so that the bucket can be destroyed without error | `bool` | `true` | no |
-| <a name="input_flowlogs_bucket_lifecycle_rule"></a> [flowlogs\_bucket\_lifecycle\_rule](#input\_flowlogs\_bucket\_lifecycle\_rule) | n/a | <pre>list(object({<br>    id     = string<br>    prefix = string<br>    status = string<br>    days   = number<br>  }))</pre> | <pre>[<br>  {<br>    "days": 360,<br>    "id": "purge",<br>    "prefix": "AWSLogs/",<br>    "status": "Enabled"<br>  }<br>]</pre> | no |
+| <a name="input_flowlogs_bucket_lifecycle_rule"></a> [flowlogs\_bucket\_lifecycle\_rule](#input\_flowlogs\_bucket\_lifecycle\_rule) | A list of lifecycle rules to apply to the S3 bucket | <pre>list(object({<br>    id     = string<br>    prefix = string<br>    status = string<br>    days   = number<br>  }))</pre> | <pre>[<br>  {<br>    "days": 360,<br>    "id": "purge",<br>    "prefix": "AWSLogs/",<br>    "status": "Enabled"<br>  }<br>]</pre> | no |
 | <a name="input_flowlogs_bucket_name"></a> [flowlogs\_bucket\_name](#input\_flowlogs\_bucket\_name) | The name of the S3 bucket to store the flow logs | `string` | `"streamsec-flowlogs"` | no |
 | <a name="input_flowlogs_bucket_tags"></a> [flowlogs\_bucket\_tags](#input\_flowlogs\_bucket\_tags) | A map of additional tags to add to the S3 bucket created | `map(string)` | `{}` | no |
 | <a name="input_flowlogs_bucket_use_name_prefix"></a> [flowlogs\_bucket\_use\_name\_prefix](#input\_flowlogs\_bucket\_use\_name\_prefix) | Whether to use a prefix for the bucket name | `bool` | `true` | no |
-| <a name="input_lambda_batch_size"></a> [lambda\_batch\_size](#input\_lambda\_batch\_size) | n/a | `number` | `4000` | no |
+| <a name="input_lambda_batch_size"></a> [lambda\_batch\_size](#input\_lambda\_batch\_size) | The maximum number of records to include in a single batch | `number` | `4000` | no |
 | <a name="input_lambda_cloudwatch_max_event_age"></a> [lambda\_cloudwatch\_max\_event\_age](#input\_lambda\_cloudwatch\_max\_event\_age) | The maximum age of a request that Lambda sends to a function for processing, in seconds | `number` | `21600` | no |
 | <a name="input_lambda_cloudwatch_max_retry"></a> [lambda\_cloudwatch\_max\_retry](#input\_lambda\_cloudwatch\_max\_retry) | The maximum number of times to retry when the function returns an error | `number` | `2` | no |
 | <a name="input_lambda_cloudwatch_memory_size"></a> [lambda\_cloudwatch\_memory\_size](#input\_lambda\_cloudwatch\_memory\_size) | The amount of memory in MB to allocate to the lambda function | `number` | `128` | no |
@@ -75,7 +75,6 @@ No modules.
 | <a name="input_lambda_security_group_ids"></a> [lambda\_security\_group\_ids](#input\_lambda\_security\_group\_ids) | The security group IDs to use for the lambda function | `list(string)` | `[]` | no |
 | <a name="input_lambda_source_code_bucket_prefix"></a> [lambda\_source\_code\_bucket\_prefix](#input\_lambda\_source\_code\_bucket\_prefix) | The prefix to use for the lambda source code bucket | `string` | `"prod-lightlytics-artifacts"` | no |
 | <a name="input_lambda_subnet_ids"></a> [lambda\_subnet\_ids](#input\_lambda\_subnet\_ids) | The subnet IDs to use for the lambda function | `list(string)` | `[]` | no |
-| <a name="input_lambda_tags"></a> [lambda\_tags](#input\_lambda\_tags) | A map of additional tags to add to the lambda function created | `map(string)` | `{}` | no |
 | <a name="input_tags"></a> [tags](#input\_tags) | A map of global tags to add to all created resources | `map(string)` | `{}` | no |
 | <a name="input_vpc_ids"></a> [vpc\_ids](#input\_vpc\_ids) | The VPC IDs to use for the flow logs | `list(string)` | `[]` | no |
 

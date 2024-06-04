@@ -17,7 +17,7 @@ locals {
 ################################################################################
 resource "aws_iam_role" "this" {
   name        = var.iam_role_use_name_prefix ? null : var.iam_role_name
-  name_prefix = var.iam_role_use_name_prefix ? "${var.iam_role_name}" : null
+  name_prefix = var.iam_role_use_name_prefix ? var.iam_role_name : null
   path        = var.iam_role_path
   description = var.iam_role_description
 

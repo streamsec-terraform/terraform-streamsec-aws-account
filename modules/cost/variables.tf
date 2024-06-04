@@ -103,10 +103,6 @@ variable "lambda_cloudwatch_timeout" {
   default     = 60
 }
 
-variable "lambda_batch_size" {
-  default = 4000
-}
-
 variable "lambda_source_code_bucket_prefix" {
   description = "The prefix to use for the lambda source code bucket"
   type        = string
@@ -141,12 +137,6 @@ variable "lambda_security_group_ids" {
   description = "The security group IDs to use for the lambda function"
   type        = list(string)
   default     = []
-}
-
-variable "lambda_tags" {
-  description = "A map of additional tags to add to the lambda function created"
-  type        = map(string)
-  default     = {}
 }
 
 variable "lambda_cloudwatch_max_event_age" {
@@ -221,6 +211,7 @@ variable "lambda_policy_path" {
 
 variable "create_cost_bucket" {
   description = "Whether to create an S3 bucket to store the flow logs"
+  type        = bool
   default     = false
 }
 
@@ -242,12 +233,6 @@ variable "cost_bucket_force_destroy" {
   default     = true
 }
 
-variable "vpc_ids" {
-  description = "The VPC IDs to use for the flow logs"
-  type        = list(string)
-  default     = []
-}
-
 variable "cost_bucket_tags" {
   description = "A map of additional tags to add to the S3 bucket created"
   type        = map(string)
@@ -255,6 +240,7 @@ variable "cost_bucket_tags" {
 }
 
 variable "cost_bucket_lifecycle_rule" {
+  description = "A list of lifecycle rules to apply to the S3 bucket"
   type = list(object({
     id     = string
     prefix = string
