@@ -1,5 +1,4 @@
 # StreamSec - AWS Account Integration using Terraform
-
 Terraform module for AWS tenant
 
 <!-- BEGIN_TF_DOCS -->
