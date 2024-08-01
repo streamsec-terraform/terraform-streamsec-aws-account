@@ -1,4 +1,6 @@
-# terraform-streamsec-aws-account
+# StreamSec - AWS Account Integration using Terraform
+
+
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
 
