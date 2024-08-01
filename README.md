@@ -8,7 +8,7 @@
 |------|---------|
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.0 |
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | >= 3.0 |
-| <a name="requirement_streamsec"></a> [streamsec](#requirement\_streamsec) | >= 1.7 |
+| <a name="requirement_streamsec"></a> [streamsec](https://github.com/streamsec-terraform/terraform-provider-streamsec) | >= 1.7 |
 | <a name="requirement_time"></a> [time](#requirement\_time) | >= 0.11 |
 
 ## Providers
@@ -16,12 +16,12 @@
 | Name | Version |
 |------|---------|
 | <a name="provider_aws"></a> [aws](#provider\_aws) | >= 3.0 |
-| <a name="provider_streamsec"></a> [streamsec](#provider\_streamsec) | >= 1.7 |
+| <a name="provider_streamsec"></a> [streamsec](https://github.com/streamsec-terraform/terraform-provider-streamsec) | >= 1.7 |
 | <a name="provider_time"></a> [time](#provider\_time) | >= 0.11 |
 
 ## Modules
 
-No modules.
+No any additional modules are required.
 
 ## Resources
 
