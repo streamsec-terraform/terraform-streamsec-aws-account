@@ -61,7 +61,7 @@ No modules.
 | <a name="input_cost_bucket_tags"></a> [cost\_bucket\_tags](#input\_cost\_bucket\_tags) | A map of additional tags to add to the S3 bucket created | `map(string)` | `{}` | no |
 | <a name="input_cost_bucket_use_name_prefix"></a> [cost\_bucket\_use\_name\_prefix](#input\_cost\_bucket\_use\_name\_prefix) | Whether to use a prefix for the bucket name | `bool` | `true` | no |
 | <a name="input_create_cost_bucket"></a> [create\_cost\_bucket](#input\_create\_cost\_bucket) | Whether to create an S3 bucket to store the flow logs | `bool` | `false` | no |
-| <a name="input_cur_prefix"></a> [cur\_prefix](#input\_cur\_prefix) | The prefix to use for the CUR report | `string` | `"/streamsec-cost-report"` | no |
+| <a name="input_cur_prefix"></a> [cur\_prefix](#input\_cur\_prefix) | The prefix to use for the CUR report | `string` | `"streamsec-cost-report"` | no |
 | <a name="input_cur_report_name"></a> [cur\_report\_name](#input\_cur\_report\_name) | Whether to create a CUR report | `string` | `"streamsec-cost-report"` | no |
 | <a name="input_cur_time_unit"></a> [cur\_time\_unit](#input\_cur\_time\_unit) | The time unit for the CUR report | `string` | `"DAILY"` | no |
 | <a name="input_iam_policy_description"></a> [iam\_policy\_description](#input\_iam\_policy\_description) | Description to use on IAM policy created | `string` | `"Stream Security IAM Policy"` | no |
