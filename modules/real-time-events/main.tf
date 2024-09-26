@@ -13,6 +13,9 @@ locals {
       event_pattern = file("${path.module}/templates/CloudWatchEventRule${i}.json")
     }
   }
+  
+  compatible_runtimes = [var.lambda_runtime]
+
 }
 
 ################################################################################
@@ -59,6 +62,8 @@ resource "aws_iam_policy" "lambda_exec_policy" {
     ]
 
   })
+
+  tags = merge(var.tags, var.iam_policy_tags)
 }
 
 resource "aws_iam_role_policy_attachment" "lambda_basic_execution_role_policy_attachment" {
@@ -75,6 +80,7 @@ resource "aws_secretsmanager_secret" "streamsec_collection_secret" {
   name                    = var.lambda_collection_secret_name
   description             = "Stream Security Collection Token"
   recovery_window_in_days = 0
+  tags                    = var.tags
 }
 
 resource "aws_secretsmanager_secret_version" "streamsec_collection_secret_version" {
@@ -87,7 +93,7 @@ resource "aws_lambda_layer_version" "streamsec_lambda_layer" {
   s3_bucket           = local.lambda_source_code_bucket
   s3_key              = var.lambda_layer_s3_source_code_key
   layer_name          = var.lambda_layer_name
-  compatible_runtimes = ["nodejs20.x"]
+  compatible_runtimes = local.compatible_runtimes
 }
 
 
@@ -95,7 +101,7 @@ resource "aws_lambda_function" "streamsec_real_time_events_lambda" {
   function_name = var.lambda_name
   role          = aws_iam_role.lambda_execution_role.arn
   handler       = "src/handler.cloudWatchCollector"
-  runtime       = "nodejs20.x"
+  runtime       = var.lambda_runtime
   memory_size   = var.lambda_cloudwatch_memory_size
   timeout       = var.lambda_cloudwatch_timeout
   s3_bucket     = local.lambda_source_code_bucket
@@ -134,6 +140,7 @@ resource "aws_cloudwatch_event_rule" "streamsec_cloudwatch_rules" {
   name          = each.key
   description   = each.value["description"]
   event_pattern = each.value["event_pattern"]
+  tags          = var.tags
 }
 
 resource "aws_cloudwatch_event_target" "streamsec_lambda_cloudwatch_target" {

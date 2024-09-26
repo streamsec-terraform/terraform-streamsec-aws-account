@@ -134,6 +134,20 @@ variable "lambda_policy_path" {
   default     = null
 }
 
+variable "lambda_runtime" {
+  description = "(optional) overwrite hardcoded lambda compatible_runtimes and lambda_runtime"
+  type        = string
+  default     = "nodejs20.x"
+  nullable    = false
+}
+
+variable "iam_policy_tags" {
+  description = "A map of additional tags to add to the IAM policy created"
+  type        = map(string)
+  default     = {}
+  nullable    = false
+}
+
 ################################################################################
 # General
 ################################################################################
