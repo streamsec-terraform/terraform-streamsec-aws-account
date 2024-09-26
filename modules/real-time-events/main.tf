@@ -62,6 +62,8 @@ resource "aws_iam_policy" "lambda_exec_policy" {
     ]
 
   })
+
+  tags = merge(var.tags, var.iam_policy_tags)
 }
 
 resource "aws_iam_role_policy_attachment" "lambda_basic_execution_role_policy_attachment" {
@@ -78,6 +80,7 @@ resource "aws_secretsmanager_secret" "streamsec_collection_secret" {
   name                    = var.lambda_collection_secret_name
   description             = "Stream Security Collection Token"
   recovery_window_in_days = 0
+  tags                    = var.tags
 }
 
 resource "aws_secretsmanager_secret_version" "streamsec_collection_secret_version" {
@@ -137,6 +140,7 @@ resource "aws_cloudwatch_event_rule" "streamsec_cloudwatch_rules" {
   name          = each.key
   description   = each.value["description"]
   event_pattern = each.value["event_pattern"]
+  tags          = var.tags
 }
 
 resource "aws_cloudwatch_event_target" "streamsec_lambda_cloudwatch_target" {
