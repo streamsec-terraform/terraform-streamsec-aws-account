@@ -141,6 +141,20 @@ variable "lambda_runtime" {
   nullable    = false
 }
 
+variable "lambda_tags" {
+  description = "A map of tags to add to the lambda created"
+  type        = map(string)
+  default     = {}
+  nullable    = false
+}
+
+variable "iam_policy_tags" {
+  description = "A map of additional tags to add to the IAM policy created"
+  type        = map(string)
+  default     = {}
+  nullable    = false
+}
+
 ################################################################################
 # IAM Activity S3
 ################################################################################
