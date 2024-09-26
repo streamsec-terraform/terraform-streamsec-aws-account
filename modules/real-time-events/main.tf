@@ -13,6 +13,9 @@ locals {
       event_pattern = file("${path.module}/templates/CloudWatchEventRule${i}.json")
     }
   }
+  
+  compatible_runtimes = [var.lambda_runtime]
+
 }
 
 ################################################################################
@@ -87,7 +90,7 @@ resource "aws_lambda_layer_version" "streamsec_lambda_layer" {
   s3_bucket           = local.lambda_source_code_bucket
   s3_key              = var.lambda_layer_s3_source_code_key
   layer_name          = var.lambda_layer_name
-  compatible_runtimes = ["nodejs20.x"]
+  compatible_runtimes = local.compatible_runtimes
 }
 
 
@@ -95,7 +98,7 @@ resource "aws_lambda_function" "streamsec_real_time_events_lambda" {
   function_name = var.lambda_name
   role          = aws_iam_role.lambda_execution_role.arn
   handler       = "src/handler.cloudWatchCollector"
-  runtime       = "nodejs20.x"
+  runtime       = var.lambda_runtime
   memory_size   = var.lambda_cloudwatch_memory_size
   timeout       = var.lambda_cloudwatch_timeout
   s3_bucket     = local.lambda_source_code_bucket
