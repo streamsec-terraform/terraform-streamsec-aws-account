@@ -90,6 +90,15 @@ resource "aws_lambda_layer_version" "streamsec_lambda_layer" {
   compatible_runtimes = ["nodejs20.x"]
 }
 
+resource "aws_cloudwatch_log_group" "streamsec_lambda_log_group" {
+  name              = "/aws/lambda/${var.lambda_name}"
+  retention_in_days = var.lambda_log_group_retention
+}
+
+import {
+  to = aws_cloudwatch_log_group.streamsec_lambda_log_group
+  id = "/aws/lambda/${var.lambda_name}"
+}
 
 resource "aws_lambda_function" "streamsec_real_time_events_lambda" {
   function_name = var.lambda_name
@@ -102,6 +111,10 @@ resource "aws_lambda_function" "streamsec_real_time_events_lambda" {
   s3_key        = var.lambda_cloudwatch_s3_source_code_key
   layers        = [aws_lambda_layer_version.streamsec_lambda_layer.arn]
 
+  logging_config {
+    log_group  = aws_cloudwatch_log_group.streamsec_lambda_log_group.name
+    log_format = "text"
+  }
   vpc_config {
     subnet_ids         = var.lambda_subnet_ids
     security_group_ids = var.lambda_security_group_ids

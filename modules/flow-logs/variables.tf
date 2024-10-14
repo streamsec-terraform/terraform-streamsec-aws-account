@@ -56,6 +56,12 @@ variable "lambda_layer_s3_source_code_key" {
   default     = "a6729c33addf65a4b886ccf1ae6ccc37"
 }
 
+variable "lambda_log_group_retention" {
+  description = "The number of days to retain log events in the log group"
+  type        = number
+  default     = 30
+}
+
 variable "lambda_subnet_ids" {
   description = "The subnet IDs to use for the lambda function"
   type        = list(string)
