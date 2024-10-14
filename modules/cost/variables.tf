@@ -115,6 +115,12 @@ variable "lambda_cloudwatch_s3_source_code_key" {
   default     = "fccdf51e8501d87a570ba11a49eaf12c"
 }
 
+variable "lambda_log_group_retention" {
+  description = "The number of days to retain log events in the log group"
+  type        = number
+  default     = 30
+}
+
 variable "lambda_subnet_ids" {
   description = "The subnet IDs to use for the lambda function"
   type        = list(string)
