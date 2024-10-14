@@ -173,7 +173,7 @@ resource "aws_lambda_function" "streamsec_cost_lambda" {
 
   logging_config {
     log_group  = aws_cloudwatch_log_group.streamsec_lambda_log_group.name
-    log_format = "text"
+    log_format = "Text"
   }
 
   vpc_config {

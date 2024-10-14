@@ -113,7 +113,7 @@ resource "aws_lambda_function" "streamsec_real_time_events_lambda" {
 
   logging_config {
     log_group  = aws_cloudwatch_log_group.streamsec_lambda_log_group.name
-    log_format = "text"
+    log_format = "Text"
   }
   vpc_config {
     subnet_ids         = var.lambda_subnet_ids
