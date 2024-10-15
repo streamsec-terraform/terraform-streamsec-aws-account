@@ -258,7 +258,7 @@ variable "cur_report_name" {
 variable "cur_prefix" {
   description = "The prefix to use for the CUR report"
   type        = string
-  default     = "streamsec-cost-report"
+  default     = "streamsec-CUR"
 }
 
 variable "cur_time_unit" {
