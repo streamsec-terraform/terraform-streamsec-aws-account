@@ -13,7 +13,7 @@ locals {
       event_pattern = file("${path.module}/templates/CloudWatchEventRule${i}.json")
     }
   }
-  
+
   compatible_runtimes = [var.lambda_runtime]
 
 }
