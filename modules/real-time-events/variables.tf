@@ -141,6 +141,12 @@ variable "lambda_runtime" {
   nullable    = false
 }
 
+variable "cloudwatch_event_rules_prefix" {
+  description = "Prefix to use for the CloudWatch event rules"
+  type        = string
+  default     = "streamsec-"
+}
+
 variable "iam_policy_tags" {
   description = "A map of additional tags to add to the IAM policy created"
   type        = map(string)
