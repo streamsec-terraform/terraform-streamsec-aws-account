@@ -72,6 +72,11 @@ resource "aws_iam_role_policy_attachment" "streamsec_policy_attachment" {
   policy_arn = aws_iam_policy.streamsec_policy[count.index].arn
 }
 
+resource "aws_iam_role_policy_attachment" "security_reviewer_policy_attachment" {
+  role       = aws_iam_role.this.name
+  policy_arn = "arn:aws:iam::aws:policy/SecurityAudit"
+}
+
 resource "time_sleep" "wait" {
   depends_on      = [aws_iam_role_policy_attachment.streamsec_policy_attachment]
   create_duration = "15s"

@@ -8,7 +8,7 @@ Terraform module for AWS tenant
 |------|---------|
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.0 |
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | >= 3.0 |
-| <a name="requirement_streamsec"></a> [streamsec](https://github.com/streamsec-terraform/terraform-provider-streamsec) | >= 1.7 |
+| <a name="requirement_streamsec"></a> [streamsec](#requirement\_streamsec) | >= 1.7 |
 | <a name="requirement_time"></a> [time](#requirement\_time) | >= 0.11 |
 
 ## Providers
@@ -16,12 +16,12 @@ Terraform module for AWS tenant
 | Name | Version |
 |------|---------|
 | <a name="provider_aws"></a> [aws](#provider\_aws) | >= 3.0 |
-| <a name="provider_streamsec"></a> [streamsec](https://github.com/streamsec-terraform/terraform-provider-streamsec) | >= 1.7 |
+| <a name="provider_streamsec"></a> [streamsec](#provider\_streamsec) | >= 1.7 |
 | <a name="provider_time"></a> [time](#provider\_time) | >= 0.11 |
 
 ## Modules
 
-No any additional modules are required.
+No modules.
 
 ## Resources
 
@@ -30,6 +30,7 @@ No any additional modules are required.
 | [aws_cloudtrail.streamsec_cloudtrail](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudtrail) | resource |
 | [aws_iam_policy.streamsec_policy](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_policy) | resource |
 | [aws_iam_role.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
+| [aws_iam_role_policy_attachment.security_reviewer_policy_attachment](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_iam_role_policy_attachment.streamsec_policy_attachment](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_s3_bucket.streamsec_cloudtrail_bucket](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket) | resource |
 | [aws_s3_bucket_policy.s3_cloudtrail_policy_attachment](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_policy) | resource |
