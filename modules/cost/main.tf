@@ -252,6 +252,7 @@ resource "aws_s3_bucket_policy" "s3_cloudtrail_policy_attachment" {
 }
 
 resource "aws_s3_bucket_notification" "cost_s3_lambda_trigger" {
+  count  = var.cost_s3_eventbridge_trigger ? 0 : 1
   bucket = data.aws_s3_bucket.cost_bucket.id
   lambda_function {
     lambda_function_arn = aws_lambda_function.streamsec_cost_lambda.arn
@@ -259,6 +260,32 @@ resource "aws_s3_bucket_notification" "cost_s3_lambda_trigger" {
   }
 
   depends_on = [aws_lambda_permission.streamsec_cost_allow_s3_invoke]
+}
+
+moved {
+  from = aws_s3_bucket_notification.cost_s3_lambda_trigger
+  to   = aws_s3_bucket_event_notification.cost_s3_lambda_trigger[0]
+}
+
+resource "aws_s3_bucket_notification" "bucket_notification" {
+  count       = var.cost_s3_eventbridge_trigger ? 1 : 0
+  bucket      = data.aws_s3_bucket.cost_bucket.id
+  eventbridge = true
+}
+
+resource "aws_cloudwatch_event_rule" "cost_s3_eventbridge_trigger" {
+  count       = var.cost_s3_eventbridge_trigger ? 1 : 0
+  name        = var.cost_eventbridge_rule_name
+  description = var.cost_eventbridge_rule_description
+  event_pattern = jsonencode({
+    source      = ["aws.s3"],
+    detail-type = ["Object Created"],
+    detail = {
+      bucket = {
+        name = [var.cost_bucket_name]
+      }
+    }
+  })
 }
 
 resource "aws_s3_bucket_lifecycle_configuration" "cost_bucket_config" {

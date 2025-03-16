@@ -154,6 +154,7 @@ data "aws_s3_bucket" "iam_activity_bucket" {
 }
 
 resource "aws_s3_bucket_notification" "iam_activity_s3_lambda_trigger" {
+  count  = var.iam_activity_s3_eventbridge_trigger ? 0 : 1
   bucket = data.aws_s3_bucket.iam_activity_bucket.id
   lambda_function {
     lambda_function_arn = aws_lambda_function.streamsec_iam_activity_lambda.arn
@@ -161,4 +162,30 @@ resource "aws_s3_bucket_notification" "iam_activity_s3_lambda_trigger" {
   }
 
   depends_on = [aws_lambda_permission.streamsec_iam_activity_allow_s3_invoke]
+}
+
+moved {
+  from = aws_s3_bucket_notification.iam_activity_s3_lambda_trigger
+  to   = aws_s3_bucket_notification.iam_activity_s3_lambda_trigger[0]
+}
+
+resource "aws_s3_bucket_notification" "bucket_notification" {
+  count       = var.iam_activity_s3_eventbridge_trigger ? 1 : 0
+  bucket      = data.aws_s3_bucket.iam_activity_bucket.id
+  eventbridge = true
+}
+
+resource "aws_cloudwatch_event_rule" "iam_activity_s3_eventbridge_trigger" {
+  count       = var.iam_activity_s3_eventbridge_trigger ? 1 : 0
+  name        = var.iam_activity_s3_eventbridge_rule_name
+  description = var.iam_activity_s3_eventbridge_rule_description
+  event_pattern = jsonencode({
+    source      = ["aws.s3"],
+    detail-type = ["Object Created"],
+    detail = {
+      bucket = {
+        name = [var.iam_activity_bucket_name]
+      }
+    }
+  })
 }

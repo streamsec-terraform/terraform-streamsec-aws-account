@@ -25,6 +25,7 @@ No modules.
 
 | Name | Type |
 |------|------|
+| [aws_cloudwatch_event_rule.cost_s3_eventbridge_trigger](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_event_rule) | resource |
 | [aws_cur_report_definition.cur_report_definition](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cur_report_definition) | resource |
 | [aws_iam_policy.lambda_exec_policy](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_policy) | resource |
 | [aws_iam_policy.streamsec_policy](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_policy) | resource |
@@ -38,6 +39,7 @@ No modules.
 | [aws_lambda_permission.streamsec_cost_allow_s3_invoke](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_permission) | resource |
 | [aws_s3_bucket.streamsec_cost_bucket](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket) | resource |
 | [aws_s3_bucket_lifecycle_configuration.cost_bucket_config](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_lifecycle_configuration) | resource |
+| [aws_s3_bucket_notification.bucket_notification](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_notification) | resource |
 | [aws_s3_bucket_notification.cost_s3_lambda_trigger](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_notification) | resource |
 | [aws_s3_bucket_policy.s3_cloudtrail_policy_attachment](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_policy) | resource |
 | [aws_secretsmanager_secret.streamsec_collection_secret](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret) | resource |
@@ -60,6 +62,9 @@ No modules.
 | <a name="input_cost_bucket_name"></a> [cost\_bucket\_name](#input\_cost\_bucket\_name) | The name of the S3 bucket to store the flow logs | `string` | `"streamsec-cost"` | no |
 | <a name="input_cost_bucket_tags"></a> [cost\_bucket\_tags](#input\_cost\_bucket\_tags) | A map of additional tags to add to the S3 bucket created | `map(string)` | `{}` | no |
 | <a name="input_cost_bucket_use_name_prefix"></a> [cost\_bucket\_use\_name\_prefix](#input\_cost\_bucket\_use\_name\_prefix) | Whether to use a prefix for the bucket name | `bool` | `true` | no |
+| <a name="input_cost_eventbridge_rule_description"></a> [cost\_eventbridge\_rule\_description](#input\_cost\_eventbridge\_rule\_description) | The description of the eventbridge rule to create for the S3 bucket | `string` | `"Stream Security Cost S3 EventBridge Rule"` | no |
+| <a name="input_cost_eventbridge_rule_name"></a> [cost\_eventbridge\_rule\_name](#input\_cost\_eventbridge\_rule\_name) | The name of the eventbridge rule to create for the S3 bucket | `string` | `"streamsec-cost-s3-eventbridge-rule"` | no |
+| <a name="input_cost_s3_eventbridge_trigger"></a> [cost\_s3\_eventbridge\_trigger](#input\_cost\_s3\_eventbridge\_trigger) | Whether to create an eventbridge trigger for the S3 bucket instead of an event notification. Requires enabling eventbridge on bucket properties, see: https://docs.streamsec.io/docs/configure-s3-event-notifications-with-amazon-eventbridge | `bool` | `false` | no |
 | <a name="input_create_cost_bucket"></a> [create\_cost\_bucket](#input\_create\_cost\_bucket) | Whether to create an S3 bucket to store the flow logs | `bool` | `false` | no |
 | <a name="input_cur_prefix"></a> [cur\_prefix](#input\_cur\_prefix) | The prefix to use for the CUR report | `string` | `"/streamsec-cost-report"` | no |
 | <a name="input_cur_report_name"></a> [cur\_report\_name](#input\_cur\_report\_name) | Whether to create a CUR report | `string` | `"streamsec-cost-report"` | no |
