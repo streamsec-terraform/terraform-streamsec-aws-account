@@ -267,6 +267,12 @@ moved {
   to   = aws_s3_bucket_event_notification.cost_s3_lambda_trigger[0]
 }
 
+resource "aws_s3_bucket_notification" "bucket_notification" {
+  count       = var.cost_s3_eventbridge_trigger ? 1 : 0
+  bucket      = data.aws_s3_bucket.cost_bucket.id
+  eventbridge = true
+}
+
 resource "aws_cloudwatch_event_rule" "cost_s3_eventbridge_trigger" {
   count       = var.cost_s3_eventbridge_trigger ? 1 : 0
   name        = var.cost_eventbridge_rule_name

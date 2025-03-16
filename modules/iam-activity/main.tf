@@ -169,6 +169,12 @@ moved {
   to   = aws_s3_bucket_notification.iam_activity_s3_lambda_trigger[0]
 }
 
+resource "aws_s3_bucket_notification" "bucket_notification" {
+  count       = var.iam_activity_s3_eventbridge_trigger ? 1 : 0
+  bucket      = data.aws_s3_bucket.iam_activity_bucket.id
+  eventbridge = true
+}
+
 resource "aws_cloudwatch_event_rule" "iam_activity_s3_eventbridge_trigger" {
   count       = var.iam_activity_s3_eventbridge_trigger ? 1 : 0
   name        = var.iam_activity_s3_eventbridge_rule_name
