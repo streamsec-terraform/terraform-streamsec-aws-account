@@ -195,3 +195,12 @@ resource "aws_cloudwatch_event_target" "iam_activity_s3_eventbridge_target" {
   rule  = aws_cloudwatch_event_rule.iam_activity_s3_eventbridge_trigger[0].name
   arn   = aws_lambda_function.streamsec_iam_activity_lambda.arn
 }
+
+resource "aws_lambda_permission" "iam_activity_s3_allow_invoke" {
+  count         = var.iam_activity_s3_eventbridge_trigger ? 1 : 0
+  statement_id  = "AllowInvocationFromEventBridge"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.streamsec_iam_activity_lambda.arn
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.iam_activity_s3_eventbridge_trigger[0].arn
+}

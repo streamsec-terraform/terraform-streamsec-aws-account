@@ -213,6 +213,15 @@ resource "aws_cloudwatch_event_target" "flowlogs_s3_eventbridge_target" {
   arn   = aws_lambda_function.streamsec_flowlogs_lambda.arn
 }
 
+resource "aws_lambda_permission" "flowlogs_s3_allow_invoke" {
+  count         = var.flowlogs_s3_eventbridge_trigger ? 1 : 0
+  statement_id  = "AllowInvocationFromEventBridge"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.streamsec_flowlogs_lambda.arn
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.flowlogs_s3_eventbridge_trigger[0].arn
+}
+
 resource "aws_s3_bucket_lifecycle_configuration" "flowlogs_bucket_config" {
   count  = var.create_flowlogs_bucket ? 1 : 0
   bucket = data.aws_s3_bucket.flowlogs_bucket.id

@@ -294,6 +294,15 @@ resource "aws_cloudwatch_event_target" "cost_s3_eventbridge_target" {
   arn   = aws_lambda_function.streamsec_cost_lambda.arn
 }
 
+resource "aws_lambda_permission" "cost_s3_allow_invoke" {
+  count         = var.cost_s3_eventbridge_trigger ? 1 : 0
+  statement_id  = "AllowInvocationFromEventBridge"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.streamsec_cost_lambda.arn
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.cost_s3_eventbridge_trigger[0].arn
+}
+
 resource "aws_s3_bucket_lifecycle_configuration" "cost_bucket_config" {
   count  = var.create_cost_bucket ? 1 : 0
   bucket = data.aws_s3_bucket.cost_bucket.id
