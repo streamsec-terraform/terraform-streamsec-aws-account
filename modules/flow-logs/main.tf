@@ -171,6 +171,7 @@ resource "aws_flow_log" "streamsec_flowlogs" {
 }
 
 resource "aws_s3_bucket_notification" "flowlogs_s3_lambda_trigger" {
+  count  = var.flowlogs_s3_eventbridge_trigger ? 0 : 1
   bucket = data.aws_s3_bucket.flowlogs_bucket.id
   lambda_function {
     lambda_function_arn = aws_lambda_function.streamsec_flowlogs_lambda.arn
@@ -178,6 +179,47 @@ resource "aws_s3_bucket_notification" "flowlogs_s3_lambda_trigger" {
   }
 
   depends_on = [aws_lambda_permission.streamsec_flowlogs_allow_s3_invoke]
+}
+
+moved {
+  from = aws_s3_bucket_notification.flowlogs_s3_lambda_trigger
+  to   = aws_s3_bucket_notification.flowlogs_s3_lambda_trigger[0]
+}
+
+resource "aws_s3_bucket_notification" "bucket_notification" {
+  count       = var.flowlogs_s3_eventbridge_trigger ? 1 : 0
+  bucket      = data.aws_s3_bucket.flowlogs_bucket.id
+  eventbridge = true
+}
+
+resource "aws_cloudwatch_event_rule" "flowlogs_s3_eventbridge_trigger" {
+  count       = var.flowlogs_s3_eventbridge_trigger ? 1 : 0
+  name        = var.flowlogs_eventbridge_rule_name
+  description = var.flowlogs_eventbridge_rule_description
+  event_pattern = jsonencode({
+    source      = ["aws.s3"],
+    detail-type = ["Object Created"],
+    detail = {
+      bucket = {
+        name = [var.flowlogs_bucket_name]
+      }
+    }
+  })
+}
+
+resource "aws_cloudwatch_event_target" "flowlogs_s3_eventbridge_target" {
+  count = var.flowlogs_s3_eventbridge_trigger ? 1 : 0
+  rule  = aws_cloudwatch_event_rule.flowlogs_s3_eventbridge_trigger[0].name
+  arn   = aws_lambda_function.streamsec_flowlogs_lambda.arn
+}
+
+resource "aws_lambda_permission" "flowlogs_s3_allow_invoke" {
+  count         = var.flowlogs_s3_eventbridge_trigger ? 1 : 0
+  statement_id  = "AllowInvocationFromEventBridge"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.streamsec_flowlogs_lambda.arn
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.flowlogs_s3_eventbridge_trigger[0].arn
 }
 
 resource "aws_s3_bucket_lifecycle_configuration" "flowlogs_bucket_config" {

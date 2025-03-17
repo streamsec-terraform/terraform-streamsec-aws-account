@@ -164,6 +164,24 @@ variable "iam_activity_bucket_name" {
   type        = string
 }
 
+variable "iam_activity_s3_eventbridge_trigger" {
+  description = "Whether to create an eventbridge trigger for the S3 bucket instead of an event notification. Requires enabling eventbridge on bucket properties, see: https://docs.streamsec.io/docs/configure-s3-event-notifications-with-amazon-eventbridge"
+  type        = bool
+  default     = false
+}
+
+variable "iam_activity_s3_eventbridge_rule_name" {
+  description = "The name of the eventbridge rule to create for the S3 bucket"
+  type        = string
+  default     = "streamsec-iam-activity-s3-eventbridge-rule"
+}
+
+variable "iam_activity_s3_eventbridge_rule_description" {
+  description = "The description of the eventbridge rule to create for the S3 bucket"
+  type        = string
+  default     = "Stream Security IAM Activity S3 EventBridge Rule"
+}
+
 ################################################################################
 # General
 ################################################################################

@@ -162,6 +162,24 @@ variable "flowlogs_bucket_force_destroy" {
   default     = true
 }
 
+variable "flowlogs_s3_eventbridge_trigger" {
+  description = "Whether to create an eventbridge trigger for the S3 bucket instead of an event notification. Requires enabling eventbridge on bucket properties, see: https://docs.streamsec.io/docs/configure-s3-event-notifications-with-amazon-eventbridge"
+  type        = bool
+  default     = false
+}
+
+variable "flowlogs_eventbridge_rule_name" {
+  description = "The name of the eventbridge rule to create for the S3 bucket"
+  type        = string
+  default     = "streamsec-flowlogs-s3-eventbridge-rule"
+}
+
+variable "flowlogs_eventbridge_rule_description" {
+  description = "The description of the eventbridge rule to create for the S3 bucket"
+  type        = string
+  default     = "Stream Security FlowLogs S3 EventBridge Rule"
+}
+
 variable "vpc_ids" {
   description = "The VPC IDs to use for the flow logs"
   type        = list(string)
