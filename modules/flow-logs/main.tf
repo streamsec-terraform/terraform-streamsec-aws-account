@@ -207,6 +207,12 @@ resource "aws_cloudwatch_event_rule" "flowlogs_s3_eventbridge_trigger" {
   })
 }
 
+resource "aws_cloudwatch_event_target" "flowlogs_s3_eventbridge_target" {
+  count = var.flowlogs_s3_eventbridge_trigger ? 1 : 0
+  rule  = aws_cloudwatch_event_rule.flowlogs_s3_eventbridge_trigger[0].name
+  arn   = aws_lambda_function.streamsec_flowlogs_lambda.arn
+}
+
 resource "aws_s3_bucket_lifecycle_configuration" "flowlogs_bucket_config" {
   count  = var.create_flowlogs_bucket ? 1 : 0
   bucket = data.aws_s3_bucket.flowlogs_bucket.id

@@ -189,3 +189,9 @@ resource "aws_cloudwatch_event_rule" "iam_activity_s3_eventbridge_trigger" {
     }
   })
 }
+
+resource "aws_cloudwatch_event_target" "iam_activity_s3_eventbridge_target" {
+  count = var.iam_activity_s3_eventbridge_trigger ? 1 : 0
+  rule  = aws_cloudwatch_event_rule.iam_activity_s3_eventbridge_trigger[0].name
+  arn   = aws_lambda_function.streamsec_iam_activity_lambda.arn
+}
