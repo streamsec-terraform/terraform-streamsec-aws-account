@@ -1,0 +1,764 @@
+Remediations:
+  - name: StreamSecurityDisablePublicAccessPolicy
+    remediation_type: runbook
+    runbook_owner: StreamSecurity
+    description: Disable public access policy for S3 bucket
+    policy_file_name: bucket_public_access_block.json
+    resource_type: s3_bucket
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: BucketName
+        type: String
+        resource_name: true
+
+  - name: StreamSecurityDeleteS3Bucket
+    description: Remove all files from S3 bucket and delete it
+    remediation_type: runbook
+    resource_type: s3_bucket
+    runbook_owner: StreamSecurity
+    policy_file_name: delete_s3_bucket_policy.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: BucketName
+        type: String
+        resource_name: true
+
+  - name: StreamSecurityDeleteIAMAccessKey
+    description: Permanently deletes all access keys associated with the specified IAM user. This immediately revokes the user’s ability to make any AWS API calls using those keys.
+    disabled_reason: Action is not applicable because the user has no access keys.
+    display_name: Delete IAM User Access Keys
+    resource_type: iam_user
+    remediation_type: runbook
+    runbook_owner: StreamSecurity
+    policy_file_name: delete_iam_access_key_policy.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: UserName
+        type: String
+        resource_name: true
+      - name: AccessKeyIds
+        type: StringList
+      - name: Region
+        type: String
+
+  - name: AWS-StopEC2Instance
+    description: Stops the selected EC2 instance, shutting down its operating system. This action immediately halts all running processes and network activity on the instance.
+    display_name: Stop EC2 Instance
+    disabled_reason: Action is not applicable because the EC2 instance is not in a 'running' state.
+    remediation_type: runbook
+    resource_type: instance
+    runbook_owner: AWS
+    policy_file_name: stop_ec2_instance_policy.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: InstanceId
+        type: StringList
+        resource_name: true
+
+  - name: AWS-TerminateEC2Instance
+    description: Terminate EC2 instance
+    remediation_type: runbook
+    resource_type: instance
+    runbook_owner: AWS
+    policy_file_name: terminate_ec2_instance_policy.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: InstanceId
+        type: StringList
+        resource_name: true
+
+  - name: AWS-ConfigureS3BucketVersioning
+    description: Enable versioning for S3 bucket
+    remediation_type: runbook
+    resource_type: s3_bucket
+    runbook_owner: AWS
+    policy_file_name: configure_s3_bucket_versioning_policy.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: BucketName
+        type: String
+        resource_name: true
+      - name: VersioningState
+        type: String
+
+  - name: AWS-ReleaseElasticIP
+    description: Release Elastic IP
+    remediation_type: runbook
+    resource_type: elastic_ip
+    runbook_owner: AWS
+    policy_file_name: release_elastic_ip_policy.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: AllocationId
+        resource_name: true
+
+  - name: StreamSecurityDeleteIAMAccessKeyWithUserOnly
+    description: Delete IAM access key
+    resource_type: iam_access_key
+    remediation_type: runbook
+    runbook_owner: StreamSecurity
+    policy_file_name: delete_access_key_user_only_policy.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: UserName
+        type: String
+        resource_name: true
+      - name: WeeksThreshold
+        type: Number
+
+  - name: StreamSecurityEditSecurityGroup
+    description: Edit Security Group inbound rules
+    resource_type: security_group
+    remediation_type: runbook
+    runbook_owner: StreamSecurity
+    policy_file_name: edit_security_group_inbound_rule_policy.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: Region
+        type: String
+      - name: SecurityGroupId
+        type: String
+        resource_name: true
+      - name: Port
+        type: Number
+
+  - name: StreamSecurityRemoveInboundRules
+    description: Remove inbound rules from a security group where the source is 0.0.0.0/0
+    resource_type: security_group
+    remediation_type: runbook
+    runbook_owner: StreamSecurity
+    policy_file_name: remove_inbound_rules_policy.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: Region
+        type: String
+      - name: SecurityGroupId
+        type: String
+        resource_name: true
+
+
+  - name: StreamSecurityRemovePublicAmiPermissions
+    description: Remove public launch permissions from an AMI
+    resource_type: ec2_image
+    remediation_type: runbook
+    runbook_owner: StreamSecurity
+    policy_file_name: remove_public_ami_permissions_policy.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: Region
+        type: String
+      - name: AMIId
+        type: String
+        resource_name: true
+
+  - name: StreamSecurityModifyDbInstance
+    description: Modify an RDS DB instance to set its public accessibility
+    resource_type: rds_db_instance
+    remediation_type: runbook
+    runbook_owner: StreamSecurity
+    policy_file_name: modify_rds_instance_policy.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: Region
+        type: String
+      - name: DBInstanceIdentifier
+        type: String
+        resource_name: true
+      - name: PubliclyAccessible
+        type: String
+
+  - name: StreamSecurityEnableBucketEncryption
+    description: Enable server-side encryption on an S3 bucket using AWS KMS
+    resource_type: s3_bucket
+    remediation_type: runbook
+    runbook_owner: StreamSecurity
+    policy_file_name: enable_bucket_encryption_policy.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: BucketName
+        type: String
+        resource_name: true
+
+  - name: StreamSecurityEditS3InlinePolicy
+    description: Set an inline policy for an S3 bucket
+    resource_type: s3_bucket
+    remediation_type: runbook
+    runbook_owner: StreamSecurity
+    policy_file_name: edit_s3_bucket_policy.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: BucketName
+        type: String
+        resource_name: true
+      - name: BucketPolicy
+        type: Dict
+
+  - name: StreamSecurityLambdaBlockEventProcessing
+    remediation_type: runbook
+    runbook_owner: StreamSecurity
+    description: Sets the reserved concurrency for the specified Lambda function to 0. This immediately prevents the function from being invoked until concurrency is restored.
+    disabled_reason: Action is not applicable because ReservedConcurrentExecutions is already set to 0.
+    display_name: Set Lambda Function Reserved Concurrency to 0
+    policy_file_name: lambda_concurrency_management_policy.json
+    resource_type: lambda_function
+    Parameters:
+      - name: FunctionName
+        type: String
+        resource_name: true
+      - name: AutomationAssumeRole
+        type: String
+      - name: Region
+        type: String
+
+
+  - name: StreamSecurityDeregisterLambdaFromLBTargetGroup
+    remediation_type: runbook
+    runbook_owner: StreamSecurity
+    description: Removes the specified Lambda function from its associated load balancer target group. This immediately stops the load balancer from routing traffic to the function.
+    display_name: Detach Lambda from Load Balancer Target Group
+    disabled_reason: Action is not applicable because the Lambda function is not registered with any target groups.
+    policy_file_name: deregister_lambda_from_alb_policy.json
+    resource_type: lambda_function
+    Parameters:
+      - name: FunctionArn
+        type: String
+        resource_name: true
+      - name: TargetGroupArn
+        type: String
+      - name: AutomationAssumeRole
+        type: String
+      - name: Region
+        type: String
+
+
+
+  - name: StreamSecurityEc2AsgDetach
+    description: Removes the selected EC2 instance from its Auto Scaling Group without terminating it. This prevents the group from automatically replacing or modifying the instance.
+    disabled_reason: Action is not applicable because the instance is not part of an auto-scaling group.
+    display_name: Detach EC2 Instance from Auto Scaling Group
+    resource_type: instance
+    remediation_type: runbook
+    runbook_owner: StreamSecurity
+    policy_file_name: ec2_asg_detach.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: Region
+        type: String
+      - name: InstanceID
+        type: String
+        resource_name: true
+      - name: AutoScalingGroupName
+        type: String
+
+  - name: StreamSecurityEC2CreateSnapshot
+    display_name: Create Snapshot of EC2 Instance Volumes
+    description: Creates a point-in-time snapshot of the selected EC2 instance volume. This preserves the current state of the disk for forensic analysis without impacting the running instance.
+    resource_type: instance
+    remediation_type: runbook
+    runbook_owner: StreamSecurity
+    policy_file_name: create_snapshot_ec2_policy.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: InstanceID
+        type: String
+        resource_name: true
+      - name: Region
+        type: String
+
+  - name: StreamSecurityRevokeInstanceProfile
+    remediation_type: runbook
+    description : Removes the attached IAM instance profile from the selected EC2 instance. This action immediately revokes all associated permissions and access granted via that profile.
+    disabled_reason: Action is not applicable because there is no instance profile attached to the selected EC2 instance.
+    policy_file_name: revoke_instance_profile.json
+    resource_type: instance
+    display_name: Revoke Instance Profile from EC2 Instance
+    runbook_owner: StreamSecurity
+    Parameters:
+      - name: InstanceId
+        type: String
+        resource_name: true
+      - name: AutomationAssumeRole
+        type: String
+      - name: Region
+        type: String
+
+  - name: StreamSecurityAddDenyPolicyInInstanceProfile
+    remediation_type: runbook
+    runbook_owner: StreamSecurity
+    display_name: Add Deny-All Inline Policy to EC2 Instance Profile
+    description: Adds an inline policy to the EC2 instance profile that denies all AWS API calls. This instantly prevents the instance from making any API requests using its profile credentials.
+    disabled_reason: Action is not applicable because the IAM role already contains a restrictive inline policy that blocks all actions.
+    policy_file_name: add_deny_policy_in_instance_profile.json
+    resource_type: instance
+    Parameters:
+      - name: IamInstanceProfileArn
+        type: String
+      - name: AutomationAssumeRole
+        type: String
+      - name: Region
+        type: String
+
+  - name: StreamSecurityRemoveInlinePoliciesFromRole
+    description: Deletes all inline policies attached to the specified IAM role. This immediately revokes any custom permissions defined directly on the role.
+    disabled_reason: Action is not applicable because the role has no inline policies.
+    display_name: Remove Inline Policies from IAM Role
+    resource_type: ForeignAccount
+    remediation_type: runbook
+    runbook_owner: StreamSecurity
+    policy_file_name: remove_inline_policies_from_role.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: RoleName
+        type: String
+        resource_name: true
+      - name: Region
+        type: String
+
+  - name: StreamSecurityDetachManagedPoliciesFromRole
+    description: Detaches all managed policies from the specified IAM role. This immediately removes the role’s permissions to perform AWS actions.
+    disabled_reason: Action is not applicable because the role has no attached policies.
+    display_name: Detach IAM Policies from Role
+    resource_type: ForeignAccount
+    remediation_type: runbook
+    runbook_owner: StreamSecurity
+    policy_file_name: detach_managed_policies_from_role.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: RoleName
+        type: String
+        resource_name: true
+      - name: Region
+        type: String
+
+  - name: StreamSecurityAddDenyAllPolicyToEcsTaskExecutionRole
+    description: Attaches an inline deny-all policy to the specified ECS task execution role. This immediately blocks the role from performing any AWS API actions.
+    disabled_reason: Action is not applicable because the task has no execution IAM role.
+    display_name: Attach Inline Deny-All Policy to Task Execution Role
+    resource_type: ecs_task
+    remediation_type: runbook
+    runbook_owner: StreamSecurity
+    policy_file_name: put_role_policy.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: IAMRoleArn
+        type: String
+        resource_name: true
+      - name: Region
+        type: String
+
+  - name: StreamSecurityStopEcsService
+    description: Stops the specified ECS service, terminating all running tasks. This immediately halts the service’s ability to handle any new or existing requests.
+    disabled_reason: Action is not applicable because the ECS service ARN doesn't exist.
+    display_name: Stop ECS Service
+    resource_type: ecs_task
+    remediation_type: runbook
+    runbook_owner: StreamSecurity
+    policy_file_name: update_ecs_service_policy.json
+    Parameters:
+      - name: ClusterArn
+        type: String
+      - name: ServiceName
+        type: String
+        resource_name: true
+      - name: AutomationAssumeRole
+        type: String
+      - name: Region
+        type: String
+
+
+  - name: StreamSecuritySetAccessKeyInactive
+    description: Marks the specified IAM user’s access key as inactive. This immediately blocks the use of that key for all AWS API requests.
+    disabled_reason: Action is not applicable because the user has no access keys.
+    display_name: Set IAM User Access Key to Inactive
+    resource_type: iam_user
+    remediation_type: runbook
+    runbook_owner: StreamSecurity
+    policy_file_name: set_iam_access_key_inactive_policy.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: UserName
+        type: String
+        resource_name: true
+      - name: AccessKeyIds
+        type: StringList
+      - name: Region
+        type: String
+
+
+  - name: StreamSecurityIsolateLambda
+    description: Attaches an isolation security group to the specified VPC-connected Lambda function. This immediately blocks all inbound and outbound network traffic, effectively isolating the function from all networks
+    display_name: Isolate Lambda Function from all networks (For VPC-Connected Lambda)
+    disabled_reason: Action is not applicable because the Lambda function is not VPC-connected or is already using the isolated security group.
+    resource_type: lambda_function
+    remediation_type: runbook
+    runbook_owner: StreamSecurity
+    policy_file_name: isolate_lambda_policy.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: FunctionName
+        type: String
+        resource_name: true
+      - name: VpcId
+        type: String
+      - name: Region
+        type: String
+
+  - name: StreamSecurityDeregisterEcsTaskDefinition
+    display_name: Deregister ECS Task Definition
+    description: Deregisters the specified ECS task definition, preventing it from being used for new task or service launches. Existing running tasks remain unaffected until manually stopped.
+    disabled_reason: Action is not applicable because the task definition ARN doesn't exist.
+    resource_type: ecs_task
+    remediation_type: runbook
+    runbook_owner: StreamSecurity
+    policy_file_name: deregister_task_definition_policy.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: TaskDefinitionArn
+        type: String
+        resource_name: true
+      - name: Region
+        type: String
+
+  - name: StreamSecurityIsolateEcsService
+    description: Updates the ECS task’s security group to an isolation group that blocks all inbound and outbound traffic. This immediately cuts off all network communication for the running task.
+    disabled_reason: Action is not applicable because the specified ECS service ARN does not exist.
+    display_name: Isolate ECS Task from all networks
+    remediation_type: runbook
+    resource_type: ecs_task
+    runbook_owner: StreamSecurity
+    policy_file_name: isolate_ecs_service_policy.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: ClusterArn
+        type: String
+        resource_name: true
+      - name: ServiceName
+        type: String
+        resource_name: true
+      - name: Region
+        type: String
+
+  - name: StreamSecurityStopEcsTask
+    display_name: Stop Running ECS Task
+    disabled_reason: Action is not applicable because the ECS task doesn't exist or is not running.
+    description: Forcefully stops the specified running ECS task. This immediately terminates the task and all associated processes.
+    resource_type: ecs_task
+    remediation_type: runbook
+    runbook_owner: StreamSecurity
+    policy_file_name: stop_task_ecs_policy.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: ClusterArn
+        type: String
+        resource_name: true
+      - name: TaskArn
+        type: String
+      - name: Region
+        type: String
+
+
+
+
+  - name: StreamSecurityDeleteIAMUserLoginProfile
+    description: Deletes the login profile of the specified IAM user, disabling console access. This immediately prevents the user from signing in to the AWS Management Console.
+    display_name: Delete IAM User Login Profile
+    resource_type: iam_user
+    remediation_type: runbook
+    runbook_owner: StreamSecurity
+    policy_file_name: delete_iam_user_login_profile.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: UserName
+        type: String
+        resource_name: true
+      - name: Region
+        type: String
+
+  - name: StreamSecurityIsolatedSecurityGroup
+    display_name: Isolate EC2 Instance from all networks
+    description: Detaches the selected EC2 instance from all VPC networks by modifying its security groups to deny all inbound and outbound traffic. This immediately blocks all network communication to and from the instance
+    disabled_reason: Action is not applicable because the isolated security group is already attached to the EC2
+    resource_type: instance
+    remediation_type: runbook
+    runbook_owner: StreamSecurity
+    policy_file_name: isolated_security_group.json
+    Parameters:
+      - name: InstanceId
+        type: String
+      - name: VpcId
+        type: String
+      - name: AutomationAssumeRole
+        type: String
+      - name: Region
+        type: String
+
+  - name: AWSConfigRemediation-DeleteIAMUser
+    description: Permanently deletes the specified IAM user from the AWS account. This action immediately removes all associated access keys, permissions, and console access.
+    display_name: Delete IAM User
+    remediation_type: runbook
+    resource_type: iam_user
+    runbook_owner: AWS
+    policy_file_name: delete_iam_user_policy.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: IAMUserId
+        type: String
+        resource_name: true
+
+  - name: StreamSecurityRevokeIAMUserSecurityCredentials
+    description: Revokes all active temporary security credentials issued from the specified IAM role(s). This immediately invalidates any current sessions for external or internal entities using those credentials.
+    display_name: Attach Policy to  Revoke IAM User Access Tokens
+    resource_type: iam_user
+    remediation_type: runbook
+    runbook_owner: StreamSecurity
+    policy_file_name: revoke_iam_user_security_credentials.json
+    Parameters:
+      - name: UserName
+        type: String
+      - name: AutomationAssumeRole
+        type: String
+
+  - name: StreamSecurityRemoveIAMUserFromAllGroups
+    description: Removes the specified IAM user from all IAM groups. This action immediately revokes any permissions granted through group memberships.
+    disabled_reason: Action is not applicable because the user is not a member of any IAM group.
+    display_name: Remove IAM User from All Groups
+    resource_type: iam_user
+    remediation_type: runbook
+    runbook_owner: StreamSecurity
+    policy_file_name: remove_iam_user_from_all_groups.json
+    Parameters:
+      - name: UserName
+        type: String
+      - name: AutomationAssumeRole
+        type: String
+      - name: Region
+        type: String
+
+  - name: StreamSecurityDetachAllPoliciesFromIAMUser
+    description: Detaches all managed and inline policies from the specified IAM user. This immediately removes all permissions and access granted to the user.
+    disabled_reason: Action is not applicable because the user has no policies (inline or managed) attached.
+    display_name: Detach All Policies from IAM User
+    remediation_type: runbook
+    resource_type: iam_user
+    runbook_owner: StreamSecurity
+    policy_file_name: detach_all_policies_from_iam_user.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: UserName
+        type: String
+        resource_name: true
+      - name: Region
+        type: String
+
+  - name: StreamSecurityAttachDenyAllPolicyToIAMUser
+    description: Attaches an inline policy to the specified IAM user that denies all AWS API actions. This immediately blocks the user from performing any operations in the AWS environment.
+    disabled_reason: Action is not applicable because the user already has a deny-all inline policy attached.
+    display_name: Attach Inline Deny-All Policy to IAM User
+    resource_type: iam_user
+    remediation_type: runbook
+    runbook_owner: StreamSecurity
+    policy_file_name: attach_deny_All_policy_to_iam_user.json
+    Parameters:
+      - name: UserName
+        type: String
+      - name: AutomationAssumeRole
+        type: String
+      - name: Region
+        type: String
+
+  - name: StreamSecurityRevokeIAMRolesTemporarySecurityCredentials
+    description: Revokes all active temporary security credentials issued from the specified IAM role(s). This immediately invalidates any current sessions for external or internal entities using those credentials
+    display_name: Revoke IAM Roles Temporary Security Credentials
+    resource_type: ForeignAccount
+    remediation_type: runbook
+    runbook_owner: StreamSecurity
+    policy_file_name: revoke_iam_roles_temporary_security_credentials.json
+    Parameters:
+      - name: RoleNames
+        type: StringList
+      - name: AutomationAssumeRole
+        type: String
+
+
+  - name: StreamSecurityRevokeIAMUserAccessTokens
+    description: Attaches a policy to the specified IAM user that forces the revocation of all active access tokens. This immediately invalidates existing session tokens and requires re-authentication
+    display_name: Attach Policy to Revoke IAM User Access Tokens
+    disabled_reason: Action is not applicable because the user's tokens already have a tokenissuetime set.
+    resource_type: iam_user
+    remediation_type: runbook
+    runbook_owner: StreamSecurity
+    policy_file_name: revoke_iam_user_access_tokens.json
+    Parameters:
+      - name: UserName
+        type: String
+      - name: AutomationAssumeRole
+        type: String
+      - name: Region
+        type: String
+
+  - name: AWS-RestartEC2Instance
+    display_name: Restart EC2 instance
+    description: Reboots the selected EC2 instance, performing a soft restart of the operating system. This temporarily stops all processes and network activity before restoring them once the instance restarts.
+    disabled_reason: Action is not applicable because the EC2 instance is not in a 'running' state.
+    remediation_type: runbook
+    resource_type: instance
+    runbook_owner: AWS
+    policy_file_name: restart_ec2_instance_policy.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: InstanceId
+        type: StringList
+        resource_name: true
+
+  - name: StreamSecurityBlockSpecificExternalAccount
+    description: Updates the trust policy of the specified IAM roles to remove or deny access for the specified external AWS account. This immediately blocks that external account from assuming the role.
+    resource_type: ForeignAccount
+    display_name: Modify IAM Roles to Block Specific External AWS Account
+    disabled_reason: Action is not applicable because the trust policy already blocks the specified external AWS account.
+    remediation_type: runbook
+    runbook_owner: StreamSecurity
+    policy_file_name: block_specific_external_account.json
+    Parameters:
+      - name: RoleNames
+        type: StringList
+      - name: AutomationAssumeRole
+        type: String
+      - name: ExternalAWSAccountId
+        type: String
+
+  - name: StreamSecurityRevokeIAMRolePermissionsForLambda
+    description: Attaches a deny-all policy to the Lambda function’s execution role, overriding existing permissions. This immediately blocks the function from performing any AWS API actions during execution.
+    disabled_reason: Action is not applicable because the Lambda's IAM role already has a deny-all policy attached.
+    remediation_type: runbook
+    display_name: Revoke IAM Role Permissions for Lambda Execution
+    resource_type: lambda_function
+    runbook_owner: StreamSecurity
+    policy_file_name: revoke_iam_role_permissions_for_lambda.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: LambdaFunctionName
+        type: String
+        resource_name: true
+      - name: AccountId
+        type: String
+      - name: Region
+        type: String
+
+  - name: StreamSecurityDetachInstanceFromElasticLoadBalancer
+    description: Removes the selected EC2 instance from its associated load balancer. This immediately stops directing traffic to the instance while keeping it running.
+    remediation_type: runbook
+    display_name: Detach EC2 Instance from Elastic Load Balancer
+    disabled_reason: Action is not applicable because the instance is not registered with any ELB load balancer.
+    resource_type: instance
+    runbook_owner: StreamSecurity
+    policy_file_name: detach_instance_from_elastic_load_balancer.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: InstanceID
+        type: String
+        resource_name: true
+      - name: LoadBalancerNames
+        type: StringList
+      - name: Region
+        type: String
+
+  - name: StreamSecurityRemoveUserFromAWSIdentityCenterGroups
+    description: Removes the specified user from all AWS Identity Center (SSO) groups. This immediately revokes any permissions and access granted through group memberships
+    remediation_type: runbook
+    display_name: Remove User from AWS Identity Center Groups
+    disabled_reason:  Action is not applicable because the user is not a member of any Identity Center groups.
+    resource_type: aws_identity_center_user
+    runbook_owner: StreamSecurity
+    policy_file_name: remove_user_from_aws_identity_center_groups.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: IdentityStoreId
+        type: String
+      - name: UserId
+        type: String
+      - name: Region
+        type: String
+
+  - name: StreamSecurityRevokeAWSAccountAssignmentForUser
+    description: Revokes all AWS account assignments for the specified user in AWS Identity Center. This immediately removes the user’s access to all linked AWS accounts
+    remediation_type: runbook
+    display_name: Revoke AWS Account Assignments for User
+    disabled_reason: Action is not applicable because the user has no account assignments
+    resource_type: aws_identity_center_user
+    runbook_owner: StreamSecurity
+    policy_file_name: revoke_aws_account_assignment_for_user.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: IdentityStoreId
+        type: String
+      - name: UserId
+        type: String
+      - name: InstanceArn
+        type: String
+      - name: Region
+        type: String
+
+#  - name: StreamSecurityDetachInstanceFromLoadBalancer
+#    remediation_type: runbook
+#    runbook_owner: StreamSecurity
+#    description: Removes the selected EC2 instance from its associated load balancer target group. This immediately stops directing traffic to the instance while keeping it running.
+#    display_name: Detach EC2 Instance from Load Balancer
+#    disabled_reason: Action is not applicable because the instance is not registered with any ALB, GLB, or NLB target groups.
+#    policy_file_name: detach_instance_from_load_balancer.json
+#    resource_type: target group
+#    Parameters:
+#      - name: InstanceID
+#        type: String
+#      - name: AutomationAssumeRole
+#        type: String
+#      - name: Region
+#        type: String
+
+  - name: StreamSecurityAttachDenyAllPermissionSetToUser
+    description: Assigns a deny-all permission set to the specified user in AWS Identity Center. This immediately blocks the user from performing any actions across assigned AWS accounts.
+    disabled_reason: Action is not applicable because the user already has a deny-all permission set assigned.
+    display_name: Attach a Deny-All Permission Set to User
+    remediation_type: runbook
+    resource_type: aws_identity_center_user
+    runbook_owner: StreamSecurity
+    policy_file_name: attach_deny_All_policy_to_identity_user_policy.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: UserId
+        type: String
+        resource_name: true
+      - name: InstanceArn
+        type: String

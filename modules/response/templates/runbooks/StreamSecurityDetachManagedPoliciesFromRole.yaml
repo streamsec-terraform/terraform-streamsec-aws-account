@@ -1,0 +1,84 @@
+schemaVersion: '0.3'
+description: |
+  This runbook lists all managed policies attached to an IAM Role and detaches them.
+assumeRole: '{{ AutomationAssumeRole }}'
+
+parameters:
+  AutomationAssumeRole:
+    type: String
+    description: "(Optional) The IAM role that allows Systems Manager Automation to perform actions."
+    default: ""
+  RoleName:
+    type: String
+    description: "(Required) The IAM Role name from which managed policies will be detached."
+  Region:
+    type: String
+    description: "(Required) The AWS region."
+
+mainSteps:
+  - name: ListAttachedPolicies
+    action: aws:executeScript
+    nextStep: DetachPolicies
+    inputs:
+      Runtime: python3.11
+      Handler: main
+      InputPayload:
+        RoleName: "{{ RoleName }}"
+        Region: "{{ Region }}"
+      Script: |
+        import boto3
+
+        def main(events, context):
+            """Lists all managed policies attached to the IAM Role"""
+            region = events.get("Region", "")
+            role_name = events.get("RoleName", "")
+            iam_client = boto3.client('iam', region_name=region)
+
+            response = iam_client.list_attached_role_policies(RoleName=role_name)
+            attached_policies = [policy['PolicyArn'] for policy in response.get('AttachedPolicies', [])]
+
+            if not attached_policies:
+                raise Exception(f"No managed policies attached to IAM Role {role_name}.")
+
+            return {"PolicyArns": attached_policies}
+
+    outputs:
+      - Name: PolicyArns
+        Selector: $.Payload.PolicyArns
+        Type: StringList
+
+  - name: DetachPolicies
+    action: aws:executeScript
+    isEnd: true
+    inputs:
+      Runtime: python3.11
+      Handler: main
+      InputPayload:
+        RoleName: "{{ RoleName }}"
+        PolicyArns: "{{ ListAttachedPolicies.PolicyArns }}"
+        Region: "{{ Region }}"
+      Script: |
+        import boto3
+
+        def main(events, context):
+            """Detaches all managed policies from the IAM Role"""
+            region = events.get("Region", "")
+            role_name = events.get("RoleName", "")
+            policy_arns = events.get("PolicyArns", [])
+            iam_client = boto3.client('iam', region_name=region)
+
+
+            detached_policies = []
+            failed_policies = []
+
+            for policy_arn in policy_arns:
+
+                iam_client.detach_role_policy(RoleName=role_name, PolicyArn=policy_arn)
+
+            response = iam_client.list_attached_role_policies(RoleName=role_name)
+            remaining_policies = [policy['PolicyArn'] for policy in response.get('AttachedPolicies', [])]
+
+            if not remaining_policies:
+                print(f"All managed policies successfully detached from {role_name}.")
+            else:
+                raise Exception(f"Some policies are still attached to {role_name}: {remaining_policies}")

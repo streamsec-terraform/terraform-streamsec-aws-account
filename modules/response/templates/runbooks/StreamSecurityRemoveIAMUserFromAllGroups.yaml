@@ -1,0 +1,75 @@
+schemaVersion: '0.3'
+description: |
+   This runbook removes the specified IAM user from all IAM groups
+assumeRole: '{{AutomationAssumeRole}}'
+parameters:
+  AutomationAssumeRole:
+    type: String
+    description: (Optional) The ARN of the role that allows Automation to perform the actions on your behalf.
+    default: ''
+  UserName:
+    type: String
+    description: (Required) IAM username whose group memberships will be removed.
+  Region:
+    type: String
+    description: The AWS Region where the Iam user is located.
+mainSteps:
+  - name: ListUserGroups
+    action: aws:executeScript
+    isEnd: false
+    nextStep: RemoveUserFromGroup
+    inputs:
+      Runtime: python3.11
+      Handler: main
+      InputPayload:
+        UserName: '{{ UserName }}'
+        Region: '{{ Region }}'
+      Script: |
+        import boto3
+        def main(events, context):
+            region = events.get("Region","Global")
+            iam = boto3.client('iam', region_name=region)
+            user_name = events.get("UserName", "")
+            group_names = list()
+            response = iam.list_groups_for_user(UserName=user_name)
+            for group in response.get('Groups', []):
+              group_names.append(group.get('GroupName'))
+            if not group_names:
+               raise Exception(f"No groups found for user {user_name}. Nothing to remove.")
+            return {"GroupNames": group_names}
+    outputs:
+      - Name: Status
+        Selector: $.Payload.Status
+        Type: String
+      - Name: GroupNames
+        Selector: $.Payload.GroupNames
+        Type: StringList
+
+  - name: RemoveUserFromGroup
+    action: aws:executeScript
+    isEnd: true
+    inputs:
+      Runtime: python3.11
+      Handler: main
+      InputPayload:
+        GroupNames: '{{ ListUserGroups.GroupNames }}'
+        Region: '{{ Region }}'
+        UserName: '{{ UserName }}'
+      Script: |
+        import boto3
+        def main(events, context):
+            region = events['Region']
+            user_name = events['UserName']
+            group_names = events['GroupNames']
+
+            iam = boto3.client('iam', region_name=region)
+
+            for group in group_names:
+              iam.remove_user_from_group(UserName=user_name, GroupName=group)
+
+            # Verify removal
+            response = iam.list_groups_for_user(UserName=user_name)
+            if response.get('Groups', []):
+              raise Exception(f"Failed to remove all groups for user {user_name}.")
+            else:
+              print(f"Successfully remove all group for user {user_name}.")

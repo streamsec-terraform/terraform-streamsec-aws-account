@@ -1,0 +1,91 @@
+schemaVersion: "0.3"
+assumeRole: '{{ AutomationAssumeRole }}'
+description: "Runbook to remove inline policies from an IAM Role in AWS."
+
+parameters:
+  RoleName:
+    type: String
+    description: The Name of the Iam Role.
+  Region:
+    type: String
+    description: The AWS region where the AMI is located.
+  AutomationAssumeRole:
+    type: String
+    description: (Optional) The IAM role that allows Systems Manager Automation to perform the actions on your behalf.
+    default: ""
+
+mainSteps:
+  - name: RemoveInlinePolicies
+    description: "Retrieves a list of inline policies attached to the specified IAM Role."
+    action: aws:executeScript
+    nextStep : DeleteRolePolicy
+    isEnd: false
+    inputs:
+      Runtime: python3.11
+      Handler: main
+      InputPayload:
+        RoleName: "{{ RoleName }}"
+        Region: "{{ Region }}"
+      Script: |
+        import boto3
+
+        def main(events, context):
+            """Fetches inline policies attached to the IAM Role"""
+            region = events.get("Region", "")
+            role_name = events.get("RoleName", "")
+            role_client = boto3.client('iam', region_name=region)
+
+            response = role_client.list_role_policies(RoleName=role_name)
+            policy_names = response.get('PolicyNames',[])
+            if not policy_names:
+              raise Exception(f"No Policy attached to Iam Role {role_name}")
+
+            return { "PolicyNames": policy_names }
+
+
+    outputs:
+      - Name: Status
+        Selector: $.Payload.Status
+        Type: String
+      - Name: PolicyNames
+        Selector: $.Payload.PolicyNames
+        Type: StringList
+      - Name: Message
+        Selector: $.Payload.Message
+        Type: String
+
+  - name: DeleteRolePolicy
+    isEnd: true
+    action: aws:executeScript
+    inputs:
+      Runtime: python3.11
+      Handler: main
+      InputPayload:
+        RoleName: "{{ RoleName }}"
+        PolicyNames: "{{ RemoveInlinePolicies.PolicyNames }}"
+        Region: "{{ Region }}"
+      Script: |
+        import boto3
+
+        def main(events, context):
+            policy_names = events.get("PolicyNames", [])
+            role_name = events.get("RoleName", "")
+            iam_client = boto3.client('iam', region_name=region)
+            policy_not_succeed_to_delete = []
+            deleted_policies = []
+            for policy in policy_names:
+              iam_client.delete_role_policy(
+                  RoleName=role_name, PolicyName=policy)
+
+            remaining_policies = iam_client.list_role_policies(RoleName=role_name).get("PolicyNames", [])
+            if remaining_policies:
+              for policy in policy_names:
+                if policy in remaining_policies:
+                  policy_not_succeed_to_delete.append(policy)
+                else:
+                  deleted_policies.append(policy)
+
+            if deleted_policies:
+                print(f"Successfully deleted policies: {', '.join(deleted_policies)}")
+            if failed_policies:
+                 raise Exception(f"Failed to delete policies: {', '.join(failed_policies)}")

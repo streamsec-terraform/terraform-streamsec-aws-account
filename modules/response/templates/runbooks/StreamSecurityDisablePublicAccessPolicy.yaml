@@ -1,0 +1,24 @@
+schemaVersion: '0.3'
+description: Stream Security - DAN Remediate public S3 bucket
+assumeRole: '{{AutomationAssumeRole}}'
+parameters:
+  AutomationAssumeRole:
+    default: ''
+    description: (Optional) The ARN of the role that allows Automation to perform the actions on your behalf.
+    type: String
+  BucketName:
+    description: Name of the S3 bucket to remediate
+    type: String
+mainSteps:
+  - inputs:
+      PublicAccessBlockConfiguration:
+        RestrictPublicBuckets: true
+        BlockPublicPolicy: true
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+      Bucket: '{{BucketName}}'
+      Service: s3
+      Api: PutPublicAccessBlock
+    name: DisablePublicAccess
+    action: aws:executeAwsApi
+    isEnd: true

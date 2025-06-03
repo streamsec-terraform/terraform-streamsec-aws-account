@@ -1,0 +1,57 @@
+schemaVersion: '0.3'
+description: |
+  Attaches a policy to a specified IAM user to revoke all session tokens issued before the current time.
+assumeRole: '{{ AutomationAssumeRole }}'
+parameters:
+  AutomationAssumeRole:
+    type: String
+    description: (Optional) The ARN of the role that allows Automation to perform actions on your behalf.
+    default: ''
+  UserName:
+    type: String
+    description: (Required) The IAM username whose session tokens will be revoked.
+  Region:
+    type: String
+    description: The AWS Region to use.
+mainSteps:
+  - name: GenerateRevokePolicy
+    action: aws:executeScript
+    inputs:
+      Runtime: python3.11
+      Handler: main
+      InputPayload:
+        UserName: '{{ UserName }}'
+        Region: '{{ Region }}'
+      Script: |
+        import boto3
+        import json
+        from datetime import datetime, timezone
+
+        def main(event, context):
+            iam = boto3.client('iam')
+            user_name = event.get("UserName", "")
+            now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+            policy_name = f"DenyOldTokensStream"
+            policy_doc = {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Deny",
+                  "Action": "*",
+                  "Resource": "*",
+                  "Condition": {
+                    "DateLessThan": {
+                      "aws:TokenIssueTime": now
+                    }
+                  }
+                }
+              ]
+            }
+
+            iam.put_user_policy(
+                UserName=user_name,
+                PolicyName=policy_name,
+                PolicyDocument=json.dumps(policy_doc)
+            )
+
+            print(f"Policy {policy_name} attached to user {user_name}")

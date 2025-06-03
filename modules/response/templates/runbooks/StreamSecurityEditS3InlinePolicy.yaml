@@ -1,0 +1,63 @@
+schemaVersion: '0.3'
+description: |
+  This runbook sets an inline policy for a specified S3 bucket in one Python script.
+assumeRole: '{{ AutomationAssumeRole }}'
+parameters:
+  AutomationAssumeRole:
+    type: String
+    description: (Optional) The IAM role that allows Systems Manager Automation to perform the actions on your behalf.
+    default: ''
+  BucketName:
+    type: String
+    description: (Required) Name of the S3 bucket.
+  BucketPolicy:
+    type: String
+    description: (Required) JSON string of the S3 bucket policy.
+mainSteps:
+  - name: SetAndVerifyBucketPolicy
+    action: 'aws:executeScript'
+    isEnd: true
+    inputs:
+      Runtime: python3.11
+      Handler: main
+      Script: |
+        import json
+        import boto3
+
+        def main(events, context):
+            s3 = boto3.client('s3')
+
+            # Extract the first element from the array parameters
+            bucket_name = events.get("BucketName", [""])
+            policy_str_list = events.get("BucketPolicy", [""])
+
+            # Ensure we have a valid policy string
+            if not policy_str_list:
+                raise ValueError(f"BucketPolicy parameter is empty! {policy_str_list}")
+
+            # Decode the JSON string
+            try:
+                policy = json.loads(policy_str_list)  # Convert from stringified JSON to a dictionary
+            except json.JSONDecodeError as e:
+                raise ValueError(f"BucketPolicy: {policy_str_list}, is not valid JSON: {str(e)}")
+
+            print(f"DEBUG: Decoded BucketPolicy JSON: {policy}")
+
+            # Apply the bucket policy
+            try:
+                s3.put_bucket_policy(
+                    Bucket=bucket_name,
+                    Policy=json.dumps(policy)  # Convert back to JSON string
+                )
+            except Exception as e:
+                raise RuntimeError(f"Failed to set policy: on bucket: {bucket_name}, {str(e)}")
+      InputPayload:
+        BucketName: "{{BucketName}}"
+        BucketPolicy: "{{ BucketPolicy}}"
+    outputs:
+      - Name: Status
+        Selector: $.Payload.Status
+        Type: String
+      - Name: Message
+        Selector: $.Payload.Message
+        Type: String

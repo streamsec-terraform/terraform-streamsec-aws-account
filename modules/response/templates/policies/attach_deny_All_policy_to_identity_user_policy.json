@@ -1,0 +1,21 @@
+{
+	"Version": "2012-10-17",
+	"Statement": [
+		{
+			"Effect": "Allow",
+			"Action": [
+				"sso:ListPermissionSets",
+				"sso:DescribePermissionSet",
+				"sso:CreatePermissionSet",
+				"sso:AttachManagedPolicyToPermissionSet",
+				"sso:DeleteAccountAssignment",
+				"sso:ListAccountAssignments",
+				"sso:ListAccountAssignmentsForPrincipal",
+				"sso:PutInlinePolicyToPermissionSet",
+				"sso:CreateAccountAssignment",
+				"sso:ProvisionPermissionSet"
+			],
+			"Resource": "*"
+		}
+	]
+}
