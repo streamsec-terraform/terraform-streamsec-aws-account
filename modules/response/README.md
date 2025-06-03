@@ -41,6 +41,7 @@ No modules.
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
 | <a name="input_response_policy_name"></a> [response\_policy\_name](#input\_response\_policy\_name) | The name of the response policy | `string` | `"stream-security-response-policy"` | no |
+| <a name="input_response_role_name"></a> [response\_role\_name](#input\_response\_role\_name) | The name of the response role | `string` | `"stream-security-response-role"` | no |
 | <a name="input_runbooks_prefix"></a> [runbooks\_prefix](#input\_runbooks\_prefix) | The prefix for the runbooks | `string` | `""` | no |
 | <a name="input_streamsec_account"></a> [streamsec\_account](#input\_streamsec\_account) | The AWS Account ID for the Stream.Security account. | `string` | `"624907860825"` | no |
 | <a name="input_tags"></a> [tags](#input\_tags) | A map of global tags to add to all created resources | `map(string)` | `{}` | no |

@@ -20,6 +20,12 @@ variable "runbooks_prefix" {
   default     = ""
 }
 
+variable "response_role_name" {
+  description = "The name of the response role"
+  type        = string
+  default     = "stream-security-response-role"
+}
+
 ################################################################################
 # General
 ################################################################################

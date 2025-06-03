@@ -18,7 +18,7 @@ resource "random_string" "external_id" {
 
 # IAM role for response
 resource "aws_iam_role" "response" {
-  name = "stream-security-response-role"
+  name = var.response_role_name
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
