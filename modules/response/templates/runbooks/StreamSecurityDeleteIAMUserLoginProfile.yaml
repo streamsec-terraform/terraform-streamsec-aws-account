@@ -1,0 +1,39 @@
+schemaVersion: '0.3'
+description: |
+  This runbook deletes the login profile of a specified IAM user, effectively disabling their ability to sign in to the AWS Management Console using a password.
+assumeRole: '{{AutomationAssumeRole}}'
+parameters:
+  AutomationAssumeRole:
+    type: String
+    description: (Optional) The ARN of the role that allows Automation to perform the actions on your behalf.
+    default: ''
+  UserName:
+    type: String
+    description: The name of the IAM User to delete login profile.
+  Region:
+    type: String
+    description: The AWS Region where the role is located.
+mainSteps:
+  - name: DeleteIAMUserLoginProfile
+    action: aws:executeScript
+    isEnd: true
+    inputs:
+      Runtime: python3.11
+      Handler: main
+      InputPayload:
+        UserName: '{{ UserName }}'
+        Region: '{{ Region }}'
+      Script: |
+        import boto3
+
+        def main(events, context):
+            user_name = events.get("UserName", "")
+            region = events.get('Region')
+
+            iam = boto3.client('iam', region_name=region)
+            if not user_name:
+                raise ValueError("ERROR: 'UserName' parameter is required.")
+
+            iam.delete_login_profile(UserName=user_name)
+
+            print(f"Login profile for user '{user_name}' deleted successfully.")

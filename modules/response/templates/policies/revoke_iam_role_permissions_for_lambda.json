@@ -1,0 +1,19 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "VisualEditor0",
+            "Effect": "Allow",
+            "Action": [
+                "lambda:GetFunction",
+                "lambda:UpdateFunctionConfiguration",
+                "iam:PutRolePolicy",
+                "iam:CreateRole",
+                "iam:GetRole",
+                "iam:UpdateAssumeRolePolicy",
+                "iam:PassRole"
+            ],
+            "Resource": "*"
+        }
+    ]
+}

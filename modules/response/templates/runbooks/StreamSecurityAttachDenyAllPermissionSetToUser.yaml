@@ -1,0 +1,179 @@
+schemaVersion: '0.3'
+description: |
+  This runbook creates a deny-all permission set, assigns it to a specified user, and provisions it in all applicable accounts.
+assumeRole: '{{ AutomationAssumeRole }}'
+parameters:
+  AutomationAssumeRole:
+    type: String
+    description: (Optional) The ARN of the IAM role that allows Automation to perform actions on your behalf.
+    default: ''
+  InstanceArn:
+    type: String
+    description: (Required) The ARN of the AWS SSO Instance.
+  UserId:
+    type: String
+    description: (Required) The ID of the user to apply the deny-all permission set to.
+  DenyPermissionSetName:
+    type: String
+    default: LLDenyAllPermissionSet
+    description: (Optional) Name of the deny-all permission set.
+mainSteps:
+  - description: Create the deny-all permission set with inline deny-all policy if it doesn't exist.
+    name: CreatePermissionSet
+    action: aws:executeScript
+    nextStep: CaptureAccounts
+    isEnd: false
+    inputs:
+      Runtime: python3.11
+      Handler: main
+      InputPayload:
+        InstanceArn: '{{ InstanceArn }}'
+        DenyPermissionSetName: '{{ DenyPermissionSetName }}'
+      Script: |
+        import boto3
+        import json
+
+        def main(event, context):
+            client = boto3.client('sso-admin')
+            instance_arn = event['InstanceArn']
+            name = event['DenyPermissionSetName']
+            response = client.create_permission_set(
+                    Name=name,
+                    InstanceArn=instance_arn,
+                    Description="Deny-all permission set to block all access",
+                    SessionDuration="PT1H"
+                )
+            permission_set_arn = response['PermissionSet']['PermissionSetArn']
+
+            deny_all_policy = json.dumps({
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Deny",
+                        "Action": "*",
+                        "Resource": "*"
+                    }
+                ]
+            })
+
+            client.put_inline_policy_to_permission_set(
+                InstanceArn=instance_arn,
+                PermissionSetArn=permission_set_arn,
+                InlinePolicy=deny_all_policy
+            )
+
+            return {
+                "PermissionSetArn": permission_set_arn,
+                "message": "Permission set ready with deny-all policy"
+            }
+    outputs:
+      - Name: PermissionSetArn
+        Selector: $.Payload.PermissionSetArn
+        Type: String
+  - description: Collect account IDs.
+    name: CaptureAccounts
+    action: aws:executeScript
+    nextStep: ReassignDenyPermissionSet
+    isEnd: false
+    inputs:
+      Runtime: python3.11
+      Handler: main
+      InputPayload:
+        InstanceArn: '{{ InstanceArn }}'
+        UserId: '{{ UserId }}'
+      Script: |
+        import boto3
+
+        def main(event, context):
+            client = boto3.client('sso-admin')
+            instance_arn = event['InstanceArn']
+            user_id = event['UserId']
+
+            response = client.list_account_assignments_for_principal(
+                InstanceArn=instance_arn,
+                PrincipalType="USER",
+                PrincipalId=user_id
+            )
+
+            account_ids = set()
+            for assignment in response['AccountAssignments']:
+                account_ids.add(assignment['AccountId'])
+            return {"AccountIds": list(account_ids)}
+    outputs:
+      - Name: AccountIds
+        Selector: $.Payload.AccountIds
+        Type: StringList
+  - description: Assign the deny permission set to all previously assigned accounts.
+    name: ReassignDenyPermissionSet
+    action: aws:executeScript
+    nextStep: ProvisionDenyPermissionSet
+    isEnd: false
+    inputs:
+      Runtime: python3.11
+      Handler: main
+      InputPayload:
+        InstanceArn: '{{ InstanceArn }}'
+        UserId: '{{ UserId }}'
+        PermissionSetArn: '{{ CreatePermissionSet.PermissionSetArn }}'
+        AccountIds: '{{ CaptureAccounts.AccountIds }}'
+      Script: |
+        import boto3
+        import time
+
+        def main(event, context):
+            client = boto3.client('sso-admin')
+            instance_arn = event['InstanceArn']
+            user_id = event['UserId']
+            permission_set_arn = event['PermissionSetArn']
+            account_ids = event['AccountIds']
+
+            for account_id in account_ids:
+                  client.create_account_assignment(
+                            InstanceArn=instance_arn,
+                            TargetId=account_id,
+                            TargetType='AWS_ACCOUNT',
+                            PrincipalType='USER',
+                            PrincipalId=user_id,
+                            PermissionSetArn=permission_set_arn
+                        )
+            print(f"Reassigned deny permission set to {len(account_ids)} account(s).")
+  - description: Provision the deny permission set in all applicable accounts.
+    name: ProvisionDenyPermissionSet
+    action: aws:executeScript
+    isEnd: true
+    inputs:
+      Runtime: python3.11
+      Handler: main
+      InputPayload:
+        InstanceArn: '{{ InstanceArn }}'
+        PermissionSetArn: '{{ CreatePermissionSet.PermissionSetArn }}'
+        AccountIds: '{{ CaptureAccounts.AccountIds }}'
+      Script: |
+        import boto3
+        import time
+
+        def main(event, context):
+            client = boto3.client('sso-admin')
+            instance_arn = event['InstanceArn']
+            permission_set_arn = event['PermissionSetArn']
+            account_ids = event['AccountIds']
+
+            for account_id in account_ids:
+                retries = 3
+                while retries > 0:
+                    try:
+                        client.provision_permission_set(
+                            InstanceArn=instance_arn,
+                            TargetType='AWS_ACCOUNT',
+                            TargetId=account_id,
+                            PermissionSetArn=permission_set_arn
+                        )
+                        time.sleep(5)
+                        break
+                    except client.exceptions.ConflictException:
+                        time.sleep(5)
+                        retries -= 1
+                        if retries == 0:
+                            raise Exception(f"Conflict error while provisioning account after multiple retries")
+
+            print(f"Provisioned permission set in {len(account_ids)} account(s).")

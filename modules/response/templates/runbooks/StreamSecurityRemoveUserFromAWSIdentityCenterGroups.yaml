@@ -1,0 +1,64 @@
+schemaVersion: '0.3'
+description: |
+  This runbook removes the specified user from all AWS Identity Center (SSO) groups.
+assumeRole: '{{AutomationAssumeRole}}'
+parameters:
+  AutomationAssumeRole:
+    type: String
+    description: (Optional) The ARN of the role that allows Automation to perform the actions on your behalf.
+    default: ''
+  UserId:
+    type: String
+    description: The unique identifier (UserId) of the Identity Center user to remove.
+  IdentityStoreId:
+    type: String
+    description: The Identity Store ID associated with AWS Identity Center.
+  Region:
+    type: String
+    description: The AWS Region where Identity Center is configured.
+
+mainSteps:
+  - name: RemoveUserFromAllGroups
+    action: aws:executeScript
+    isEnd: true
+    inputs:
+      Runtime: python3.11
+      Handler: main
+      InputPayload:
+        UserId: '{{ UserId }}'
+        IdentityStoreId: '{{ IdentityStoreId }}'
+        Region: '{{ Region }}'
+      Script: |
+        import boto3
+
+        def main(events, context):
+            identity_store_id = events['IdentityStoreId']
+            user_id = events['UserId']
+            region = events['Region']
+
+            identity_store = boto3.client('identitystore', region_name=region)
+
+
+            response = identity_store.list_group_memberships_for_member(
+                          IdentityStoreId=identity_store_id,
+                          MemberId={'UserId': user_id}
+                      )
+
+            memberships = response.get('GroupMemberships', [])
+            if not memberships:
+                raise Exception(f"No group memberships found for user {user_id}")
+
+
+            groups_id = []
+            for membership in memberships:
+                membership_id = membership.get('MembershipId')
+                group_id = membership.get('GroupId')
+                print(f"Removing user {user_id} from group {group_id}")
+                identity_store.delete_group_membership(
+                    IdentityStoreId=identity_store_id,
+                    MembershipId=membership_id
+                )
+                groups_id.append(group_id)
+
+
+            print(f"Finished removing user {user_id} from all groups {groups_id}.")

@@ -1,0 +1,32 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "iam:ListUsers",
+        "iam:GetUser",
+        "iam:DeleteUser",
+        "iam:ListAccessKeys",
+        "iam:DeleteAccessKey",
+        "iam:ListSSHPublicKeys",
+        "iam:DeleteSSHPublicKey",
+        "iam:ListSigningCertificates",
+        "iam:DeleteSigningCertificate",
+        "iam:ListMFADevices",
+        "iam:DeactivateMFADevice",
+        "iam:DeleteVirtualMFADevice",
+        "iam:ListServiceSpecificCredentials",
+        "iam:DeleteServiceSpecificCredential",
+        "iam:DeleteLoginProfile",
+        "iam:ListGroupsForUser",
+        "iam:RemoveUserFromGroup",
+        "iam:ListUserPolicies",
+        "iam:DeleteUserPolicy",
+        "iam:ListAttachedUserPolicies",
+        "iam:DetachUserPolicy"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
