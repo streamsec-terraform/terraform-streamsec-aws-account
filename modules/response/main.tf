@@ -81,7 +81,10 @@ resource "aws_iam_role_policy" "response" {
 
 # SSM Documents for each response
 resource "aws_ssm_document" "response" {
-  for_each = { for response in local.runbook_config.Remediations : response.name => response if response.runbook_owner == "StreamSecurity" }
+  for_each = {
+    for response in local.runbook_config.Remediations : response.name => response
+    if response.runbook_owner == "StreamSecurity" && !contains(var.exclude_runbooks, response.name)
+  }
 
   name            = "${var.runbooks_prefix}${each.value.name}"
   document_type   = "Automation"
@@ -93,7 +96,10 @@ resource "aws_ssm_document" "response" {
 
 # IAM roles for each response policy
 resource "aws_iam_role" "response_roles" {
-  for_each = { for response in local.runbook_config.Remediations : response.name => response if response.runbook_owner == "StreamSecurity" }
+  for_each = {
+    for response in local.runbook_config.Remediations : response.name => response
+    if response.runbook_owner == "StreamSecurity" && !contains(var.exclude_runbooks, response.name)
+  }
 
   name = "${replace(each.value.name, "-", "")}-role"
 
@@ -115,7 +121,10 @@ resource "aws_iam_role" "response_roles" {
 
 # IAM policies for each response role
 resource "aws_iam_role_policy" "response_policies" {
-  for_each = { for response in local.runbook_config.Remediations : response.name => response if response.runbook_owner == "StreamSecurity" }
+  for_each = {
+    for response in local.runbook_config.Remediations : response.name => response
+    if response.runbook_owner == "StreamSecurity" && !contains(var.exclude_runbooks, response.name)
+  }
 
   name = "${replace(each.value.name, "-", "")}-policy"
   role = aws_iam_role.response_roles[each.key].id
@@ -129,7 +138,7 @@ resource "streamsec_aws_response_ack" "this" {
   region            = data.aws_region.current.name
   policy_to_role_map = {
     for response in local.runbook_config.Remediations : response.policy_file_name => aws_iam_role.response_roles[response.name].arn
-    if response.runbook_owner == "StreamSecurity"
+    if response.runbook_owner == "StreamSecurity" && !contains(var.exclude_runbooks, response.name)
   }
   role_arn     = aws_iam_role.response.arn
   runbook_list = [for doc in aws_ssm_document.response : doc.name]

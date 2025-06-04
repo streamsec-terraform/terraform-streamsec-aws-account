@@ -27,6 +27,7 @@ module "real_time_us_east_1" {
   providers = {
     aws = aws.aws-east-1
   }
+  depends_on = [module.account]
 }
 
 module "real_time_us_east_2" {
@@ -34,20 +35,29 @@ module "real_time_us_east_2" {
   providers = {
     aws = aws.aws-east-2
   }
+  depends_on = [module.account]
 }
 
 module "flow_logs" {
   source                 = "../../modules/flow-logs"
   create_flowlogs_bucket = true                  # whether to create a bucket for flow logs and attach it to the VPCs
   vpc_ids                = ["vpc-xxxxxxxxxxxxx"] # required if create_flowlogs_bucket is true
+  depends_on             = [module.account]
 }
 
 module "iam_activity" {
   source                   = "../../modules/iam-activity"
   iam_activity_bucket_name = "xxxxxxxxxxxxx"
+  depends_on               = [module.account]
 }
 
 module "cost" {
   source             = "../../modules/cost"
   create_cost_bucket = true
+  depends_on         = [module.account]
+}
+
+module "response" {
+  source     = "../../modules/response"
+  depends_on = [module.account]
 }
