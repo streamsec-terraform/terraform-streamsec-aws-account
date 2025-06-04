@@ -26,6 +26,12 @@ variable "response_role_name" {
   default     = "stream-security-response-role"
 }
 
+variable "exclude_runbooks" {
+  description = "A list of runbooks to exclude from the response policy"
+  type        = list(string)
+  default     = []
+}
+
 ################################################################################
 # General
 ################################################################################

@@ -5,7 +5,7 @@
 |------|---------|
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.0 |
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | >= 3.0 |
-| <a name="requirement_streamsec"></a> [streamsec](#requirement\_streamsec) | >= 1.7 |
+| <a name="requirement_streamsec"></a> [streamsec](#requirement\_streamsec) | >= 1.12 |
 
 ## Providers
 
@@ -21,6 +21,7 @@ No providers.
 | <a name="module_iam_activity"></a> [iam\_activity](#module\_iam\_activity) | ../../modules/iam-activity | n/a |
 | <a name="module_real_time_us_east_1"></a> [real\_time\_us\_east\_1](#module\_real\_time\_us\_east\_1) | ../../modules/real-time-events | n/a |
 | <a name="module_real_time_us_east_2"></a> [real\_time\_us\_east\_2](#module\_real\_time\_us\_east\_2) | ../../modules/real-time-events | n/a |
+| <a name="module_response"></a> [response](#module\_response) | ../../modules/response | n/a |
 
 ## Resources
 
