@@ -1,0 +1,42 @@
+schemaVersion: '0.3'
+description: |
+  Deregisters the specified ECS task definition, preventing it from being used for new task or service launches. Existing running tasks remain unaffected until manually stopped.
+assumeRole: '{{AutomationAssumeRole}}'
+parameters:
+  AutomationAssumeRole:
+    type: String
+    description: (Optional) The ARN of the role that allows Automation to perform actions on your behalf.
+    default: ''
+  TaskDefinitionArn:
+    type: String
+    description: (Required) The Arn of the ECS Task Definition to deregister (without revision number).
+  Region:
+    type: String
+    description: (Required) The AWS region where the ECS Task Definition exists.
+mainSteps:
+  - name: DeregisterAllECSTaskRevisions
+    action: aws:executeScript
+    isEnd: true
+    inputs:
+      Runtime: python3.11
+      Handler: main
+      InputPayload:
+        TaskDefinitionArn: '{{ TaskDefinitionArn }}'
+        Region: '{{ Region }}'
+      Script: |
+        import boto3
+        from botocore.exceptions import ClientError
+
+        def main(event, context):
+            ecs_client = boto3.client('ecs', region_name=event['Region'])
+            task_def_arn = event.get('TaskDefinitionArn')
+            
+            if not task_def_arn:
+                raise ValueError("TaskDefinitionArn parameter is required.")
+            
+            try:           
+                ecs_client.deregister_task_definition(taskDefinition=task_def_arn)
+                print(f"Task Definition {task_def_arn} has been deregistered successfully.")
+            except Exception as e:
+                print(f"Failed to deregister Task Definition {task_def_arn}: {str(e)}")
+                raise Exception(f"Failed to retrieve task definitions for {task_def_arn}: {str(e)}")

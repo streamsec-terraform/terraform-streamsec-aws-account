@@ -1,0 +1,114 @@
+schemaVersion: '0.3'
+description: |
+  This runbook revokes all AWS account assignments (permission sets) for a specified user
+  in AWS Identity Center.
+assumeRole: '{{AutomationAssumeRole}}'
+parameters:
+  AutomationAssumeRole:
+    type: String
+    description: (Optional) The ARN of the role that allows Automation to perform the actions on your behalf.
+    default: ''
+  UserId:
+    type: String
+    description: The unique identifier (UserId) of the Identity Center user.
+  InstanceArn:
+    type: String
+    description: The ARN of the AWS Identity Center instance (starts with arn:aws:sso:::instance/).
+  IdentityStoreId:
+    type: String
+    description: The Identity Store ID associated with AWS Identity Center.
+  Region:
+    type: String
+    description: The AWS Region where Identity Center is configured.
+
+mainSteps:
+  - name: RevokeUserAssignments
+    action: aws:executeScript
+    isEnd: true
+    inputs:
+      Runtime: python3.11
+      Handler: main
+      InputPayload:
+        UserId: '{{ UserId }}'
+        IdentityStoreId: '{{ IdentityStoreId }}'
+        InstanceArn: '{{ InstanceArn }}'
+        Region: '{{ Region }}'
+      Script: |
+        import boto3
+        import time
+        
+        def main(events, context):
+            user_id = events['UserId']
+            instance_arn = events['InstanceArn']
+            identity_store_id = events['IdentityStoreId']
+            region = events['Region']
+            identity_store = boto3.client('identitystore', region_name=region)
+            sso_admin = boto3.client('sso-admin', region_name=region)
+            
+            # Step 1: Remove user from all groups
+            
+            response = identity_store.list_group_memberships_for_member(
+                IdentityStoreId=identity_store_id,
+                MemberId={'UserId': user_id}
+            )
+
+            memberships = response.get('GroupMemberships', [])
+            removed_groups = []
+
+            for membership in memberships:
+                membership_id = membership['MembershipId']
+                group_id = membership.get('GroupId')
+                identity_store.delete_group_membership(
+                    IdentityStoreId=identity_store_id,
+                    MembershipId=membership_id
+                )
+                removed_groups.append(group_id)
+            if removed_groups:
+              print(f"Removed user {user_id} from groups: {removed_groups}")
+          
+            # Step 2: Revoke AWS account assignments
+            
+            response = sso_admin.list_account_assignments_for_principal(
+                InstanceArn=instance_arn,
+                PrincipalType='USER',
+                PrincipalId=user_id
+            )
+
+            assignments = response.get('AccountAssignments', [])
+            if not assignments and not memberships:
+                raise Exception(f"No account assignments found for user {user_id}")
+
+            revoked = []
+            for assignment in assignments:
+                account_id = assignment['AccountId']
+                permission_set_arn = assignment['PermissionSetArn']
+
+                print(f"Revoking assignment: AccountId={account_id}, PermissionSetArn={permission_set_arn}")
+                response = sso_admin.delete_account_assignment(
+                    InstanceArn=instance_arn,
+                    TargetId=account_id,
+                    TargetType='AWS_ACCOUNT',
+                    PermissionSetArn=permission_set_arn,
+                    PrincipalType='USER',
+                    PrincipalId=user_id
+                )
+
+                revoked.append(account_id)
+            
+            # Step 3: Verification
+            
+            time.sleep(10)
+        
+            response = sso_admin.list_account_assignments_for_principal(
+                InstanceArn=instance_arn,
+                PrincipalId=user_id,
+                PrincipalType='USER'
+            )
+            
+            assignments = response.get('AccountAssignments', [])
+            if assignments:
+                raise Exception(f"Verification failed: user {user_id} still has assignments: {assignments}")
+
+            print(f"Verification passed: user {user_id} has no assignments.")
+            
+

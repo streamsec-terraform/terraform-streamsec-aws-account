@@ -1,0 +1,54 @@
+schemaVersion: "0.3"
+assumeRole: '{{ AutomationAssumeRole }}'
+description: "Runbook to enable server-side encryption on an S3 bucket using AWS KMS."
+parameters:
+  BucketName:
+    type: "String"
+    description: "The name of the S3 bucket to enable encryption on."
+  AutomationAssumeRole:
+    type: "String"
+    description: "(Optional) The IAM role that allows Systems Manager Automation to perform the actions on your behalf."
+    default: ""
+
+mainSteps:
+  - name: enableBucketEncryption
+    action: "aws:executeScript"
+    timeoutSeconds: 300
+    description: "Enables server-side encryption on the specified S3 bucket using AWS KMS."
+    inputs:
+      Runtime: python3.11
+      Handler: "handler"
+      Script: |
+        import boto3
+        from botocore.exceptions import ClientError, NoCredentialsError, PartialCredentialsError
+
+        def handler(event, context):
+            bucket_name = event['BucketName']
+            s3_client = boto3.client('s3')
+
+            encryption_configuration = {
+                "Rules": [
+                    {
+                        "ApplyServerSideEncryptionByDefault": {
+                            "SSEAlgorithm": "aws:kms"
+                        }
+                    }
+                ]
+            }
+        
+            try:
+                # Enable bucket encryption
+                s3_client.put_bucket_encryption(
+                    Bucket=bucket_name,
+                    ServerSideEncryptionConfiguration=encryption_configuration
+                )
+                print(f"Server-side encryption enabled for bucket: {bucket_name}")
+            except ClientError as e:
+                raise Exception(f"FAILURE: {str(e)}")
+            except NoCredentialsError:
+                raise Exception(f"AWS credentials not found. Please configure them.")
+            except PartialCredentialsError:
+                raise Exception(f"Incomplete AWS credentials. Please check your configuration.")
+
+      InputPayload:
+        BucketName: "{{ BucketName }}"

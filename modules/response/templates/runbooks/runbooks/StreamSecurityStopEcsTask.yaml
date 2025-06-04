@@ -1,0 +1,53 @@
+schemaVersion: '0.3'
+description: |
+  Stops a running ECS task in a specified cluster, preventing further execution.
+  Ensures that the task is terminated while keeping the task definition intact.
+assumeRole: '{{AutomationAssumeRole}}'
+parameters:
+  AutomationAssumeRole:
+    type: String
+    description: (Optional) The ARN of the role that allows Automation to perform actions on your behalf.
+    default: ''
+  ClusterArn:
+    type: String
+    description: (Required) The arn of the ECS cluster where the task is running.
+  TaskArn:
+    type: String
+    description: (Required) The ARN of the ECS task to stop.
+  Region:
+    type: String
+    description: (Required) The AWS region where the ECS cluster exists.
+
+mainSteps:
+  - name: StopECSTask
+    action: aws:executeScript
+    isEnd: true
+    inputs:
+      Runtime: python3.11
+      Handler: main
+      InputPayload:
+        ClusterArn: '{{ ClusterArn }}'
+        TaskArn: '{{ TaskArn }}'
+        Region: '{{ Region }}'
+      Script: |
+        import boto3
+        
+        def main(event, context):
+            ecs_client = boto3.client('ecs', region_name=event['Region'])
+            cluster_arn = event.get('ClusterArn')
+            cluster_name = cluster_arn.split("/")[-1]
+            task_arn = event.get('TaskArn')
+            
+            if not cluster_name:
+                raise ValueError("'ClusterName' parameter is required.")
+            if not task_arn:
+                raise ValueError("'TaskArn' parameter is required.")
+            
+            try:
+                ecs_client.stop_task(
+                    cluster=cluster_name,
+                    task=task_arn
+                )
+                print(f"Task {task_arn} in cluster {cluster_name} has been stopped successfully.")
+            except Exception as e:
+                raise RuntimeError(f"Failed to stop ECS Task {task_arn}: {str(e)}")

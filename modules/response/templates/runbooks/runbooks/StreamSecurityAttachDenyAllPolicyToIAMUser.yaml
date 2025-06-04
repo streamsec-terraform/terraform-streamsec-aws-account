@@ -1,0 +1,54 @@
+schemaVersion: '0.3'
+description: |
+   This runbook attaches an inline "Deny-All" IAM policy to the specified IAM user.
+assumeRole: '{{AutomationAssumeRole}}'
+parameters:
+  AutomationAssumeRole:
+    type: String
+    description: (Optional) The ARN of the role that allows Automation to perform the actions on your behalf.
+    default: ''
+  UserName:
+    type: String
+    description: (Required) The IAM username to which the Deny-All inline policy will be attached.
+  Region:
+    type: String
+    description: The AWS Region where the IAM user is managed.
+mainSteps:
+  - name: AttachDenyAllPolicy
+    action: aws:executeScript
+    isEnd: true
+    inputs:
+      Runtime: python3.11
+      Handler: main
+      InputPayload:
+        UserName: '{{ UserName }}'
+        Region: '{{ Region }}'
+      Script: |
+        import boto3
+        import json
+
+        def main(events, context):
+            region = events.get("Region","Global")
+            iam = boto3.client('iam',region_name=region)
+            user_name = events.get("UserName", "")
+
+            if not user_name:
+                raise ValueError("'UserName' parameter is required.")
+            deny_policy = {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Deny",
+                        "Action": "*",
+                        "Resource": "*"
+                    }
+                ]
+            }
+            iam.put_user_policy( UserName=user_name,PolicyName='denyAllStream',PolicyDocument=json.dumps(deny_policy))
+            
+            user_policies = iam.list_user_policies(UserName=user_name)
+            inline_policies = user_policies.get('PolicyNames', [])
+            if 'denyAllStream' in inline_policies:
+                print(f"Successfully attached denyAllStream to user {user_name}.")
+            else:
+                raise Exception(f"denyAllStream not found in inline policies for user {user_name}.")

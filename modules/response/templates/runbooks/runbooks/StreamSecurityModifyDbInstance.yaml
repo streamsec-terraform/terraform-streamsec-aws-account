@@ -1,0 +1,53 @@
+schemaVersion: '0.3'
+assumeRole: '{{ AutomationAssumeRole }}'
+description: >-
+  Modify an RDS DB instance to set its public accessibility.
+parameters:
+  AutomationAssumeRole:
+    type: String
+    description: >-
+      The IAM role that allows Systems Manager Automation to perform the actions on your behalf.
+  Region:
+    type: String
+    description: The AWS region where the RDS instance exists.
+  DBInstanceIdentifier:
+    type: String
+    description: The identifier of the RDS DB instance.
+  PubliclyAccessible:
+    type: String
+    allowedValues:
+      - 'True'
+      - 'False'
+    description: >-
+      Set to 'True' to make the DB instance publicly accessible, or 'False' to make it private.
+mainSteps:
+  - name: modifyDBInstance
+    action: 'aws:executeScript'
+    inputs:
+      Runtime: python3.11
+      Handler: script_handler
+      Script: |
+        import boto3
+
+        def modify_db_instance(db_instance_identifier, publicly_accessible, region):
+            rds_client = boto3.client('rds', region_name=region)
+
+            try:
+                response = rds_client.modify_db_instance(
+                    DBInstanceIdentifier=db_instance_identifier,
+                    PubliclyAccessible=(publicly_accessible == 'True')
+                )
+                print("ModifyDBInstance response:", response)
+                print("DB Instance modification initiated successfully.")
+            except Exception as e:
+                raise Exception(f"Unexpected error while modifying RDS instance '{db_instance_identifier}' in region '{region}': {str(e)}")
+
+        def script_handler(event, context):
+            region = event['Region']
+            db_instance_identifier = event['DBInstanceIdentifier']
+            publicly_accessible = event['PubliclyAccessible']
+            modify_db_instance(db_instance_identifier, publicly_accessible, region)
+      InputPayload:
+        Region: "{{Region}}"
+        DBInstanceIdentifier: "{{DBInstanceIdentifier}}"
+        PubliclyAccessible: "{{PubliclyAccessible}}"

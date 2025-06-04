@@ -1,0 +1,94 @@
+schemaVersion: '0.3'
+description: |
+   This runbook detaches all IAM managed policies attached to a specified user
+assumeRole: '{{AutomationAssumeRole}}'
+parameters:
+  AutomationAssumeRole:
+    type: String
+    description: (Optional) The ARN of the role that allows Automation to perform the actions on your behalf.
+    default: ''
+  UserName:
+    type: String
+    description: ired) The IAM username from which all managed policies will be detached.
+  Region:
+    type: String
+    description: The AWS Region where the IAM user is managed.
+mainSteps:
+  - name: ListAttachPolicy
+    action: aws:executeScript
+    isEnd: false
+    nextStep: DetachAllUserPolicies
+    inputs:
+      Runtime: python3.11
+      Handler: main
+      InputPayload:
+        UserName: '{{ UserName }}'
+        Region: '{{ Region }}'
+      Script: |
+        import boto3
+
+        def main(events, context):
+            region = events.get("Region","Global")
+            iam = boto3.client('iam',region_name=region)
+            user_name = events.get("UserName", "")
+
+            if not user_name:
+                raise ValueError("UserName parameter is required.")
+            policies_arn = []
+            is_truncated = True
+            marker = ""
+            while is_truncated:
+              if marker:
+                  response = iam.list_attached_user_policies(UserName=user_name, Marker=marker)
+              else:
+                  response = iam.list_attached_user_policies(UserName=user_name)
+              attached_policies = response.get('AttachedPolicies',[])
+              for policy in attached_policies:
+                  policies_arn.append(policy["PolicyArn"])
+              if is_truncated := response.get("IsTruncated", False):
+                marker = response.get("Marker")
+            if not policies_arn:
+              raise Exception(f"PoliciesArn is not attached to user name.")
+            
+            return {"PoliciesArn": policies_arn}
+    outputs:
+      - Name: Status
+        Selector: $.Payload.Status
+        Type: String
+      - Name: PoliciesArn
+        Selector: $.Payload.PoliciesArn
+        Type: StringList
+
+  - name: DetachAllUserPolicies
+    action: aws:executeScript
+    isEnd: true
+    inputs:
+      Runtime: python3.11
+      Handler: main
+      InputPayload:
+        PoliciesArn: '{{ ListAttachPolicy.PoliciesArn }}'
+        Region: '{{ Region }}'
+        UserName: '{{ UserName }}'
+      Script: |
+        import boto3
+
+        def main(events, context):
+            region = events['Region']
+            user_name = events['UserName']
+            policies_arn = events['PoliciesArn']
+            if not policies_arn:
+               raise Exception(f"PoliciesArn is not attached to user name.")
+
+            iam = boto3.client('iam', region_name=region)
+            
+            for policy in policies_arn:
+              iam.detach_user_policy(UserName=user_name, PolicyArn=policy)
+            
+            response = iam.list_attached_user_policies(UserName=user_name)
+            if AttachedPolicies := response.get('AttachedPolicies'):
+              attached_str = ', '.join([p['PolicyName'] for p in AttachedPolicies])
+              raise Exception(f"Failed to detach all policies for user {user_name}. Still attached policies: {attached_str}")
+            else:
+              print(f"Successfully detached all policies for user {user_name}.")
+            
+              

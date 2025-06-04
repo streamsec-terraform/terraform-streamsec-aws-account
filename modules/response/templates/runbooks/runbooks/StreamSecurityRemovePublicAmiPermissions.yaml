@@ -1,0 +1,48 @@
+schemaVersion: "0.3"
+assumeRole: '{{ AutomationAssumeRole }}'
+description: "Runbook to remove public launch permissions from an AMI using a custom script."
+parameters:
+  AMIId:
+    type: "String"
+    description: "The ID of the AMI to modify."
+  Region:
+    type: "String"
+    description: "The AWS region where the AMI is located."
+  AutomationAssumeRole:
+    type: "String"
+    description: "(Optional) The IAM role that allows Systems Manager Automation to perform the actions on your behalf."
+    default: ""
+
+mainSteps:
+  - name: removePublicLaunchPermission
+    action: "aws:executeScript"
+    timeoutSeconds: 300
+    description: "Remove public launch permissions from the specified AMI in the specified region."
+    inputs:
+      Runtime: python3.11
+      Handler: "handler"
+      Script: |
+        import boto3
+        from botocore.exceptions import ClientError
+
+        def handler(event, context):
+            ami_id = event['AMIId']
+            region = event['Region']
+            ec2_client =  boto3.client('ec2', region_name=region)
+            try:
+                # Remove public launch permissions
+                ec2_client.modify_image_attribute(
+                    ImageId=ami_id,
+                    LaunchPermission={
+                        "Remove": [
+                            {"Group": "all"}
+                        ]
+                    }
+                )
+                print(f"Public launch permissions removed for AMI {ami_id} in region {region}.")
+            except ClientError as e:
+                raise Exception(f"Failed to remove public launch permissions for AMI {ami_id} in region {region}, handled exception: {str(e)}")
+
+      InputPayload:
+        AMIId: "{{ AMIId }}"
+        Region: "{{ Region }}"

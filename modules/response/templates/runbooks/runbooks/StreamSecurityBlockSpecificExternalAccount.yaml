@@ -1,0 +1,120 @@
+schemaVersion: '0.3'
+description: |
+  Updates the trust policy of the specified IAM roles to remove or deny access for the specified external AWS account.
+  This immediately blocks that external account from assuming the role.
+
+assumeRole: '{{ AutomationAssumeRole }}'
+
+parameters:
+  AutomationAssumeRole:
+    type: String
+    description: (Optional) The ARN of the role that allows Automation to perform the actions on your behalf.
+    default: ''
+  RoleNames:
+    type: StringList
+    description: A list of IAM Role names whose trust policies will be modified.
+  ExternalAWSAccountId:
+    type: String
+    description: The AWS account ID to block from assuming the roles.
+
+mainSteps:
+  - name: UpdateTrustPolicies
+    action: aws:executeScript
+    isEnd: false
+    nextStep: VerifyUpdatedTrustPolicies
+    inputs:
+      Runtime: python3.11
+      Handler: main
+      InputPayload:
+        RoleNames: '{{ RoleNames }}'
+        ExternalAWSAccountId: '{{ ExternalAWSAccountId }}'
+      Script: |
+        import boto3
+        import json
+
+        def normalize(obj):
+            if isinstance(obj, dict):
+                return {k: normalize(obj[k]) for k in sorted(obj)}
+            elif isinstance(obj, list):
+                return [normalize(x) for x in obj]
+            else:
+                return obj
+
+        def main(events, context):
+            iam = boto3.client('iam')
+            blocked_account = events.get('ExternalAWSAccountId')
+            role_names = events.get('RoleNames', [])
+            updated_roles = []
+            already_blocked_roles = []
+
+            deny_statement = {
+                "Effect": "Deny",
+                "Principal": {
+                    "AWS": f"arn:aws:iam::{blocked_account}:root"
+                },
+                "Action": "sts:AssumeRole"
+            }
+
+            normalized_deny = normalize(deny_statement)
+
+            for role_name in role_names:
+                response = iam.get_role(RoleName=role_name)
+                trust_policy = response['Role']['AssumeRolePolicyDocument']
+                current_statements = trust_policy.get("Statement", [])
+
+                normalized_statements = [normalize(stmt) for stmt in current_statements]
+
+                if normalized_deny not in normalized_statements:
+                    trust_policy["Statement"].append(deny_statement)
+                    iam.update_assume_role_policy(
+                        RoleName=role_name,
+                        PolicyDocument=json.dumps(trust_policy)
+                    )
+                    updated_roles.append(role_name)
+                else:
+                    already_blocked_roles.append(role_name)
+            
+            if not updated_roles:
+              raise Exception(f"No updates made. The deny statement already exists in roles: {role_names}")
+            print(
+                (f"The following roles already had the deny statement: {already_blocked_roles}. " if already_blocked_roles else "") +
+                f"Trust policies updated for roles: {updated_roles}.")
+
+
+  - name: VerifyUpdatedTrustPolicies
+    action: aws:executeScript
+    isEnd: true
+    inputs:
+      Runtime: python3.11
+      Handler: main
+      InputPayload:
+        RoleNames: '{{ RoleNames }}'
+        ExternalAWSAccountId: '{{ ExternalAWSAccountId }}'
+      Script: |
+        import boto3
+        import json
+
+        def main(events, context):
+            iam = boto3.client('iam')
+            blocked_account = events.get('ExternalAWSAccountId')
+            role_names = events.get('RoleNames', [])
+
+            expected_statement = {
+                "Effect": "Deny",
+                "Principal": {
+                    "AWS": f"arn:aws:iam::{blocked_account}:root"
+                },
+                "Action": "sts:AssumeRole"
+            }
+
+            failed_roles = []
+            for role_name in role_names:
+                response = iam.get_role(RoleName=role_name)
+                current_policy = response['Role']['AssumeRolePolicyDocument']
+                if expected_statement not in current_policy.get('Statement', []):
+                    failed_roles.append(role_name)
+
+            if failed_roles:
+                raise Exception(f"Trust policy update failed for roles: {', '.join(failed_roles)}")
+
+            print("Trust policies updated and verified successfully.")

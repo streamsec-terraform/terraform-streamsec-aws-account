@@ -1,0 +1,91 @@
+schemaVersion: '0.3'
+description: |
+  This runbook detaches an EC2 instance from its Auto Scaling Group (ASG) and prevents automatic replacement.
+assumeRole: '{{ AutomationAssumeRole }}'
+parameters:
+  InstanceID:
+    type: String
+    description: (Required) The EC2 instance ID to detach from ASG.
+  AutoScalingGroupName:
+    type: String
+    description: (Required) The name of the Auto Scaling Group.
+  Region:
+    type: String
+    description: (Required) The AWS region where the ASG is located.
+  AutomationAssumeRole:
+    type: AWS::IAM::Role::Arn
+    description: (Optional) The IAM role ARN for executing the automation.
+    default: ''
+mainSteps:
+  - name: DetachInstance
+    action: aws:executeScript
+    isEnd: true
+    onFailure: Abort
+    inputs:
+      Runtime: python3.11
+      Handler: script_handler
+      InputPayload:
+        InstanceID: '{{ InstanceID }}'
+        AutoScalingGroupName: '{{ AutoScalingGroupName }}'
+        Region: '{{ Region }}'
+      Script: |
+        import boto3
+        from botocore.exceptions import ClientError
+
+        def script_handler(event, context):
+            try:
+                instance_id = event.get('InstanceID')
+                asg_name = event.get('AutoScalingGroupName')
+                region = event.get('Region')
+
+                if not instance_id:
+                    raise ValueError("FAILURE: InstanceID parameter is missing.")
+                if not asg_name:
+                    raise ValueError("FAILURE: AutoScalingGroupName parameter is missing.")
+                if not region:
+                    raise ValueError("FAILURE: Region parameter is missing.")
+
+                asg_client = boto3.client('autoscaling', region_name=region)
+
+                try:
+                    response = asg_client.describe_auto_scaling_groups(AutoScalingGroupNames=[asg_name])
+                    asg_instances = []
+                    
+                    for asg in response.get('AutoScalingGroups', []):
+                        asg_instances.extend(asg.get('Instances', []))
+                    
+                    attached_instances = [inst['InstanceId'] for inst in asg_instances]
+
+                    if instance_id not in attached_instances:
+                        raise ValueError(f"FAILURE: Instance {instance_id} is NOT part of Auto Scaling Group {asg_name}, no action needed.")
+
+                except ClientError as e:
+                    raise Exception(f"FAILURE: Unable to verify instance membership in ASG: {str(e)}")
+
+                try:
+                    asg_client.detach_instances(
+                        InstanceIds=[instance_id],
+                        AutoScalingGroupName=asg_name,
+                        ShouldDecrementDesiredCapacity=True
+                    )
+                except ClientError as e:
+                    if "min-size" in str(e) or "desired-size" in str(e):
+                        try:
+                            asg_client.update_auto_scaling_group(
+                                AutoScalingGroupName=asg_name,
+                                MinSize=0
+                            )
+                            asg_client.detach_instances(
+                                InstanceIds=[instance_id],
+                                AutoScalingGroupName=asg_name,
+                                ShouldDecrementDesiredCapacity=True
+                            )
+                        except ClientError as inner_e:
+                            raise Exception(f"Retry failed after adjusting capacity: {str(inner_e)}")
+                    else:
+                        raise Exception(f"Unable to detach instance {instance_id} from ASG {asg_name}: {str(e)}")
+
+                print(f"Instance {instance_id} was successfully detached from Auto Scaling Group {asg_name} in {region}.")
+
+            except Exception as e:
+                raise Exception(f"Unexpected error encountered while detaching instance from ASG, handled exception: {str(e)}")

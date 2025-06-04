@@ -1,0 +1,91 @@
+schemaVersion: '0.3'
+description: |
+  This runbook isolates an ECS task by modifying its security group to an isolated one.
+  It retrieves the current SG, checks the associated VPC, creates an isolated SG if needed, and attaches it to the ECS task.
+assumeRole: '{{AutomationAssumeRole}}'
+parameters:
+  AutomationAssumeRole:
+    type: String
+    description: (Optional) The ARN of the role that allows Automation to perform the actions on your behalf.
+    default: ''
+  ClusterArn:
+    type: String
+    description: (Required) The name of the ECS cluster.
+  ServiceName:
+    type: String
+    description: (Required) The name of the ECS service to be isolated.
+  Region:
+    type: String
+    description: (Required) The AWS region where the ECS service is located.
+mainSteps:
+  - name: IsolateEcsService
+    action: aws:executeScript
+    isEnd: true
+    inputs:
+      Runtime: python3.11
+      Handler: main
+      InputPayload:
+        ClusterArn: '{{ ClusterArn }}'
+        ServiceName: '{{ ServiceName }}'
+        Region: '{{ Region }}'
+      Script: |
+        import boto3
+
+        def main(events, context):
+            try:
+                ecs_client = boto3.client('ecs', region_name=events['Region'])
+                ec2_client = boto3.client('ec2', region_name=events['Region'])
+                
+                cluster_arn = events['ClusterArn']
+                cluster_name = cluster_arn.split('/')[-1]
+                service_name = events['ServiceName']
+                isolation_sg_name = "stream-deny"
+
+                service = ecs_client.describe_services(cluster=cluster_name, services=[service_name])['services'][0]
+                network_config = service.get('networkConfiguration', {}).get('awsvpcConfiguration', {})
+                security_groups = network_config.get('securityGroups', [])
+
+                if not security_groups:
+                    raise ValueError(f"No Security Group found for ECS service '{service_name}'.")
+
+                sg_info = ec2_client.describe_security_groups(GroupIds=[security_groups[0]])['SecurityGroups'][0]
+                vpc_id = sg_info['VpcId']
+
+                existing_isolation_sg = ec2_client.describe_security_groups(Filters=[
+                    {"Name": "vpc-id", "Values": [vpc_id]},
+                    {"Name": "group-name", "Values": [isolation_sg_name]}
+                ])['SecurityGroups']
+
+                if existing_isolation_sg:
+                    isolation_sg_id = existing_isolation_sg[0]['GroupId']
+                else:
+                    sg_response = ec2_client.create_security_group(
+                        Description='Isolated Security Group for ECS',
+                        GroupName=isolation_sg_name,
+                        VpcId=vpc_id
+                    )
+                    isolation_sg_id = sg_response['GroupId']
+
+                sg_details = ec2_client.describe_security_groups(GroupIds=[isolation_sg_id])['SecurityGroups'][0]
+                ingress_rules = sg_details.get('IpPermissions', [])
+                egress_rules = sg_details.get('IpPermissionsEgress', [])
+                if ingress_rules:
+                    ec2_client.revoke_security_group_ingress(GroupId=isolation_sg_id, IpPermissions=ingress_rules)
+                if egress_rules:
+                    ec2_client.revoke_security_group_egress(GroupId=isolation_sg_id, IpPermissions=egress_rules)
+                
+                ecs_client.update_service(
+                    cluster=cluster_name,
+                    service=service_name,
+                    networkConfiguration={
+                        'awsvpcConfiguration': {
+                            'subnets': network_config.get('subnets', []),
+                            'securityGroups': [isolation_sg_id],
+                            'assignPublicIp': network_config.get('assignPublicIp', 'DISABLED')
+                        }
+                    }
+                )
+                print(f"ECS Service '{service_name}' is now isolated with Security Group '{isolation_sg_id}'")
+
+            except Exception as e:
+                raise Exception(f"Failed to isolate ECS service '{service_name}': {str(e)}")
