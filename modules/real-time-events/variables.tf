@@ -17,7 +17,7 @@ variable "lambda_name" {
 variable "lambda_cloudwatch_memory_size" {
   description = "The amount of memory in MB to allocate to the lambda function"
   type        = number
-  default     = 128
+  default     = 256
 }
 
 variable "lambda_cloudwatch_timeout" {
