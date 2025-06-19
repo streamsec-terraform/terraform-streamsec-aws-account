@@ -73,7 +73,7 @@ mainSteps:
                     updated_roles.append(role_name)
                 else:
                     already_blocked_roles.append(role_name)
-
+            
             if not updated_roles:
               raise Exception(f"No updates made. The deny statement already exists in roles: {role_names}")
             print(

@@ -49,7 +49,7 @@ mainSteps:
                 marker = response.get("Marker")
             if not policies_arn:
               raise Exception(f"PoliciesArn is not attached to user name.")
-
+            
             return {"PoliciesArn": policies_arn}
     outputs:
       - Name: Status
@@ -80,13 +80,15 @@ mainSteps:
                raise Exception(f"PoliciesArn is not attached to user name.")
 
             iam = boto3.client('iam', region_name=region)
-
+            
             for policy in policies_arn:
               iam.detach_user_policy(UserName=user_name, PolicyArn=policy)
-
+            
             response = iam.list_attached_user_policies(UserName=user_name)
             if AttachedPolicies := response.get('AttachedPolicies'):
               attached_str = ', '.join([p['PolicyName'] for p in AttachedPolicies])
               raise Exception(f"Failed to detach all policies for user {user_name}. Still attached policies: {attached_str}")
             else:
               print(f"Successfully detached all policies for user {user_name}.")
+            
+              

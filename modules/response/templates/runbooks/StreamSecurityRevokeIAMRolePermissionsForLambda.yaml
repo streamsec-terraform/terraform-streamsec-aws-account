@@ -125,7 +125,7 @@ mainSteps:
 
             lambda_client = boto3.client('lambda', region_name=region)
             print(f"Updating Lambda function {function_name} with new role {new_role_arn}")
-
+            
             lambda_client.update_function_configuration(
                 FunctionName=function_name,
                 Role=new_role_arn

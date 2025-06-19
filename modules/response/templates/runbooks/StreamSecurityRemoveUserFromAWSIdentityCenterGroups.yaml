@@ -47,8 +47,8 @@ mainSteps:
             memberships = response.get('GroupMemberships', [])
             if not memberships:
                 raise Exception(f"No group memberships found for user {user_id}")
-
-
+            
+            
             groups_id = []
             for membership in memberships:
                 membership_id = membership.get('MembershipId')
@@ -59,6 +59,6 @@ mainSteps:
                     MembershipId=membership_id
                 )
                 groups_id.append(group_id)
-
+  
 
             print(f"Finished removing user {user_id} from all groups {groups_id}.")

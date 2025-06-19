@@ -36,9 +36,9 @@ mainSteps:
             if not response.get('InstanceProfile'):
               raise Exception(f"Instance profile '{profile_name}' was not found")
             role_name = response['InstanceProfile']['Roles'][0]['RoleName']
-
+            
             return {"RoleName": role_name}
-
+           
 
     outputs:
       - Name: Status
@@ -74,11 +74,13 @@ mainSteps:
                     }
                 ]
             }
-
+           
             iam.put_role_policy(
                 RoleName=role_name,
                 PolicyName="DenyAllStream",
                 PolicyDocument=json.dumps(deny_all_policy)
             )
-
+            
             print(f"'Deny All' policy attached to {role_name}")
+            
+           

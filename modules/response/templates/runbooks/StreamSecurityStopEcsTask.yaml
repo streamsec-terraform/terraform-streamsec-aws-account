@@ -31,18 +31,18 @@ mainSteps:
         Region: '{{ Region }}'
       Script: |
         import boto3
-
+        
         def main(event, context):
             ecs_client = boto3.client('ecs', region_name=event['Region'])
             cluster_arn = event.get('ClusterArn')
             cluster_name = cluster_arn.split("/")[-1]
             task_arn = event.get('TaskArn')
-
+            
             if not cluster_name:
                 raise ValueError("'ClusterName' parameter is required.")
             if not task_arn:
                 raise ValueError("'TaskArn' parameter is required.")
-
+            
             try:
                 ecs_client.stop_task(
                     cluster=cluster_name,

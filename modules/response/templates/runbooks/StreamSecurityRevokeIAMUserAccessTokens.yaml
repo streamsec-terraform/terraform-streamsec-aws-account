@@ -47,11 +47,12 @@ mainSteps:
                 }
               ]
             }
-
+  
             iam.put_user_policy(
                 UserName=user_name,
                 PolicyName=policy_name,
                 PolicyDocument=json.dumps(policy_doc)
             )
-
+      
             print(f"Policy {policy_name} attached to user {user_name}")
+            

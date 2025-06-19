@@ -50,10 +50,10 @@ mainSteps:
                 try:
                     response = asg_client.describe_auto_scaling_groups(AutoScalingGroupNames=[asg_name])
                     asg_instances = []
-
+                    
                     for asg in response.get('AutoScalingGroups', []):
                         asg_instances.extend(asg.get('Instances', []))
-
+                    
                     attached_instances = [inst['InstanceId'] for inst in asg_instances]
 
                     if instance_id not in attached_instances:

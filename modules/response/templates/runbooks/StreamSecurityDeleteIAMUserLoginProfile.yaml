@@ -27,7 +27,7 @@ mainSteps:
         import boto3
 
         def main(events, context):
-            user_name = events.get("UserName", "")
+            user_name = events.get("UserName", "")  
             region = events.get('Region')
 
             iam = boto3.client('iam', region_name=region)
@@ -35,5 +35,5 @@ mainSteps:
                 raise ValueError("ERROR: 'UserName' parameter is required.")
 
             iam.delete_login_profile(UserName=user_name)
-
+            
             print(f"Login profile for user '{user_name}' deleted successfully.")

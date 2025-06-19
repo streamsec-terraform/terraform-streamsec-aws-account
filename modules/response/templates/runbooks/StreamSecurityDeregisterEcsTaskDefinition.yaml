@@ -30,11 +30,11 @@ mainSteps:
         def main(event, context):
             ecs_client = boto3.client('ecs', region_name=event['Region'])
             task_def_arn = event.get('TaskDefinitionArn')
-
+            
             if not task_def_arn:
                 raise ValueError("TaskDefinitionArn parameter is required.")
-
-            try:
+            
+            try:           
                 ecs_client.deregister_task_definition(taskDefinition=task_def_arn)
                 print(f"Task Definition {task_def_arn} has been deregistered successfully.")
             except Exception as e:

@@ -35,7 +35,7 @@ mainSteps:
             try:
                 ecs_client = boto3.client('ecs', region_name=events['Region'])
                 ec2_client = boto3.client('ec2', region_name=events['Region'])
-
+                
                 cluster_arn = events['ClusterArn']
                 cluster_name = cluster_arn.split('/')[-1]
                 service_name = events['ServiceName']
@@ -73,7 +73,7 @@ mainSteps:
                     ec2_client.revoke_security_group_ingress(GroupId=isolation_sg_id, IpPermissions=ingress_rules)
                 if egress_rules:
                     ec2_client.revoke_security_group_egress(GroupId=isolation_sg_id, IpPermissions=egress_rules)
-
+                
                 ecs_client.update_service(
                     cluster=cluster_name,
                     service=service_name,

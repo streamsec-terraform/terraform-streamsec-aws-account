@@ -28,20 +28,20 @@ mainSteps:
         Region: "{{ Region }}"
       Script: |
         import boto3
-
+        
         def main(events, context):
             """Fetches inline policies attached to the IAM Role"""
             region = events.get("Region", "")
             role_name = events.get("RoleName", "")
             role_client = boto3.client('iam', region_name=region)
-
+            
             response = role_client.list_role_policies(RoleName=role_name)
             policy_names = response.get('PolicyNames',[])
             if not policy_names:
               raise Exception(f"No Policy attached to Iam Role {role_name}")
-
+        
             return { "PolicyNames": policy_names }
-
+            
 
     outputs:
       - Name: Status
@@ -66,7 +66,7 @@ mainSteps:
         Region: "{{ Region }}"
       Script: |
         import boto3
-
+        
         def main(events, context):
             policy_names = events.get("PolicyNames", [])
             role_name = events.get("RoleName", "")
@@ -76,7 +76,7 @@ mainSteps:
             for policy in policy_names:
               iam_client.delete_role_policy(
                   RoleName=role_name, PolicyName=policy)
-
+            
             remaining_policies = iam_client.list_role_policies(RoleName=role_name).get("PolicyNames", [])
             if remaining_policies:
               for policy in policy_names:
@@ -84,8 +84,12 @@ mainSteps:
                   policy_not_succeed_to_delete.append(policy)
                 else:
                   deleted_policies.append(policy)
-
+              
             if deleted_policies:
                 print(f"Successfully deleted policies: {', '.join(deleted_policies)}")
             if failed_policies:
                  raise Exception(f"Failed to delete policies: {', '.join(failed_policies)}")
+            
+            
+            
+              

@@ -40,7 +40,7 @@ mainSteps:
             load_balancer_names = [load_balancer_names] if isinstance(load_balancer_names, str) else load_balancer_names
             lbs = client.describe_load_balancers(LoadBalancerNames=load_balancer_names)
             associated_lbs = []
-
+        
             for lb in lbs.get('LoadBalancerDescriptions', []):
                 instances = [inst['InstanceId'] for inst in lb.get('Instances', [])]
                 if instance_id in instances:
@@ -88,9 +88,9 @@ mainSteps:
 
             success = []
             still_registered = []
-
+        
             print(f"Deregistering {len(lb_names)} load balancer(s) from instance {instance_id}")
-
+            
             for lb_name in lb_names:
                 client.deregister_instances_from_load_balancer(
                     LoadBalancerName=lb_name,
@@ -98,9 +98,9 @@ mainSteps:
                 )
 
             time.sleep(60)
-
+            
             print(f"Validating instance {instance_id} deregistration from load balancers {lb_names}")
-
+        
             for lb_name in lb_names:
                 resp = client.describe_load_balancers(LoadBalancerNames=[lb_name])
                 instances = [inst['InstanceId'] for inst in resp['LoadBalancerDescriptions'][0]['Instances']]

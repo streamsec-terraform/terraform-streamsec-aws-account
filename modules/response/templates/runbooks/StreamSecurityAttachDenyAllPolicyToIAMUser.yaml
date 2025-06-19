@@ -45,7 +45,7 @@ mainSteps:
                 ]
             }
             iam.put_user_policy( UserName=user_name,PolicyName='denyAllStream',PolicyDocument=json.dumps(deny_policy))
-
+            
             user_policies = iam.list_user_policies(UserName=user_name)
             inline_policies = user_policies.get('PolicyNames', [])
             if 'denyAllStream' in inline_policies:

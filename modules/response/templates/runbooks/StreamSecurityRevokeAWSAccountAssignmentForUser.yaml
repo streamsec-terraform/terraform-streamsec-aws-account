@@ -36,7 +36,7 @@ mainSteps:
       Script: |
         import boto3
         import time
-
+        
         def main(events, context):
             user_id = events['UserId']
             instance_arn = events['InstanceArn']
@@ -44,9 +44,9 @@ mainSteps:
             region = events['Region']
             identity_store = boto3.client('identitystore', region_name=region)
             sso_admin = boto3.client('sso-admin', region_name=region)
-
+            
             # Step 1: Remove user from all groups
-
+            
             response = identity_store.list_group_memberships_for_member(
                 IdentityStoreId=identity_store_id,
                 MemberId={'UserId': user_id}
@@ -65,9 +65,9 @@ mainSteps:
                 removed_groups.append(group_id)
             if removed_groups:
               print(f"Removed user {user_id} from groups: {removed_groups}")
-
+          
             # Step 2: Revoke AWS account assignments
-
+            
             response = sso_admin.list_account_assignments_for_principal(
                 InstanceArn=instance_arn,
                 PrincipalType='USER',
@@ -94,19 +94,21 @@ mainSteps:
                 )
 
                 revoked.append(account_id)
-
+            
             # Step 3: Verification
-
+            
             time.sleep(10)
-
+        
             response = sso_admin.list_account_assignments_for_principal(
                 InstanceArn=instance_arn,
                 PrincipalId=user_id,
                 PrincipalType='USER'
             )
-
+            
             assignments = response.get('AccountAssignments', [])
             if assignments:
                 raise Exception(f"Verification failed: user {user_id} still has assignments: {assignments}")
 
             print(f"Verification passed: user {user_id} has no assignments.")
+            
+

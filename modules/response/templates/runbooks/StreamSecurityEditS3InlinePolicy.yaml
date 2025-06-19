@@ -34,7 +34,7 @@ mainSteps:
             # Ensure we have a valid policy string
             if not policy_str_list:
                 raise ValueError(f"BucketPolicy parameter is empty! {policy_str_list}")
-
+        
             # Decode the JSON string
             try:
                 policy = json.loads(policy_str_list)  # Convert from stringified JSON to a dictionary

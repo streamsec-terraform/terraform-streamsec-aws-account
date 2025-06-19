@@ -61,12 +61,12 @@ mainSteps:
             region = events['Region']
             user_name = events['UserName']
             group_names = events['GroupNames']
-
+            
             iam = boto3.client('iam', region_name=region)
-
+            
             for group in group_names:
               iam.remove_user_from_group(UserName=user_name, GroupName=group)
-
+            
             # Verify removal
             response = iam.list_groups_for_user(UserName=user_name)
             if response.get('Groups', []):

@@ -1,6 +1,6 @@
 schemaVersion: '0.3'
 description: |
-  This runbook checks the target health of an EC2 instance within a target group and deregisters it if it is registered.
+  This runbook checks the target health of an EC2 instance within a target group and deregisters it if it is registered. 
   It uses Boto3 to interact with AWS services.
 assumeRole: '{{ AutomationAssumeRole }}'
 parameters:
@@ -27,14 +27,14 @@ mainSteps:
         Region: '{{ Region }}'
       Script: |
         import boto3
-
+        
         def main(events, context):
             region = events['Region']
             instance_id = events['InstanceID']
-
+            
             client = boto3.client('elbv2', region_name=region)
-
-
+            
+            
             target_groups  = client.describe_target_groups()
             associated_target_groups = []
             for tg in target_groups.get('TargetGroups',[]):
@@ -43,7 +43,7 @@ mainSteps:
               for target in response['TargetHealthDescriptions']:
                   if target['Target']['Id'] == instance_id:
                       associated_target_groups.append(target_group_arn)
-                      break
+                      break  
             if associated_target_groups:
                 return {
                     "InstanceRegistered": True,
@@ -77,21 +77,21 @@ mainSteps:
       Script: |
         import boto3
         import time
-
+                
         def main(events, context):
             if not events.get("InstanceRegistered", False):
                raise Exception(f"Instance is not registered in any target group.")
-
+            
             region = events['Region']
             instance_id = events['InstanceID']
             target_group_arns = events['TargetGroupArns']
-
+            
             client = boto3.client('elbv2', region_name=region)
             # Deregister the instance from all associated target groups
             target_group_success = []
             target_group_failed = []
             for target_group_arn in target_group_arns:
-
+                
                 client.deregister_targets(
                     TargetGroupArn=target_group_arn,
                     Targets=[{'Id': instance_id}]
@@ -100,7 +100,7 @@ mainSteps:
             still_registered = []
             for target_group_arn in target_group_arns:
                 response = client.describe_target_health(TargetGroupArn=target_group_arn)
-
+                
                 for target in response.get('TargetHealthDescriptions', []):
                     if target['Target']['Id'] == instance_id:
                         still_registered.append(target_group_arn)
@@ -109,6 +109,7 @@ mainSteps:
 
             if target_group_success:
               print( f"Instance {instance_id} deregistered successfully from those {target_group_success}.")
-
+            
             if still_registered:
               raise Exception(f" Instance {instance_id} is still registered in: {', '.join(still_registered)}")
+            
