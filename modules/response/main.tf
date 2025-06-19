@@ -5,7 +5,13 @@ data "streamsec_aws_account" "this" {
 }
 
 locals {
-  runbook_config = yamldecode(file("${path.module}/templates/runbook_config.yaml"))
+  runbook_config_all = yamldecode(file("${path.module}/templates/runbook_config.yaml"))
+  runbook_config = {
+    Remediations = [
+      for remediation in local.runbook_config_all.Remediations :
+      remediation if(lookup(remediation, "cloud_provider", "aws") == "aws")
+    ]
+  }
 }
 
 # Generate random external ID
