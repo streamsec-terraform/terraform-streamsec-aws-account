@@ -327,6 +327,7 @@ resource "aws_cur_report_definition" "cur_report_definition" {
   additional_schema_elements = ["RESOURCES"]
   s3_bucket                  = data.aws_s3_bucket.cost_bucket.bucket
   s3_region                  = "us-east-1"
+  s3_prefix                  = var.cur_prefix
 }
 
 resource "streamsec_aws_cost_ack" "this" {
