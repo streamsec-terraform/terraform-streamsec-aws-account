@@ -264,7 +264,7 @@ resource "aws_s3_bucket_notification" "cost_s3_lambda_trigger" {
 
 moved {
   from = aws_s3_bucket_notification.cost_s3_lambda_trigger
-  to   = aws_s3_bucket_event_notification.cost_s3_lambda_trigger[0]
+  to   = aws_s3_bucket_notification.cost_s3_lambda_trigger[0]
 }
 
 resource "aws_s3_bucket_notification" "bucket_notification" {
