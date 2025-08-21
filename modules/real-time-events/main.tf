@@ -117,7 +117,7 @@ resource "aws_lambda_function" "streamsec_real_time_events_lambda" {
   environment {
     variables = {
       SECRET_NAME = aws_secretsmanager_secret.streamsec_collection_secret.name
-      API_URL     = var.enable_privatelink && module.streamsec_account.privatelink_dns_entries[0].dns_name != null ? "https://${module.streamsec_account.privatelink_dns_entries[0].dns_name}" : data.streamsec_host.this.url
+      API_URL     = var.enable_privatelink && module.privatelink.privatelink_dns_entries[0].dns_name != null ? "https://${module.privatelink.privatelink_dns_entries[0].dns_name}" : data.streamsec_host.this.url
       ENV         = "production"
       NODE_ENV    = "production"
     }
