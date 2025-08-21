@@ -7,7 +7,15 @@ resource "aws_security_group" "streamsec_privatelink" {
   name_prefix = "streamsec-privatelink-"
   vpc_id      = var.vpc_id
   description = "Allow HTTPS to StreamSecurity PrivateLink endpoint"
-
+  
+  ingress {
+    description = "HTTPS to VPCE ENI targets"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  
   egress {
     description = "HTTPS to VPCE ENI targets"
     from_port   = 443
