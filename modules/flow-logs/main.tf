@@ -7,6 +7,17 @@ data "streamsec_aws_account" "this" {
 
 locals {
   lambda_source_code_bucket = "${var.lambda_source_code_bucket_prefix}-${data.aws_region.current.name}"
+
+  # If the privatelink module/output is null (e.g., disabled or not yet created), fall back to empty list
+  _pl_dns_entries = coalesce(module.privatelink.lightlytics_endpoint, null)
+
+  # Safely pick first dns_name if present; otherwise null
+  _pl_dns_name = length(local._pl_dns_entries) > 0 ? module.privatelink.lightlytics_endpoint : null
+
+  # Final API URL: use PrivateLink only when enabled *and* we have a DNS name
+  effective_api_url = (
+    var.enable_privatelink && local._pl_dns_name != null
+  ) ? "https://${local._pl_dns_name}" : data.streamsec_host.this.url
 }
 
 ################################################################################
@@ -114,13 +125,13 @@ resource "aws_lambda_function" "streamsec_flowlogs_lambda" {
   layers        = [aws_lambda_layer_version.streamsec_lambda_layer.arn]
 
   vpc_config {
-    subnet_ids         = var.lambda_subnet_ids
-    security_group_ids = var.lambda_security_group_ids
+    subnet_ids         = var.enable_privatelink && var.private_subnet_ids != null ? var.private_subnet_ids : var.lambda_subnet_ids
+    security_group_ids = var.enable_privatelink ? concat(var.lambda_security_group_ids, [module.privatelink.privatelink_security_group_id]) : var.lambda_security_group_ids
   }
 
   environment {
     variables = {
-      API_URL     = data.streamsec_host.this.url
+      API_URL     = local.effective_api_url
       SECRET_NAME = var.collection_flowlogs_token_secret_name
       BATCH_SIZE  = var.lambda_batch_size
       ENV         = "production"
