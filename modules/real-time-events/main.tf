@@ -18,10 +18,10 @@ locals {
   compatible_runtimes = [var.lambda_runtime]
 
   # If the privatelink module/output is null (e.g., disabled or not yet created), fall back to empty list
-  _pl_dns_entries = coalesce(module.privatelink.privatelink_dns_entries, [])
+  _pl_dns_entries = coalesce(module.privatelink.lightlytics_endpoint, [])
 
   # Safely pick first dns_name if present; otherwise null
-  _pl_dns_name = length(local._pl_dns_entries) > 0 ? local._pl_dns_entries[0].dns_name : null
+  _pl_dns_name = length(local._pl_dns_entries) > 0 ? module.privatelink.lightlytics_endpoint : null
 
   # Final API URL: use PrivateLink only when enabled *and* we have a DNS name
   effective_api_url = (
