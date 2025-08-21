@@ -17,6 +17,17 @@ locals {
 
   compatible_runtimes = [var.lambda_runtime]
 
+  # If the privatelink module/output is null (e.g., disabled or not yet created), fall back to empty list
+  _pl_dns_entries = coalesce(module.privatelink.privatelink_dns_entries, [])
+
+  # Safely pick first dns_name if present; otherwise null
+  _pl_dns_name = length(local._pl_dns_entries) > 0 ? local._pl_dns_entries[0].dns_name : null
+
+  # Final API URL: use PrivateLink only when enabled *and* we have a DNS name
+  effective_api_url = (
+    var.enable_privatelink && local._pl_dns_name != null
+  ) ? "https://${local._pl_dns_name}" : data.streamsec_host.this.url
+
 }
 
 ################################################################################
@@ -117,7 +128,7 @@ resource "aws_lambda_function" "streamsec_real_time_events_lambda" {
   environment {
     variables = {
       SECRET_NAME = aws_secretsmanager_secret.streamsec_collection_secret.name
-      API_URL     = var.enable_privatelink && module.privatelink.privatelink_dns_entries[0].dns_name != null ? "https://${module.privatelink.privatelink_dns_entries[0].dns_name}" : data.streamsec_host.this.url
+      API_URL     = local.effective_api_url
       ENV         = "production"
       NODE_ENV    = "production"
     }
