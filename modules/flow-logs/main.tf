@@ -247,3 +247,12 @@ resource "aws_s3_bucket_lifecycle_configuration" "flowlogs_bucket_config" {
     status = var.flowlogs_bucket_lifecycle_rule[0].status
   }
 }
+
+################################################################################
+# Private Link
+################################################################################
+resource "aws_iam_role_policy_attachment" "lambda_vpc_access" {
+  count      = var.enable_privatelink ? 1 : 0
+  role       = aws_iam_role.lambda_execution_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+}
