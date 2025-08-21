@@ -110,8 +110,8 @@ resource "aws_lambda_function" "streamsec_real_time_events_lambda" {
   layers        = [aws_lambda_layer_version.streamsec_lambda_layer.arn]
 
   vpc_config {
-    subnet_ids         = var.enable_privatelink && var.private_subnet_ids != null ? private_subnet_ids : var.lambda_subnet_ids
-    security_group_ids = var.enable_privatelink && var.privatelink_security_group_id != null ? privatelink_security_group_id : var.lambda_security_group_ids
+    subnet_ids         = var.enable_privatelink && var.private_subnet_ids != null ? var.private_subnet_ids : var.lambda_subnet_ids
+    security_group_ids = var.enable_privatelink && var.privatelink_security_group_id != null ? var.privatelink_security_group_id : var.lambda_security_group_ids
   }
 
   environment {
