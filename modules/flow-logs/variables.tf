@@ -139,7 +139,7 @@ variable "lambda_policy_path" {
 ################################################################################
 
 variable "create_flowlogs_bucket" {
-  description = "Whether to create an S3 bucket to store the flow logs"
+  description = "Whether to create an S3 bucket to store the flow logs (using this will also create the flow logs)"
   type        = bool
   default     = false
 }
