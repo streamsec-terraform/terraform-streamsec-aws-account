@@ -34,7 +34,7 @@ resource "aws_vpc_endpoint" "streamsec" {
   vpc_endpoint_type   = "Interface"
   subnet_ids          = var.private_subnet_ids
   private_dns_enabled = var.enable_privatelink_private_dns
-  security_group_ids  = [local._pl_sg_id]
+  security_group_ids  = [local.pl_sg_id]
 
   tags = merge(
     { Name = "streamsec-privatelink" },

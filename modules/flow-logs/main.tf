@@ -9,12 +9,12 @@ locals {
   lambda_source_code_bucket = "${var.lambda_source_code_bucket_prefix}-${data.aws_region.current.name}"
 
   # Use the privatelink endpoint if available, otherwise null
-  _pl_dns_name = module.privatelink.lightlytics_endpoint
+  pl_dns_name = module.privatelink.streamsec_endpoint
 
   # Final API URL: use PrivateLink only when enabled *and* we have a DNS name
   effective_api_url = (
-    var.enable_privatelink && local._pl_dns_name != null
-  ) ? "https://${local._pl_dns_name}" : data.streamsec_host.this.url
+    var.enable_privatelink && local.pl_dns_name != null
+  ) ? "https://${local.pl_dns_name}" : data.streamsec_host.this.url
 }
 
 ################################################################################

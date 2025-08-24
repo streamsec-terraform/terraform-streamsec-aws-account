@@ -13,12 +13,12 @@ output "privatelink_dns_entries" {
 }
 
 output "privatelink_security_group_id" {
-  value       = local._pl_sg_id
+  value       = local.pl_sg_id
   description = "Security Group used for PrivateLink"
 }
 
 # Output the extracted DNS name
-output "lightlytics_endpoint" {
-  description = "The Lightlytics DNS endpoint for the VPC Endpoint"
-  value       = local.lightlytics_dns
+output "streamsec_endpoint" {
+  description = "The StreamSecurity DNS endpoint for the VPC Endpoint"
+  value       = local.streamsec_dns
 }
