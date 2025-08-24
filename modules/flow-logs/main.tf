@@ -8,8 +8,11 @@ data "streamsec_aws_account" "this" {
 locals {
   lambda_source_code_bucket = "${var.lambda_source_code_bucket_prefix}-${data.aws_region.current.name}"
 
-  # Use the privatelink endpoint if available, otherwise null
-  _pl_dns_name = module.privatelink.lightlytics_endpoint
+  # If the privatelink module/output is null (e.g., disabled or not yet created), fall back to empty list
+  _pl_dns_entries = coalesce(module.privatelink.lightlytics_endpoint, null)
+
+  # Safely pick first dns_name if present; otherwise null
+  _pl_dns_name = length(local._pl_dns_entries) > 0 ? module.privatelink.lightlytics_endpoint : null
 
   # Final API URL: use PrivateLink only when enabled *and* we have a DNS name
   effective_api_url = (
