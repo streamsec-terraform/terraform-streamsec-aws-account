@@ -7,6 +7,14 @@ data "streamsec_aws_account" "this" {
 
 locals {
   lambda_source_code_bucket = "${var.lambda_source_code_bucket_prefix}-${data.aws_region.current.name}"
+
+  # Use the privatelink endpoint if available, otherwise null
+  pl_dns_name = module.privatelink.streamsec_endpoint
+
+  # Final API URL: use PrivateLink only when enabled *and* we have a DNS name
+  effective_api_url = (
+    var.enable_privatelink && local.pl_dns_name != null
+  ) ? "https://${local.pl_dns_name}" : data.streamsec_host.this.url
 }
 
 ################################################################################
@@ -114,13 +122,13 @@ resource "aws_lambda_function" "streamsec_flowlogs_lambda" {
   layers        = [aws_lambda_layer_version.streamsec_lambda_layer.arn]
 
   vpc_config {
-    subnet_ids         = var.lambda_subnet_ids
-    security_group_ids = var.lambda_security_group_ids
+    subnet_ids         = var.enable_privatelink && var.private_subnet_ids != null ? var.private_subnet_ids : var.lambda_subnet_ids
+    security_group_ids = var.enable_privatelink ? concat(var.lambda_security_group_ids, [module.privatelink.privatelink_security_group_id]) : var.lambda_security_group_ids
   }
 
   environment {
     variables = {
-      API_URL     = data.streamsec_host.this.url
+      API_URL     = local.effective_api_url
       SECRET_NAME = var.collection_flowlogs_token_secret_name
       BATCH_SIZE  = var.lambda_batch_size
       ENV         = "production"
@@ -235,4 +243,13 @@ resource "aws_s3_bucket_lifecycle_configuration" "flowlogs_bucket_config" {
     }
     status = var.flowlogs_bucket_lifecycle_rule[0].status
   }
+}
+
+################################################################################
+# Private Link
+################################################################################
+resource "aws_iam_role_policy_attachment" "lambda_vpc_access" {
+  count      = var.enable_privatelink ? 1 : 0
+  role       = aws_iam_role.lambda_execution_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
 }

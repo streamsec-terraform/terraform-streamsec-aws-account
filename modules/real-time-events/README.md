@@ -17,7 +17,9 @@
 
 ## Modules
 
-No modules.
+| Name | Source | Version |
+|------|--------|---------|
+| <a name="module_privatelink"></a> [privatelink](#module\_privatelink) | ../private-link | n/a |
 
 ## Resources
 
@@ -29,6 +31,7 @@ No modules.
 | [aws_iam_role.lambda_execution_role](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
 | [aws_iam_role_policy_attachment.lambda_basic_execution_role_policy_attachment](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_iam_role_policy_attachment.lambda_exec_policy_attachment](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
+| [aws_iam_role_policy_attachment.lambda_vpc_access](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_lambda_function.streamsec_real_time_events_lambda](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_function) | resource |
 | [aws_lambda_function_event_invoke_config.streamsec_options_cloudwatch](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_function_event_invoke_config) | resource |
 | [aws_lambda_layer_version.streamsec_lambda_layer](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_layer_version) | resource |
@@ -46,11 +49,13 @@ No modules.
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
 | <a name="input_cloudwatch_event_rules_prefix"></a> [cloudwatch\_event\_rules\_prefix](#input\_cloudwatch\_event\_rules\_prefix) | Prefix to use for the CloudWatch event rules | `string` | `"streamsec-"` | no |
+| <a name="input_enable_privatelink"></a> [enable\_privatelink](#input\_enable\_privatelink) | Create an Interface VPC Endpoint for StreamSecurity | `bool` | `false` | no |
+| <a name="input_enable_privatelink_private_dns"></a> [enable\_privatelink\_private\_dns](#input\_enable\_privatelink\_private\_dns) | Enable Private DNS on the VPC Endpoint (recommended) | `bool` | `true` | no |
 | <a name="input_iam_policy_tags"></a> [iam\_policy\_tags](#input\_iam\_policy\_tags) | A map of additional tags to add to the IAM policy created | `map(string)` | `{}` | no |
 | <a name="input_lambda_cloudwatch_max_event_age"></a> [lambda\_cloudwatch\_max\_event\_age](#input\_lambda\_cloudwatch\_max\_event\_age) | The maximum age of a request that Lambda sends to a function for processing, in seconds | `number` | `21600` | no |
 | <a name="input_lambda_cloudwatch_max_retry"></a> [lambda\_cloudwatch\_max\_retry](#input\_lambda\_cloudwatch\_max\_retry) | The maximum number of times to retry when the function returns an error | `number` | `2` | no |
 | <a name="input_lambda_cloudwatch_memory_size"></a> [lambda\_cloudwatch\_memory\_size](#input\_lambda\_cloudwatch\_memory\_size) | The amount of memory in MB to allocate to the lambda function | `number` | `256` | no |
-| <a name="input_lambda_cloudwatch_s3_source_code_key"></a> [lambda\_cloudwatch\_s3\_source\_code\_key](#input\_lambda\_cloudwatch\_s3\_source\_code\_key) | The S3 key for the lambda source code | `string` | `"4f9189e262201912b0b9b86fdf6ffebb"` | no |
+| <a name="input_lambda_cloudwatch_s3_source_code_key"></a> [lambda\_cloudwatch\_s3\_source\_code\_key](#input\_lambda\_cloudwatch\_s3\_source\_code\_key) | The S3 key for the lambda source code | `string` | `"9cf1709dd6146fb541e090981f983c1d"` | no |
 | <a name="input_lambda_cloudwatch_timeout"></a> [lambda\_cloudwatch\_timeout](#input\_lambda\_cloudwatch\_timeout) | The amount of time in seconds the lambda function is allowed to run | `number` | `60` | no |
 | <a name="input_lambda_collection_secret_name"></a> [lambda\_collection\_secret\_name](#input\_lambda\_collection\_secret\_name) | The name of the secret to use for the lambda function | `string` | `"streamsec-collection-token"` | no |
 | <a name="input_lambda_iam_role_description"></a> [lambda\_iam\_role\_description](#input\_lambda\_iam\_role\_description) | Description to use on IAM role created | `string` | `"Stream Security IAM Role"` | no |
@@ -70,7 +75,12 @@ No modules.
 | <a name="input_lambda_source_code_bucket_prefix"></a> [lambda\_source\_code\_bucket\_prefix](#input\_lambda\_source\_code\_bucket\_prefix) | The prefix to use for the lambda source code bucket | `string` | `"prod-lightlytics-artifacts"` | no |
 | <a name="input_lambda_subnet_ids"></a> [lambda\_subnet\_ids](#input\_lambda\_subnet\_ids) | The subnet IDs to use for the lambda function | `list(string)` | `[]` | no |
 | <a name="input_lambda_tags"></a> [lambda\_tags](#input\_lambda\_tags) | A map of additional tags to add to the lambda function created | `map(string)` | `{}` | no |
+| <a name="input_private_subnet_ids"></a> [private\_subnet\_ids](#input\_private\_subnet\_ids) | Private subnet IDs for the Interface Endpoint | `list(string)` | `[]` | no |
+| <a name="input_privatelink_security_group_id"></a> [privatelink\_security\_group\_id](#input\_privatelink\_security\_group\_id) | Optional existing SG ID allowing egress 443 to the endpoint. If null, the module creates one. | `string` | `null` | no |
+| <a name="input_privatelink_service_name"></a> [privatelink\_service\_name](#input\_privatelink\_service\_name) | StreamSecurity AWS PrivateLink service name for your region (from StreamSecurity) | `string` | `null` | no |
+| <a name="input_privatelink_tags"></a> [privatelink\_tags](#input\_privatelink\_tags) | Tags for PrivateLink resources | `map(string)` | `{}` | no |
 | <a name="input_tags"></a> [tags](#input\_tags) | A map of global tags to add to all created resources | `map(string)` | `{}` | no |
+| <a name="input_vpc_id"></a> [vpc\_id](#input\_vpc\_id) | VPC ID where the Interface Endpoint will be created | `string` | `null` | no |
 
 ## Outputs
 

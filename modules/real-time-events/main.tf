@@ -17,6 +17,14 @@ locals {
 
   compatible_runtimes = [var.lambda_runtime]
 
+  # Use the privatelink endpoint if available, otherwise null
+  pl_dns_name = module.privatelink.streamsec_endpoint
+
+  # Final API URL: use PrivateLink only when enabled *and* we have a DNS name
+  effective_api_url = (
+    var.enable_privatelink && local.pl_dns_name != null
+  ) ? "https://${local.pl_dns_name}" : data.streamsec_host.this.url
+
 }
 
 ################################################################################
@@ -110,14 +118,14 @@ resource "aws_lambda_function" "streamsec_real_time_events_lambda" {
   layers        = [aws_lambda_layer_version.streamsec_lambda_layer.arn]
 
   vpc_config {
-    subnet_ids         = var.lambda_subnet_ids
-    security_group_ids = var.lambda_security_group_ids
+    subnet_ids         = var.enable_privatelink && var.private_subnet_ids != null ? var.private_subnet_ids : var.lambda_subnet_ids
+    security_group_ids = var.enable_privatelink ? concat(var.lambda_security_group_ids, [module.privatelink.privatelink_security_group_id]) : var.lambda_security_group_ids
   }
 
   environment {
     variables = {
       SECRET_NAME = aws_secretsmanager_secret.streamsec_collection_secret.name
-      API_URL     = data.streamsec_host.this.url
+      API_URL     = local.effective_api_url
       ENV         = "production"
       NODE_ENV    = "production"
     }
@@ -164,4 +172,13 @@ resource "streamsec_aws_real_time_events_ack" "this" {
   cloud_account_id = data.aws_caller_identity.current.account_id
   region           = data.aws_region.current.name
   depends_on       = [aws_lambda_permission.streamsec_allow_lambda_cloudwatch_invocation]
+}
+
+################################################################################
+# Private Link
+################################################################################
+resource "aws_iam_role_policy_attachment" "lambda_vpc_access" {
+  count      = var.enable_privatelink ? 1 : 0
+  role       = aws_iam_role.lambda_execution_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
 }
