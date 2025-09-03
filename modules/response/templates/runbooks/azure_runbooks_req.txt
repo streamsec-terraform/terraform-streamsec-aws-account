@@ -1,0 +1,14 @@
+azure.mgmt.authorization==0.61.0
+azure-common==1.1.28
+azure-core==1.34.0
+azure-identity==1.21.0
+azure-mgmt-authorization==4.0.0
+azure-mgmt-compute==34.1.0
+azure-mgmt-core==1.5.0
+azure-mgmt-network==19.1.0
+azure-mgmt-resource==21.2.1
+azure-mgmt-sql==3.0.1
+azure-mgmt-storage==21.1.0
+azure-mgmt-web==8.0.0
+azure-storage-blob==12.25.1
+msal==1.32.3

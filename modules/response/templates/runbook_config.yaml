@@ -1,6 +1,7 @@
 Remediations:
   - name: StreamSecurityDisablePublicAccessPolicy
     remediation_type: runbook
+    cloud_provider: aws
     runbook_owner: StreamSecurity
     description: Disable public access policy for S3 bucket
     policy_file_name: bucket_public_access_block.json
@@ -15,6 +16,7 @@ Remediations:
   - name: StreamSecurityDeleteS3Bucket
     description: Remove all files from S3 bucket and delete it
     remediation_type: runbook
+    cloud_provider: aws
     resource_type: s3_bucket
     runbook_owner: StreamSecurity
     policy_file_name: delete_s3_bucket_policy.json
@@ -31,6 +33,7 @@ Remediations:
     display_name: Delete IAM User Access Keys
     resource_type: iam_user
     remediation_type: runbook
+    cloud_provider: aws
     runbook_owner: StreamSecurity
     policy_file_name: delete_iam_access_key_policy.json
     Parameters:
@@ -49,6 +52,7 @@ Remediations:
     display_name: Stop EC2 Instance
     disabled_reason: Action is not applicable because the EC2 instance is not in a 'running' state.
     remediation_type: runbook
+    cloud_provider: aws
     resource_type: instance
     runbook_owner: AWS
     policy_file_name: stop_ec2_instance_policy.json
@@ -62,6 +66,7 @@ Remediations:
   - name: AWS-TerminateEC2Instance
     description: Terminate EC2 instance
     remediation_type: runbook
+    cloud_provider: aws
     resource_type: instance
     runbook_owner: AWS
     policy_file_name: terminate_ec2_instance_policy.json
@@ -75,6 +80,7 @@ Remediations:
   - name: AWS-ConfigureS3BucketVersioning
     description: Enable versioning for S3 bucket
     remediation_type: runbook
+    cloud_provider: aws
     resource_type: s3_bucket
     runbook_owner: AWS
     policy_file_name: configure_s3_bucket_versioning_policy.json
@@ -90,6 +96,7 @@ Remediations:
   - name: AWS-ReleaseElasticIP
     description: Release Elastic IP
     remediation_type: runbook
+    cloud_provider: aws
     resource_type: elastic_ip
     runbook_owner: AWS
     policy_file_name: release_elastic_ip_policy.json
@@ -103,6 +110,7 @@ Remediations:
     description: Delete IAM access key
     resource_type: iam_access_key
     remediation_type: runbook
+    cloud_provider: aws
     runbook_owner: StreamSecurity
     policy_file_name: delete_access_key_user_only_policy.json
     Parameters:
@@ -118,6 +126,7 @@ Remediations:
     description: Edit Security Group inbound rules
     resource_type: security_group
     remediation_type: runbook
+    cloud_provider: aws
     runbook_owner: StreamSecurity
     policy_file_name: edit_security_group_inbound_rule_policy.json
     Parameters:
@@ -135,6 +144,7 @@ Remediations:
     description: Remove inbound rules from a security group where the source is 0.0.0.0/0
     resource_type: security_group
     remediation_type: runbook
+    cloud_provider: aws
     runbook_owner: StreamSecurity
     policy_file_name: remove_inbound_rules_policy.json
     Parameters:
@@ -151,6 +161,7 @@ Remediations:
     description: Remove public launch permissions from an AMI
     resource_type: ec2_image
     remediation_type: runbook
+    cloud_provider: aws
     runbook_owner: StreamSecurity
     policy_file_name: remove_public_ami_permissions_policy.json
     Parameters:
@@ -166,6 +177,7 @@ Remediations:
     description: Modify an RDS DB instance to set its public accessibility
     resource_type: rds_db_instance
     remediation_type: runbook
+    cloud_provider: aws
     runbook_owner: StreamSecurity
     policy_file_name: modify_rds_instance_policy.json
     Parameters:
@@ -183,6 +195,7 @@ Remediations:
     description: Enable server-side encryption on an S3 bucket using AWS KMS
     resource_type: s3_bucket
     remediation_type: runbook
+    cloud_provider: aws
     runbook_owner: StreamSecurity
     policy_file_name: enable_bucket_encryption_policy.json
     Parameters:
@@ -196,6 +209,7 @@ Remediations:
     description: Set an inline policy for an S3 bucket
     resource_type: s3_bucket
     remediation_type: runbook
+    cloud_provider: aws
     runbook_owner: StreamSecurity
     policy_file_name: edit_s3_bucket_policy.json
     Parameters:
@@ -209,6 +223,7 @@ Remediations:
 
   - name: StreamSecurityLambdaBlockEventProcessing
     remediation_type: runbook
+    cloud_provider: aws
     runbook_owner: StreamSecurity
     description: Sets the reserved concurrency for the specified Lambda function to 0. This immediately prevents the function from being invoked until concurrency is restored.
     disabled_reason: Action is not applicable because ReservedConcurrentExecutions is already set to 0.
@@ -227,6 +242,7 @@ Remediations:
 
   - name: StreamSecurityDeregisterLambdaFromLBTargetGroup
     remediation_type: runbook
+    cloud_provider: aws
     runbook_owner: StreamSecurity
     description: Removes the specified Lambda function from its associated load balancer target group. This immediately stops the load balancer from routing traffic to the function.
     display_name: Detach Lambda from Load Balancer Target Group
@@ -252,6 +268,7 @@ Remediations:
     display_name: Detach EC2 Instance from Auto Scaling Group
     resource_type: instance
     remediation_type: runbook
+    cloud_provider: aws
     runbook_owner: StreamSecurity
     policy_file_name: ec2_asg_detach.json
     Parameters:
@@ -270,6 +287,7 @@ Remediations:
     description: Creates a point-in-time snapshot of the selected EC2 instance volume. This preserves the current state of the disk for forensic analysis without impacting the running instance.
     resource_type: instance
     remediation_type: runbook
+    cloud_provider: aws
     runbook_owner: StreamSecurity
     policy_file_name: create_snapshot_ec2_policy.json
     Parameters:
@@ -283,6 +301,7 @@ Remediations:
 
   - name: StreamSecurityRevokeInstanceProfile
     remediation_type: runbook
+    cloud_provider: aws
     description : Removes the attached IAM instance profile from the selected EC2 instance. This action immediately revokes all associated permissions and access granted via that profile.
     disabled_reason: Action is not applicable because there is no instance profile attached to the selected EC2 instance.
     policy_file_name: revoke_instance_profile.json
@@ -300,6 +319,7 @@ Remediations:
 
   - name: StreamSecurityAddDenyPolicyInInstanceProfile
     remediation_type: runbook
+    cloud_provider: aws
     runbook_owner: StreamSecurity
     display_name: Add Deny-All Inline Policy to EC2 Instance Profile
     description: Adds an inline policy to the EC2 instance profile that denies all AWS API calls. This instantly prevents the instance from making any API requests using its profile credentials.
@@ -320,6 +340,7 @@ Remediations:
     display_name: Remove Inline Policies from IAM Role
     resource_type: ForeignAccount
     remediation_type: runbook
+    cloud_provider: aws
     runbook_owner: StreamSecurity
     policy_file_name: remove_inline_policies_from_role.json
     Parameters:
@@ -337,6 +358,7 @@ Remediations:
     display_name: Detach IAM Policies from Role
     resource_type: ForeignAccount
     remediation_type: runbook
+    cloud_provider: aws
     runbook_owner: StreamSecurity
     policy_file_name: detach_managed_policies_from_role.json
     Parameters:
@@ -354,6 +376,7 @@ Remediations:
     display_name: Attach Inline Deny-All Policy to Task Execution Role
     resource_type: ecs_task
     remediation_type: runbook
+    cloud_provider: aws
     runbook_owner: StreamSecurity
     policy_file_name: put_role_policy.json
     Parameters:
@@ -371,6 +394,7 @@ Remediations:
     display_name: Stop ECS Service
     resource_type: ecs_task
     remediation_type: runbook
+    cloud_provider: aws
     runbook_owner: StreamSecurity
     policy_file_name: update_ecs_service_policy.json
     Parameters:
@@ -391,6 +415,7 @@ Remediations:
     display_name: Set IAM User Access Key to Inactive
     resource_type: iam_user
     remediation_type: runbook
+    cloud_provider: aws
     runbook_owner: StreamSecurity
     policy_file_name: set_iam_access_key_inactive_policy.json
     Parameters:
@@ -411,6 +436,7 @@ Remediations:
     disabled_reason: Action is not applicable because the Lambda function is not VPC-connected or is already using the isolated security group.
     resource_type: lambda_function
     remediation_type: runbook
+    cloud_provider: aws
     runbook_owner: StreamSecurity
     policy_file_name: isolate_lambda_policy.json
     Parameters:
@@ -430,6 +456,7 @@ Remediations:
     disabled_reason: Action is not applicable because the task definition ARN doesn't exist.
     resource_type: ecs_task
     remediation_type: runbook
+    cloud_provider: aws
     runbook_owner: StreamSecurity
     policy_file_name: deregister_task_definition_policy.json
     Parameters:
@@ -446,6 +473,7 @@ Remediations:
     disabled_reason: Action is not applicable because the specified ECS service ARN does not exist.
     display_name: Isolate ECS Task from all networks
     remediation_type: runbook
+    cloud_provider: aws
     resource_type: ecs_task
     runbook_owner: StreamSecurity
     policy_file_name: isolate_ecs_service_policy.json
@@ -467,6 +495,7 @@ Remediations:
     description: Forcefully stops the specified running ECS task. This immediately terminates the task and all associated processes.
     resource_type: ecs_task
     remediation_type: runbook
+    cloud_provider: aws
     runbook_owner: StreamSecurity
     policy_file_name: stop_task_ecs_policy.json
     Parameters:
@@ -488,6 +517,7 @@ Remediations:
     display_name: Delete IAM User Login Profile
     resource_type: iam_user
     remediation_type: runbook
+    cloud_provider: aws
     runbook_owner: StreamSecurity
     policy_file_name: delete_iam_user_login_profile.json
     Parameters:
@@ -505,6 +535,7 @@ Remediations:
     disabled_reason: Action is not applicable because the isolated security group is already attached to the EC2
     resource_type: instance
     remediation_type: runbook
+    cloud_provider: aws
     runbook_owner: StreamSecurity
     policy_file_name: isolated_security_group.json
     Parameters:
@@ -521,6 +552,7 @@ Remediations:
     description: Permanently deletes the specified IAM user from the AWS account. This action immediately removes all associated access keys, permissions, and console access.
     display_name: Delete IAM User
     remediation_type: runbook
+    cloud_provider: aws
     resource_type: iam_user
     runbook_owner: AWS
     policy_file_name: delete_iam_user_policy.json
@@ -536,6 +568,7 @@ Remediations:
     display_name: Attach Policy to  Revoke IAM User Access Tokens
     resource_type: iam_user
     remediation_type: runbook
+    cloud_provider: aws
     runbook_owner: StreamSecurity
     policy_file_name: revoke_iam_user_security_credentials.json
     Parameters:
@@ -550,6 +583,7 @@ Remediations:
     display_name: Remove IAM User from All Groups
     resource_type: iam_user
     remediation_type: runbook
+    cloud_provider: aws
     runbook_owner: StreamSecurity
     policy_file_name: remove_iam_user_from_all_groups.json
     Parameters:
@@ -565,6 +599,7 @@ Remediations:
     disabled_reason: Action is not applicable because the user has no policies (inline or managed) attached.
     display_name: Detach All Policies from IAM User
     remediation_type: runbook
+    cloud_provider: aws
     resource_type: iam_user
     runbook_owner: StreamSecurity
     policy_file_name: detach_all_policies_from_iam_user.json
@@ -583,6 +618,7 @@ Remediations:
     display_name: Attach Inline Deny-All Policy to IAM User
     resource_type: iam_user
     remediation_type: runbook
+    cloud_provider: aws
     runbook_owner: StreamSecurity
     policy_file_name: attach_deny_All_policy_to_iam_user.json
     Parameters:
@@ -598,6 +634,7 @@ Remediations:
     display_name: Revoke IAM Roles Temporary Security Credentials
     resource_type: ForeignAccount
     remediation_type: runbook
+    cloud_provider: aws
     runbook_owner: StreamSecurity
     policy_file_name: revoke_iam_roles_temporary_security_credentials.json
     Parameters:
@@ -613,6 +650,7 @@ Remediations:
     disabled_reason: Action is not applicable because the user's tokens already have a tokenissuetime set.
     resource_type: iam_user
     remediation_type: runbook
+    cloud_provider: aws
     runbook_owner: StreamSecurity
     policy_file_name: revoke_iam_user_access_tokens.json
     Parameters:
@@ -628,6 +666,7 @@ Remediations:
     description: Reboots the selected EC2 instance, performing a soft restart of the operating system. This temporarily stops all processes and network activity before restoring them once the instance restarts.
     disabled_reason: Action is not applicable because the EC2 instance is not in a 'running' state.
     remediation_type: runbook
+    cloud_provider: aws
     resource_type: instance
     runbook_owner: AWS
     policy_file_name: restart_ec2_instance_policy.json
@@ -644,6 +683,7 @@ Remediations:
     display_name: Modify IAM Roles to Block Specific External AWS Account
     disabled_reason: Action is not applicable because the trust policy already blocks the specified external AWS account.
     remediation_type: runbook
+    cloud_provider: aws
     runbook_owner: StreamSecurity
     policy_file_name: block_specific_external_account.json
     Parameters:
@@ -658,6 +698,7 @@ Remediations:
     description: Attaches a deny-all policy to the Lambda function’s execution role, overriding existing permissions. This immediately blocks the function from performing any AWS API actions during execution.
     disabled_reason: Action is not applicable because the Lambda's IAM role already has a deny-all policy attached.
     remediation_type: runbook
+    cloud_provider: aws
     display_name: Revoke IAM Role Permissions for Lambda Execution
     resource_type: lambda_function
     runbook_owner: StreamSecurity
@@ -676,6 +717,7 @@ Remediations:
   - name: StreamSecurityDetachInstanceFromElasticLoadBalancer
     description: Removes the selected EC2 instance from its associated load balancer. This immediately stops directing traffic to the instance while keeping it running.
     remediation_type: runbook
+    cloud_provider: aws
     display_name: Detach EC2 Instance from Elastic Load Balancer
     disabled_reason: Action is not applicable because the instance is not registered with any ELB load balancer.
     resource_type: instance
@@ -695,6 +737,7 @@ Remediations:
   - name: StreamSecurityRemoveUserFromAWSIdentityCenterGroups
     description: Removes the specified user from all AWS Identity Center (SSO) groups. This immediately revokes any permissions and access granted through group memberships
     remediation_type: runbook
+    cloud_provider: aws
     display_name: Remove User from AWS Identity Center Groups
     disabled_reason:  Action is not applicable because the user is not a member of any Identity Center groups.
     resource_type: aws_identity_center_user
@@ -713,6 +756,7 @@ Remediations:
   - name: StreamSecurityRevokeAWSAccountAssignmentForUser
     description: Revokes all AWS account assignments for the specified user in AWS Identity Center. This immediately removes the user’s access to all linked AWS accounts
     remediation_type: runbook
+    cloud_provider: aws
     display_name: Revoke AWS Account Assignments for User
     disabled_reason: Action is not applicable because the user has no account assignments
     resource_type: aws_identity_center_user
@@ -751,6 +795,7 @@ Remediations:
     disabled_reason: Action is not applicable because the user already has a deny-all permission set assigned.
     display_name: Attach a Deny-All Permission Set to User
     remediation_type: runbook
+    cloud_provider: aws
     resource_type: aws_identity_center_user
     runbook_owner: StreamSecurity
     policy_file_name: attach_deny_All_policy_to_identity_user_policy.json
@@ -762,6 +807,382 @@ Remediations:
         resource_name: true
       - name: InstanceArn
         type: String
+
+  - name: StreamSecurityAzureRestartVm
+    description: Performs a soft reboot of the operating system, briefly interrupting all processes and network traffic before service is restored.
+    disabled_reason: Action is not applicable because the virtual machine is already in a stopped or deallocated state.
+    display_name: Restart Virtual Machine
+    remediation_type: runbook
+    cloud_provider: azure
+    resource_type: azure_virtual_machine
+    runbook_owner: StreamSecurity
+    role_name: Stream Restart VM Role
+    role_file: azure_restart_vm_policy_role.json
+    Parameters:
+      - name: VmId
+        type: String
+        resource_name: true
+        order: 1
+      - name: UAMIClientId
+        type: String
+        order: 2
+
+
+
+  - name: StreamSecurityAzureStopVm
+    description: Powers the VM off.
+    disabled_reason: Action is not applicable because the virtual machine is already in a stopped or deallocated state.
+    display_name: Stop Virtual Machine
+    remediation_type: runbook
+    cloud_provider: azure
+    resource_type: azure_virtual_machine
+    runbook_owner: StreamSecurity
+    role_name: Stream Stop VM Role
+    role_file: azure_stop_vm_role.json
+    Parameters:
+      - name: VmId
+        type: String
+        resource_name: true
+        order: 1
+      - name: UAMIClientId
+        type: String
+        order: 2
+
+  - name: StreamSecurityAzureCreateDiskSnapshotVm
+    description: Creates point-in-time snapshots of the OS and every data disk, preserving exact disk state for later forensic analysis without touching the running VM.
+    display_name: Create Virtual Machine Disks Snapshots
+    remediation_type: runbook
+    cloud_provider: azure
+    resource_type: azure_virtual_machine
+    runbook_owner: StreamSecurity
+    role_name: Stream Create Disk Snapshot Role
+    role_file: azure_create_disk_vm_role.json
+    Parameters:
+      - name: VmId
+        type: String
+        resource_name: true
+        order: 1
+      - name: Location
+        type: String
+        order: 2
+      - name: UAMIClientId
+        type: String
+        order: 3
+
+  - name: StreamSecurityAzureRemoveVmFromLb
+    description: Removes the VM from the Azure Load Balancer backend.
+    disabled_reason: Action is not applicable because the virtual machine is not part of any load balancer.
+    display_name: Remove Virtual Machine from Load Balancer
+    remediation_type: runbook
+    cloud_provider: azure
+    resource_type: azure_virtual_machine
+    runbook_owner: StreamSecurity
+    role_name: Stream Remove VM from Load Balancer Role
+    role_file: azure_remove_vm_from_lb_role.json
+    Parameters:
+      - name: VmId
+        type: String
+        resource_name: true
+        order: 1
+      - name: UAMIClientId
+        type: String
+        order: 2
+
+  - name: StreamSecurityAzureStopFunctionApp
+    description: Changes the site state to Stopped so no functions execute until restarted.
+    disabled_reason: Action is not applicable because the Function App is already in a stopped state.
+    display_name: Stop the Function App
+    remediation_type: runbook
+    cloud_provider: azure
+    resource_type: azure_function_app
+    runbook_owner: StreamSecurity
+    role_name: Stream Stop Function App Role
+    role_file: azure_stop_function_app_role.json
+    Parameters:
+      - name: FunctionAppId
+        type: String
+        resource_name: true
+        order: 1
+      - name: UAMIClientId
+        type: String
+        order: 2
+
+  - name: StreamSecurityAzureDisableFunctionApp
+    description: Disables all triggers for the Function App to prevent functions from executing without stopping the app.
+    disabled_reason: Action is not applicable because the specified function triggers are already disabled.
+    display_name: Disable specific function triggers
+    remediation_type: runbook
+    cloud_provider: azure
+    resource_type: azure_function_app
+    runbook_owner: StreamSecurity
+    role_name: Stream Disable Function App Role
+    role_file: azure_disable_function_app_role.json
+    Parameters:
+      - name: AzureFunctionId
+        type: String
+        resource_name: true
+        order: 1
+      - name: UAMIClientId
+        type: String
+        order: 2
+
+
+  - name: StreamSecurityAzureSetScaleSetProtectionVm
+    description: Marks the VM instance as protected inside its Virtual Machine Scale Set; autoscale or image upgrades can’t replace, reimage, or delete it.
+    disabled_reason: Action is not applicable because the virtual machine is either not part of a scale set or already has scale set protection enabled.
+    display_name: Set Virtual Machine ScaleSet Protection
+    remediation_type: runbook
+    cloud_provider: azure
+    resource_type: azure_virtual_machine
+    runbook_owner: StreamSecurity
+    role_name: Stream Set Virtual Machine ScaleSet Protection Role
+    role_file: azure_set_vmss_protections_role.json
+    Parameters:
+      - name: Name
+        type: String
+        resource_name: true
+        order: 1
+      - name: VirtualMachineScaleSetId
+        type: String
+        order: 2
+      - name: UAMIClientId
+        type: String
+        order: 3
+
+  - name: StreamSecurityAzureIsolateVm
+    description: Creates and attaches a quarantine Network Security Group that denies all inbound and outbound network traffic.
+    disabled_reason: Action is not applicable because the virtual machine is already isolated from all networks.
+    display_name: Isolate Virtual Machine from All Networks
+    remediation_type: runbook
+    cloud_provider: azure
+    resource_type: azure_virtual_machine
+    runbook_owner: StreamSecurity
+    role_name: Stream Set Isolate VM Role
+    role_file: azure_set_isolate_vm_role.json
+    Parameters:
+      - name: VmId
+        type: String
+        resource_name: true
+        order: 1
+      - name: UAMIClientId
+        type: String
+        order: 2
+
+  - name: StreamSecurityAzureIsolateFunctionApp
+    description: Moves the Function App to a locked-down subnet with a deny-all network security group to block all inbound and outbound traffic.
+    disabled_reason: Action is not applicable because the Function App is either already isolated from all networks or not integrated with a Virtual Network.
+    display_name: Re‑attach Function App to an isolated subnet with deny‑all NSG
+    remediation_type: runbook
+    cloud_provider: azure
+    resource_type: azure_function_app
+    runbook_owner: StreamSecurity
+    role_name: Stream Set Isolate Function App Role
+    role_file: azure_set_isolate_function_app_role.json
+    Parameters:
+      - name: AzureFunctionId
+        type: String
+        resource_name: true
+        order: 1
+      - name: UAMIClientId
+        type: String
+        order: 2
+
+  - name: StreamSecurityAzureDetachRBACVM
+    description: Detaches all Azure RBAC role assignments linked to the VM or its identities, eliminating any residual permissions.
+    disabled_reason: Action is not applicable because the virtual machine has no managed identities or associated RBAC role assignments.
+    display_name: Detach Virtual Machine Managed Identities and Revoke Role Assignments
+    remediation_type: runbook
+    cloud_provider: azure
+    resource_type: azure_virtual_machine
+    runbook_owner: StreamSecurity
+    role_name: Stream Detach RBAC VM Role
+    role_file: azure_detach_rbac_vm_role.json
+    Parameters:
+      - name: VmId
+        type: String
+        resource_name: true
+        order: 1
+      - name: UAMIClientId
+        type: String
+        order: 2
+
+  - name: StreamSecurityAzureDetachRBACFunctionApp
+    description: Removes all role-based access control (RBAC) assignments from the Function App’s managed identity to revoke its access to Azure resources.
+    disabled_reason: Action is not applicable because the Function's managed identity has no RBAC role assignments attached.
+    display_name: Detach all RBAC role assignments from Function’s managed identity
+    remediation_type: runbook
+    cloud_provider: azure
+    resource_type: azure_function_app
+    runbook_owner: StreamSecurity
+    role_name: Stream Detach RBAC Function App Role
+    role_file: azure_detach_rbac_function_app_role.json
+    Parameters:
+      - name: AzureFunctionId
+        type: String
+        resource_name: true
+        order: 1
+      - name: UAMIClientId
+        type: String
+        order: 2
+
+  - name: StreamSecurityAzureDisableUser
+    description: Blocks the user’s sign-in capability, preventing any new logins or token issuance across Azure and Microsoft 365.
+    disabled_reason: Action is not applicable because the Entra ID user account is either already disabled or does not exist.
+    display_name: Disable Entra ID User Account
+    remediation_type: runbook
+    cloud_provider: azure
+    resource_type: azure_user
+    runbook_owner: StreamSecurity
+    role_name: User Administrator
+    Parameters:
+      - name: AzureUserId
+        type: String
+        resource_name: true
+        order: 1
+      - name: UAMIClientId
+        type: String
+        order: 2
+
+  - name: StreamSecurityAzureRevokeUserSessions
+    description: Instantly signs the user out everywhere by invalidating all refresh tokens and session cookies, forcing fresh authentication.
+    disabled_reason: Action is not applicable because the Entra ID user does not exist
+    display_name: Revoke Entra ID User Sessions
+    remediation_type: runbook
+    cloud_provider: azure
+    resource_type: azure_user
+    runbook_owner: StreamSecurity
+    role_name: User Administrator
+    Parameters:
+      - name: AzureUserId
+        type: String
+        resource_name: true
+        order: 1
+      - name: UAMIClientId
+        type: String
+        order: 2
+
+  - name: StreamSecurityAzureDisablePublicAccessBlobContainer
+    description: not provided
+    disabled_reason: not provided
+    display_name: Disable Azure Storage Accounts 'Public Access Level' for Blob Container
+    remediation_type: runbook
+    cloud_provider: azure
+    resource_type: azure_storage_account
+    runbook_owner: StreamSecurity
+    role_name: Stream Disable Public Access Blob Container Role
+    role_file: disable_public_access_blob_container_role.json
+    Parameters:
+      - name: StorageAccountId
+        type: String
+        resource_name: true
+        order: 1
+      - name: UAMIClientId
+        type: String
+        order: 2
+  - name: StreamSecurityAzureRemoveAllTcpSecurityGroup
+    description: not provided
+    disabled_reason: not provided
+    display_name: Remove Network Security Group Rule
+    remediation_type: runbook
+    cloud_provider: azure
+    resource_type: azure_network_security_group
+    runbook_owner: StreamSecurity
+    role_name: Stream Remove Network Security Group Rule Role
+    role_file: remove_from_security_group_role.json
+    Parameters:
+      - name: NetworkSecurityGroupId
+        type: String
+        resource_name: true
+        order: 1
+      - name: UAMIClientId
+        type: String
+        order: 2
+
+  - name: StreamSecurityAzureDisabledSQLServerPublicNetwork
+    description: not provided
+    disabled_reason: not provided
+    display_name: Set Azure SQL Server public network access to 'Disabled'
+    remediation_type: runbook
+    cloud_provider: azure
+    resource_type: azure_sql_server
+    runbook_owner: StreamSecurity
+    role_name: Stream Disable SQL Server Public Network Role
+    role_file: disable_sql_server_public_network_access_role.json
+    Parameters:
+      - name: ServerId
+        type: String
+        resource_name: true
+        order: 1
+      - name: UAMIClientId
+        type: String
+        order: 2
+
+  - name: StreamSecurityAzureDisassociatePublicIpVM
+    description: not provided
+    disabled_reason: not provided
+    display_name: Disassociate Public IP from Virtual Machine
+    remediation_type: runbook
+    cloud_provider: azure
+    resource_type: azure_virtual_machine
+    runbook_owner: StreamSecurity
+    role_name: Stream Disassociate Public IP VM Role
+    role_file: disassociate_public_ip_vm_role.json
+    Parameters:
+      - name: VmId
+        type: String
+        resource_name: true
+        order: 1
+      - name: UAMIClientId
+        type: String
+        order: 2
+
+  - name: StreamSecurityAzureEditSecurityGroup
+    description: not provided
+    disabled_reason: not provided
+    display_name: Remove Network Security Group Rule
+    remediation_type: runbook
+    cloud_provider: azure
+    resource_type: azure_network_security_group
+    runbook_owner: StreamSecurity
+    role_name: Stream Edit Security Group Rule Role
+    role_file: remove_inbound_rules_role.json
+    Parameters:
+      - name: NetworkSecurityGroupId
+        type: String
+        resource_name: true
+        order: 1
+      - name: UAMIClientId
+        type: String
+        order: 2
+
+
+
+  - name: StreamSecurityAzureStorageAccountEnableBlobVersioning
+    description: not provided
+    disabled_reason: not provided
+    display_name: Enable Azure Storage Account versioning for blobs
+    remediation_type: runbook
+    cloud_provider: azure
+    resource_type: azure_storage_account
+    runbook_owner: StreamSecurity
+    role_name: Stream Enable Blob Versioning Role
+    role_file: enable_blob_versioning_role.json
+    Parameters:
+      - name: StorageAccountId
+        type: String
+        resource_name: true
+        order: 1
+      - name: UAMIClientId
+        type: String
+        order: 2
+
+
+
+
+
+
+
+
 
 
 
