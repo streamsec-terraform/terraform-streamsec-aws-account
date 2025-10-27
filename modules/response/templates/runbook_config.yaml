@@ -174,7 +174,7 @@ Remediations:
         resource_name: true
 
   - name: StreamSecurityModifyDbInstance
-    description: Modify an RDS DB instance to set its public accessibility
+    description: Modify an Available RDS DB instance to set its public accessibility
     resource_type: rds_db_instance
     remediation_type: runbook
     cloud_provider: aws
@@ -515,6 +515,7 @@ Remediations:
   - name: StreamSecurityDeleteIAMUserLoginProfile
     description: Deletes the login profile of the specified IAM user, disabling console access. This immediately prevents the user from signing in to the AWS Management Console.
     display_name: Delete IAM User Login Profile
+    disabled_reason: Action is not applicable because the user does not have a login profile.
     resource_type: iam_user
     remediation_type: runbook
     cloud_provider: aws
@@ -609,8 +610,7 @@ Remediations:
       - name: UserName
         type: String
         resource_name: true
-      - name: Region
-        type: String
+
 
   - name: StreamSecurityAttachDenyAllPolicyToIAMUser
     description: Attaches an inline policy to the specified IAM user that denies all AWS API actions. This immediately blocks the user from performing any operations in the AWS environment.
@@ -969,9 +969,9 @@ Remediations:
         order: 2
 
   - name: StreamSecurityAzureIsolateFunctionApp
-    description: Moves the Function App to a locked-down subnet with a deny-all network security group to block all inbound and outbound traffic.
-    disabled_reason: Action is not applicable because the Function App is either already isolated from all networks or not integrated with a Virtual Network.
-    display_name: Re‑attach Function App to an isolated subnet with deny‑all NSG
+    description: Disables public network access for the Function App.
+    disabled_reason: Action is not applicable because the Function App already has public network access disabled.
+    display_name: Disable public network access for the Function App
     remediation_type: runbook
     cloud_provider: azure
     resource_type: azure_function_app
@@ -1176,7 +1176,92 @@ Remediations:
         type: String
         order: 2
 
+  - name: AWS-StopRdsInstance
+    description: Stops the selected RDS instance, shutting down its database engine. This action immediately halts all database operations and connections on the instance.
+    display_name: Stop RDS Instance
+    disabled_reason: Action is not applicable because the RDS instance is not in an 'available' state.
+    remediation_type: runbook
+    cloud_provider: aws
+    resource_type: rds
+    runbook_owner: AWS
+    policy_file_name: stop_rds_instance_policy.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: InstanceId
+        type: String
+        resource_name: true
 
+  - name: AWSConfigRemediation-DeleteRDSInstance
+    description: Deletes the selected RDS instance and creates a final snapshot before permanent removal. This action cannot be undone.
+    display_name: Delete RDS Instance
+    remediation_type: runbook
+    cloud_provider: aws
+    resource_type: rds
+    runbook_owner: AWS
+    policy_file_name: delete_rds_instance_policy.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: DbiResourceId
+        type: String
+        resource_name: true
+
+  - name: StreamSecurityDeleteMQBroker
+    description: Deletes the specified Amazon MQ broker, permanently removing it and all associated data from the AWS account.
+    resource_type: mq
+    display_name: Delete MQ Broker
+    remediation_type: runbook
+    cloud_provider: aws
+    runbook_owner: StreamSecurity
+    policy_file_name: delete_mq_broker_policy.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: Region
+        type: String
+      - name: BrokerId
+        type: String
+        resource_name: true
+
+
+  - name: StreamSecurityDeleteElasticacheMemcached
+    description: Deletes the specified ElastiCache Memcached cluster, permanently removing all cached data and configurations. This action cannot be undone.
+    disabled_reason: Action is not applicable because the ElastiCache Memcached cluster does not exist.
+    display_name: Delete ElastiCache Memcached Cluster
+    resource_type: elasticache_memcached
+    remediation_type: runbook
+    cloud_provider: aws
+    runbook_owner: StreamSecurity
+    policy_file_name: delete_elasticache_memcached_policy.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: ClusterId
+        type: String
+        resource_name: true
+      - name: Region
+        type: String
+
+
+
+  - name: StreamSecurityDeleteElasticacheRedis
+    description: Deletes the specified ElastiCache Redis cluster, permanently removing all cached data and configurations. This action cannot be undone.
+    disabled_reason: Action is not applicable because the ElastiCache Redis cluster does not exist.
+    display_name: Delete ElastiCache Redis Cluster
+    resource_type: elasticache_redis
+    remediation_type: runbook
+    cloud_provider: aws
+    runbook_owner: StreamSecurity
+    policy_file_name: delete_elasticache_redis_policy.json
+    Parameters:
+      - name: AutomationAssumeRole
+        type: String
+      - name: ClusterId
+        type: String
+        resource_name: true
+      - name: Region
+        type: String
 
 
 

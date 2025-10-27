@@ -1,0 +1,62 @@
+schemaVersion: '0.3'
+description: |
+  Deletes an existing Amazon MQ broker in the specified region.
+  This action permanently removes the broker and all its configurations.
+  A verification step ensures the broker deletion process has started successfully.
+assumeRole: '{{AutomationAssumeRole}}'
+parameters:
+  AutomationAssumeRole:
+    type: String
+    description: (Optional) The ARN of the role that allows Automation to perform actions on your behalf.
+    default: ''
+  Region:
+    type: String
+    description: (Required) The AWS region where the broker exists.
+  BrokerId:
+    type: String
+    description: (Required) The ID of the Amazon MQ broker to delete.
+mainSteps:
+  - description: |
+      ## DeleteMQBroker
+      Initiates the deletion of the specified Amazon MQ broker.
+    name: DeleteMQBroker
+    action: aws:executeScript
+    nextStep: VerifyBrokerDeletion
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Runtime: python3.11
+      Handler: main
+      InputPayload:
+        BrokerId: '{{ BrokerId }}'
+        Region: '{{ Region }}'
+      Script: |
+        import boto3
+
+        def main(event, context):
+            mq_client = boto3.client('mq', region_name=event['Region'])
+            broker_id = event.get('BrokerId')
+            if not broker_id:
+                raise ValueError("'BrokerId' parameter is required.")
+            
+            try:
+                print(f"Attempting to delete Amazon MQ broker: {broker_id}")
+                mq_client.delete_broker(BrokerId=broker_id)
+                print(f"Delete command issued for broker: {broker_id}")
+            except Exception as e:
+                raise RuntimeError(f"Failed to delete Amazon MQ broker {broker_id}: {str(e)}")
+  - description: |
+      ## VerifyBrokerDeletion
+      Verifies that the Amazon MQ broker has entered the deletion process.
+    name: VerifyBrokerDeletion
+    action: aws:assertAwsResourceProperty
+    timeoutSeconds: 600
+    isEnd: true
+    inputs:
+      Service: mq
+      Api: DescribeBroker
+      BrokerId: '{{ BrokerId }}'
+      PropertySelector: $.BrokerState
+      DesiredValues:
+        - DELETION_IN_PROGRESS
+        - DELETION_SCHEDULED

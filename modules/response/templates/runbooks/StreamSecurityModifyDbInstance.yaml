@@ -33,6 +33,11 @@ mainSteps:
             rds_client = boto3.client('rds', region_name=region)
 
             try:
+                resp = rds_client.describe_db_instances(DBInstanceIdentifier=db_instance_identifier)
+                instance = resp['DBInstances'][0]
+                status = instance['DBInstanceStatus']
+                if status != 'available':
+                    raise Exception(f"DB instance '{db_instance_identifier}' is not available (current status: {status}).")
                 response = rds_client.modify_db_instance(
                     DBInstanceIdentifier=db_instance_identifier,
                     PubliclyAccessible=(publicly_accessible == 'True')

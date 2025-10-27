@@ -26,6 +26,15 @@
                 "ec2:DescribeSubnets"
             ],
             "Resource": "*"
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "iam:ListRolePolicies",
+                "iam:GetRolePolicy",
+                "iam:PutRolePolicy"
+            ],
+            "Resource": "*"
         }
     ]
 }

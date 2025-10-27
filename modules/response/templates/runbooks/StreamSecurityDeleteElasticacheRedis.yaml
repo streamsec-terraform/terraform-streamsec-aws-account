@@ -1,0 +1,110 @@
+schemaVersion: '0.3'
+description: |
+  This runbook deletes a specific ElastiCache Redis CacheCluster by its ID.
+  It ignores any replication group association and deletes the cluster directly.
+  After 20 seconds, it verifies that the cluster has been deleted.
+assumeRole: '{{ AutomationAssumeRole }}'
+parameters:
+  AutomationAssumeRole:
+    type: String
+    description: (Optional) IAM Role ARN to perform the automation.
+    default: ''
+  ClusterId:
+    type: String
+    description: (Required) The ElastiCache Redis cluster ID to delete.
+  Region:
+    type: String
+    description: (Required) The AWS region where the Redis cluster exists.
+mainSteps:
+  - name: DeleteRedisCacheCluster
+    action: aws:executeScript
+    nextStep: VerifyRedisDeletion
+    isEnd: false
+    inputs:
+      Runtime: python3.11
+      Handler: main
+      InputPayload:
+        ClusterId: '{{ ClusterId }}'
+        Region: '{{ Region }}'
+      Script: |
+        import boto3
+        from botocore.exceptions import ClientError
+
+        def main(events, context):
+            region = events['Region']
+            cluster_id = events['ClusterId']
+            client = boto3.client('elasticache', region_name=region)
+
+            try:
+                response = client.describe_cache_clusters(
+                    CacheClusterId=cluster_id,
+                    ShowCacheNodeInfo=False
+                )
+                cluster = response['CacheClusters'][0]
+                status = cluster.get('CacheClusterStatus')
+
+                if status == "creating":
+                    print(f"Cluster '{cluster_id}' is in 'creating' state. Waiting 10 minutes before retrying deletion...")
+                    time.sleep(600)
+                    response = client.describe_cache_clusters(
+                                CacheClusterId=cluster_id,
+                                ShowCacheNodeInfo=False)
+                    status = response['CacheClusters'][0].get('CacheClusterStatus')
+                
+                if status != "available":
+                    raise Exception(f"Cluster '{cluster_id}' is not in 'available' state (status: {status})")
+                
+                print(f"Deleting cache cluster '{cluster_id}'...")
+                client.delete_cache_cluster(CacheClusterId=cluster_id)
+                return {
+                    "Message": f"Cache cluster '{cluster_id}' deletion initiated.",
+                    "ClusterId": cluster_id
+                }
+
+            except ClientError as e:
+                if "NotFound" in str(e):
+                    print(f"Cluster '{cluster_id}' not found. Nothing to delete.")
+                    return {
+                        "Message": f"Cluster '{cluster_id}' not found.",
+                        "Exists": False
+                    }
+                raise
+    outputs:
+      - Name: ClusterId
+        Selector: $.Payload.ClusterId
+        Type: String
+  - name: VerifyRedisDeletion
+    action: aws:executeScript
+    isEnd: true
+    inputs:
+      Runtime: python3.11
+      Handler: main
+      InputPayload:
+        ClusterId: '{{ DeleteRedisCacheCluster.ClusterId }}'
+        Region: '{{ Region }}'
+      Script: |
+        import boto3
+        from botocore.exceptions import ClientError
+        import time
+
+        def main(events, context):
+            region = events['Region']
+            cluster_id = events['ClusterId']
+            client = boto3.client('elasticache', region_name=region)
+
+            print(f"Waiting 20 seconds before verifying deletion of cluster '{cluster_id}'...")
+            time.sleep(20)
+
+            try:
+                response = client.describe_cache_clusters(CacheClusterId=cluster_id)
+                status = response['CacheClusters'][0].get('CacheClusterStatus', 'unknown')
+                print(f"Cluster still exists with status: {status}")
+                if status.lower() == "deleting":
+                    return {"Verification": "InProgress"}
+                else:
+                    raise Exception(f"Cluster '{cluster_id}' still exists with status: {status}")
+            except ClientError as e:
+                if "NotFound" in str(e):
+                    print(f"Cluster '{cluster_id}' successfully deleted.")
+                    return {"Verification": "Success"}
+                raise

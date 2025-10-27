@@ -4,11 +4,9 @@
         {
             "Effect": "Allow",
             "Action": [
-                "iam:ListAttachedUserPolicies",
-				"iam:DetachUserPolicy",
-				"iam:ListUserPolicies",
-				"iam:DeleteUserPolicy",
-				"iam:GetUser"
+                "rds:DescribeDBInstances",
+                "rds:CreateDBSnapshot",
+				"rds:DeleteDBInstance"
             ],
             "Resource": "*"
         }

@@ -1,64 +1,70 @@
 schemaVersion: '0.3'
 description: |
-   This runbook detaches all IAM managed policies attached to a specified user
+  This runbook detaches all IAM managed policies and deletes all inline policies attached to a specified user.
+  It ensures that all permissions are removed from the IAM user.
 assumeRole: '{{AutomationAssumeRole}}'
 parameters:
   AutomationAssumeRole:
-    type: String
-    description: (Optional) The ARN of the role that allows Automation to perform the actions on your behalf.
     default: ''
+    description: (Optional) The ARN of the role that allows Automation to perform the actions on your behalf.
+    type: String
   UserName:
+    description: (Required) The IAM username from which all managed and inline policies will be removed.
     type: String
-    description: ired) The IAM username from which all managed policies will be detached.
-  Region:
-    type: String
-    description: The AWS Region where the IAM user is managed.
 mainSteps:
   - name: ListAttachPolicy
     action: aws:executeScript
-    isEnd: false
     nextStep: DetachAllUserPolicies
+    isEnd: false
     inputs:
       Runtime: python3.11
       Handler: main
       InputPayload:
         UserName: '{{ UserName }}'
-        Region: '{{ Region }}'
       Script: |
         import boto3
 
         def main(events, context):
-            region = events.get("Region","Global")
-            iam = boto3.client('iam',region_name=region)
-            user_name = events.get("UserName", "")
-
+            user_name = events.get("UserName")
             if not user_name:
-                raise ValueError("UserName parameter is required.")
+                raise ValueError("UserName parameter is required and cannot be empty.")
+
+            iam = boto3.client('iam')
             policies_arn = []
+            inline_policies = []
+
+            # --- List attached managed policies ---
             is_truncated = True
             marker = ""
             while is_truncated:
-              if marker:
-                  response = iam.list_attached_user_policies(UserName=user_name, Marker=marker)
-              else:
-                  response = iam.list_attached_user_policies(UserName=user_name)
-              attached_policies = response.get('AttachedPolicies',[])
-              for policy in attached_policies:
-                  policies_arn.append(policy["PolicyArn"])
-              if is_truncated := response.get("IsTruncated", False):
-                marker = response.get("Marker")
-            if not policies_arn:
-              raise Exception(f"PoliciesArn is not attached to user name.")
-            
-            return {"PoliciesArn": policies_arn}
-    outputs:
-      - Name: Status
-        Selector: $.Payload.Status
-        Type: String
-      - Name: PoliciesArn
-        Selector: $.Payload.PoliciesArn
-        Type: StringList
+                if marker:
+                    response = iam.list_attached_user_policies(UserName=user_name, Marker=marker)
+                else:
+                    response = iam.list_attached_user_policies(UserName=user_name)
 
+                attached_policies = response.get('AttachedPolicies', [])
+                for policy in attached_policies:
+                    policies_arn.append(policy["PolicyArn"])
+
+                is_truncated = response.get("IsTruncated", False)
+                marker = response.get("Marker", "")
+
+            # --- List inline policies ---
+            inline_response = iam.list_user_policies(UserName=user_name)
+            inline_policies = inline_response.get('PolicyNames', [])
+
+            if not policies_arn and not inline_policies:
+                raise Exception(f"No managed or inline policies are attached to user '{user_name}'.")
+
+            print(f"Found {len(policies_arn)} managed and {len(inline_policies)} inline policies for user '{user_name}'.")
+            return {"PoliciesArn": policies_arn, "InlinePolicies": inline_policies}
+    outputs:
+      - Type: StringList
+        Name: PoliciesArn
+        Selector: $.Payload.PoliciesArn
+      - Type: StringList
+        Name: InlinePolicies
+        Selector: $.Payload.InlinePolicies
   - name: DetachAllUserPolicies
     action: aws:executeScript
     isEnd: true
@@ -66,29 +72,38 @@ mainSteps:
       Runtime: python3.11
       Handler: main
       InputPayload:
-        PoliciesArn: '{{ ListAttachPolicy.PoliciesArn }}'
-        Region: '{{ Region }}'
         UserName: '{{ UserName }}'
+        PoliciesArn: '{{ ListAttachPolicy.PoliciesArn }}'
+        InlinePolicies: '{{ ListAttachPolicy.InlinePolicies }}'
       Script: |
         import boto3
 
         def main(events, context):
-            region = events['Region']
             user_name = events['UserName']
-            policies_arn = events['PoliciesArn']
-            if not policies_arn:
-               raise Exception(f"PoliciesArn is not attached to user name.")
+            policies_arn = events.get('PoliciesArn', [])
+            inline_policies = events.get('InlinePolicies', [])
 
-            iam = boto3.client('iam', region_name=region)
-            
+            if not user_name:
+                raise ValueError("UserName parameter is required and cannot be empty.")
+
+            iam = boto3.client('iam')
+
+            # --- Detach managed policies ---
             for policy in policies_arn:
-              iam.detach_user_policy(UserName=user_name, PolicyArn=policy)
-            
-            response = iam.list_attached_user_policies(UserName=user_name)
-            if AttachedPolicies := response.get('AttachedPolicies'):
-              attached_str = ', '.join([p['PolicyName'] for p in AttachedPolicies])
-              raise Exception(f"Failed to detach all policies for user {user_name}. Still attached policies: {attached_str}")
+                iam.detach_user_policy(UserName=user_name, PolicyArn=policy)
+                print(f"Detached managed policy: {policy}")
+
+            # --- Delete inline policies ---
+            for policy_name in inline_policies:
+                iam.delete_user_policy(UserName=user_name, PolicyName=policy_name)
+                print(f"Deleted inline policy: {policy_name}")
+
+            # --- Verify cleanup ---
+            attached_check = iam.list_attached_user_policies(UserName=user_name).get('AttachedPolicies', [])
+            inline_check = iam.list_user_policies(UserName=user_name).get('PolicyNames', [])
+
+            if attached_check or inline_check:
+                remaining = [p['PolicyName'] for p in attached_check] + inline_check
+                raise Exception(f"Failed to remove all policies for user '{user_name}'. Still attached: {', '.join(remaining)}")
             else:
-              print(f"Successfully detached all policies for user {user_name}.")
-            
-              
+                print(f"Successfully removed all managed and inline policies for user '{user_name}'.")

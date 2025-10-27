@@ -1,0 +1,17 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "mq:DeleteBroker",
+        "mq:DescribeBroker",
+        "ec2:DetachNetworkInterface",
+        "ec2:DeleteNetworkInterfacePermission",
+        "ec2:DeleteNetworkInterface",
+        "mq:ListBrokers"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

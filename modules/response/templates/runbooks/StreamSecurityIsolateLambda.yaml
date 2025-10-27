@@ -1,7 +1,9 @@
 schemaVersion: '0.3'
 description: |
   This runbook ensures that a VPC-connected AWS Lambda function has only an isolated security group named 'stream-deny'.
-  It checks if 'stream-deny' exists in the given VPC, creates it if necessary, and then attaches it to the Lambda function while removing all other security groups.
+  It checks if 'stream-deny' exists in the given VPC, creates it if necessary,
+  ensures the Lambda's execution role has the required VPC permissions,
+  and then attaches the SG to the Lambda function while removing all other security groups.
 assumeRole: '{{AutomationAssumeRole}}'
 parameters:
   AutomationAssumeRole:
@@ -30,16 +32,21 @@ mainSteps:
         VpcId: '{{ VpcId }}'
       Script: |
         import boto3
+        import json
+        import time
 
         def main(events, context):
             try:
-                ec2_client = boto3.client('ec2', region_name=events['Region'])
-                lambda_client = boto3.client('lambda', region_name=events['Region'])
-
+                region = events['Region']
                 function_name = events['FunctionName']
                 vpc_id = events['VpcId']
                 sg_name = "stream-deny"
 
+                ec2_client = boto3.client('ec2', region_name=region)
+                lambda_client = boto3.client('lambda', region_name=region)
+                iam_client = boto3.client('iam')
+
+                # 1. Create or find the SG
                 existing_sgs = ec2_client.describe_security_groups(Filters=[
                     {"Name": "vpc-id", "Values": [vpc_id]},
                     {"Name": "group-name", "Values": [sg_name]}
@@ -47,6 +54,7 @@ mainSteps:
 
                 if existing_sgs:
                     isolated_sg_id = existing_sgs[0]['GroupId']
+                    print(f"Found existing security group: {isolated_sg_id}")
                 else:
                     sg_response = ec2_client.create_security_group(
                         Description='Isolated Security Group for Lambda',
@@ -54,12 +62,70 @@ mainSteps:
                         VpcId=vpc_id
                     )
                     isolated_sg_id = sg_response['GroupId']
+                    print(f"Created new security group: {isolated_sg_id}")
 
+                # 2. Check Lambda VPC config and execution role
                 response = lambda_client.get_function_configuration(FunctionName=function_name)
                 vpc_config = response.get('VpcConfig', {})
                 subnet_ids = vpc_config.get('SubnetIds', [])
-                security_groups = vpc_config.get('SecurityGroupIds', [])
+                if not subnet_ids:
+                  print(f"Lambda '{function_name}' is not configured with VPC networking. Skipping security group update.")
+                  return {
+                      "Result": "Skipped",
+                      "Reason": f"Lambda '{function_name}' is not attached to a VPC."
+                  }
+                role_arn = response['Role']
+                role_name = role_arn.split('/')[-1]
 
+                # 3. Ensure IAM permissions
+                required_actions = [
+                    "ec2:CreateNetworkInterface",
+                    "ec2:DescribeNetworkInterfaces",
+                    "ec2:DeleteNetworkInterface",
+                    "ec2:DescribeSubnets",
+                    "ec2:DescribeSecurityGroups",
+                    "ec2:DescribeVpcs"
+                ]
+
+                inline_policies = iam_client.list_role_policies(RoleName=role_name)['PolicyNames']
+                permission_exist = False
+
+                for policy_name in inline_policies:
+                    policy_doc = iam_client.get_role_policy(RoleName=role_name, PolicyName=policy_name)
+                    statements = policy_doc['PolicyDocument'].get('Statement', [])
+                    for stmt in statements:
+                        actions = stmt.get('Action', [])
+                        if isinstance(actions, str):
+                            actions = [actions]
+                        if "*" in actions or all(a in actions for a in required_actions):
+                            permission_exist = True
+                            break
+                    if permission_exist:
+                        break
+
+                if not permission_exist:
+                    policy_name = "AllowLambdaVpcAccess"
+                    policy_doc = {
+                        "Version": "2012-10-17",
+                        "Statement": [
+                            {
+                                "Effect": "Allow",
+                                "Action": required_actions,
+                                "Resource": "*"
+                            }
+                        ]
+                    }
+
+                    iam_client.put_role_policy(
+                        RoleName=role_name,
+                        PolicyName=policy_name,
+                        PolicyDocument=json.dumps(policy_doc)
+                    )
+                    print(f"Attached inline policy '{policy_name}' to role '{role_name}'")
+                
+                print("Waiting for IAM policy propagation...")
+                time.sleep(15)
+                # 4. Update Lambda config
                 lambda_client.update_function_configuration(
                     FunctionName=function_name,
                     VpcConfig={
@@ -68,7 +134,7 @@ mainSteps:
                     }
                 )
 
-                print(f"Lambda function '{function_name}' successfully updated. Now using only security group stream-deny")
+                print(f"Lambda function '{function_name}' successfully updated to use only 'stream-deny' SG.")
 
             except Exception as e:
                 raise Exception(f"Failed to attach Security Group to Lambda: {str(e)}")

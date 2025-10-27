@@ -1,0 +1,112 @@
+schemaVersion: '0.3'
+description: |
+  This runbook deletes a specific ElastiCache Memcached cluster by its ID.
+  It checks whether the cluster exists and deletes it directly.
+  Then it verifies the deletion was successful.
+assumeRole: '{{ AutomationAssumeRole }}'
+parameters:
+  AutomationAssumeRole:
+    type: String
+    description: (Optional) IAM Role ARN to perform the automation.
+    default: ''
+  ClusterId:
+    type: String
+    description: (Required) The ElastiCache Memcached cluster ID to delete.
+  Region:
+    type: String
+    description: (Required) The AWS region where the Memcached cluster exists.
+mainSteps:
+  - name: DeleteMemcachedCluster
+    action: aws:executeScript
+    nextStep: VerifyMemcachedDeletion
+    isEnd: false
+    inputs:
+      Runtime: python3.11
+      Handler: main
+      InputPayload:
+        ClusterId: '{{ ClusterId }}'
+        Region: '{{ Region }}'
+      Script: |
+        import boto3
+        from botocore.exceptions import ClientError
+
+        def main(events, context):
+            region = events['Region']
+            cluster_id = events['ClusterId']
+            client = boto3.client('elasticache', region_name=region)
+
+            try:
+                response = client.describe_cache_clusters(
+                    CacheClusterId=cluster_id,
+                    ShowCacheNodeInfo=False
+                )
+                status = response['CacheClusters'][0].get('CacheClusterStatus')
+                
+                if status == "creating":
+                    print(f"Cluster '{cluster_id}' is in 'creating' state. Waiting 10 minutes before retrying deletion...")
+                    time.sleep(600)
+                    response = client.describe_cache_clusters(
+                    CacheClusterId=cluster_id,
+                    ShowCacheNodeInfo=False)
+                    status = response['CacheClusters'][0].get('CacheClusterStatus')
+                
+                if status != "available":
+                   raise Exception(f"Cluster '{cluster_id}' is not in 'available' state (status: {status})")
+                
+                print(f"Deleting Memcached cluster '{cluster_id}'...")
+                client.delete_cache_cluster(CacheClusterId=cluster_id)
+                return {
+                    "Message": f"Cluster '{cluster_id}' deletion initiated.",
+                    "TargetId": cluster_id
+                }
+
+            except ClientError as e:
+                if "CacheClusterNotFoundFault" in str(e):
+                    print(f"Cluster '{cluster_id}' not found. Nothing to delete.")
+                    return {
+                        "Message": f"Cluster '{cluster_id}' not found.",
+                        "TargetId": cluster_id,
+                        "Exists": False
+                    }
+                raise
+    outputs:
+      - Name: TargetId
+        Selector: $.Payload.TargetId
+        Type: String
+  - name: VerifyMemcachedDeletion
+    action: aws:executeScript
+    isEnd: true
+    inputs:
+      Runtime: python3.11
+      Handler: main
+      InputPayload:
+        ClusterId: '{{ DeleteMemcachedCluster.TargetId }}'
+        Region: '{{ Region }}'
+      Script: |
+        import boto3
+        from botocore.exceptions import ClientError
+        import time
+
+        def main(events, context):
+            region = events['Region']
+            cluster_id = events['ClusterId']
+            client = boto3.client('elasticache', region_name=region)
+
+            print(f"Waiting 20 seconds before checking deletion status of cluster '{cluster_id}'...")
+            time.sleep(20)
+
+            try:
+                response = client.describe_cache_clusters(CacheClusterId=cluster_id)
+                status = response['CacheClusters'][0].get('CacheClusterStatus', 'unknown')
+                print(f"Cluster '{cluster_id}' status after 20s: {status}")
+                
+                if status.lower() == "deleting":
+                    return {"Verification": "InProgress"}
+                else:
+                    return {"Verification": f"Still exists - status: {status}"}
+
+            except ClientError as e:
+                if "NotFoundFault" in str(e):
+                    print(f"Cluster '{cluster_id}' no longer exists.")
+                    return {"Verification": "Success"}
+                raise

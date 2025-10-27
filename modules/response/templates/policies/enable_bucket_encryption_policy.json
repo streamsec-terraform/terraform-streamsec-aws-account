@@ -4,11 +4,14 @@
     {
       "Effect": "Allow",
       "Action": [
+        "kms:CreateKey",
+        "kms:CreateAlias",
+        "kms:ListAliases",
+        "kms:DescribeKey",
+        "kms:EnableKeyRotation",
         "s3:PutEncryptionConfiguration"
       ],
-      "Resource": [
-        "arn:aws:s3:::*"
-      ]
+      "Resource": "*"
     }
   ]
 }

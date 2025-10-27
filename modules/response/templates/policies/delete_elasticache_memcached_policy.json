@@ -4,11 +4,8 @@
         {
             "Effect": "Allow",
             "Action": [
-                "iam:ListAttachedUserPolicies",
-				"iam:DetachUserPolicy",
-				"iam:ListUserPolicies",
-				"iam:DeleteUserPolicy",
-				"iam:GetUser"
+                "elasticache:DescribeCacheClusters",
+                "elasticache:DeleteCacheCluster"
             ],
             "Resource": "*"
         }

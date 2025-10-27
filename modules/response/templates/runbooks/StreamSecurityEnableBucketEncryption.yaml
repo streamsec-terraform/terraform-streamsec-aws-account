@@ -1,54 +1,106 @@
-schemaVersion: "0.3"
+schemaVersion: '0.3'
+description: Runbook to enable server-side encryption on an S3 bucket by using an existing or new KMS key named after the bucket.
 assumeRole: '{{ AutomationAssumeRole }}'
-description: "Runbook to enable server-side encryption on an S3 bucket using AWS KMS."
 parameters:
-  BucketName:
-    type: "String"
-    description: "The name of the S3 bucket to enable encryption on."
   AutomationAssumeRole:
-    type: "String"
-    description: "(Optional) The IAM role that allows Systems Manager Automation to perform the actions on your behalf."
-    default: ""
-
+    default: ''
+    description: (Optional) The IAM role that allows Systems Manager Automation to perform the actions on your behalf.
+    type: String
+  BucketName:
+    description: The name of the S3 bucket to enable encryption on.
+    type: String
 mainSteps:
-  - name: enableBucketEncryption
-    action: "aws:executeScript"
-    timeoutSeconds: 300
-    description: "Enables server-side encryption on the specified S3 bucket using AWS KMS."
+  - description: Uses or creates a KMS key for the S3 bucket, then enables SSE-KMS encryption.
+    name: EnableBucketEncryption
+    action: aws:executeScript
+    timeoutSeconds: 600
+    isEnd: true
     inputs:
       Runtime: python3.11
-      Handler: "handler"
+      Handler: handler
       Script: |
         import boto3
         from botocore.exceptions import ClientError, NoCredentialsError, PartialCredentialsError
 
+        def get_or_create_kms_key(bucket_name, kms_client):
+            """
+            Check if a KMS key alias for the bucket exists.
+            If yes, return its ARN. If not, create a new key and alias.
+            """
+            alias_name = f"alias/{bucket_name}-kms-key"
+            paginator = kms_client.get_paginator('list_aliases')
+
+            for page in paginator.paginate():
+                for alias in page.get('Aliases', []):
+                    if alias.get('AliasName') == alias_name and 'TargetKeyId' in alias:
+                        key_id = alias['TargetKeyId']
+                        key_metadata = kms_client.describe_key(KeyId=key_id)
+                        kms_key_arn = key_metadata['KeyMetadata']['Arn']
+                        print(f"Found existing KMS key: {kms_key_arn}")
+                        return kms_key_arn, alias_name, True
+
+            # If alias not found, create new key
+            print(f"No existing key found for alias {alias_name}. Creating new one...")
+            key_description = f"KMS key for S3 bucket {bucket_name}"
+            kms_response = kms_client.create_key(
+                Description=key_description,
+                KeyUsage='ENCRYPT_DECRYPT',
+                Origin='AWS_KMS'
+            )
+            kms_key_arn = kms_response['KeyMetadata']['Arn']
+            key_id = kms_response['KeyMetadata']['KeyId']
+
+            kms_client.create_alias(
+                AliasName=alias_name,
+                TargetKeyId=key_id
+            )
+            kms_client.enable_key_rotation(KeyId=key_id)
+
+            print(f"Created new KMS key and alias: {alias_name}")
+            return kms_key_arn, alias_name, False
+
+
         def handler(event, context):
             bucket_name = event['BucketName']
             s3_client = boto3.client('s3')
+            kms_client = boto3.client('kms')
 
-            encryption_configuration = {
-                "Rules": [
-                    {
-                        "ApplyServerSideEncryptionByDefault": {
-                            "SSEAlgorithm": "aws:kms"
-                        }
-                    }
-                ]
-            }
-        
             try:
-                # Enable bucket encryption
+                # --- Step 1: Get or create KMS key ---
+                kms_key_arn, alias_name, reused_existing_key = get_or_create_kms_key(bucket_name, kms_client)
+
+                # --- Step 2: Apply encryption on S3 bucket ---
+                encryption_configuration = {
+                    "Rules": [
+                        {
+                            "ApplyServerSideEncryptionByDefault": {
+                                "SSEAlgorithm": "aws:kms",
+                                "KMSMasterKeyID": kms_key_arn
+                            }
+                        }
+                    ]
+                }
+
                 s3_client.put_bucket_encryption(
                     Bucket=bucket_name,
                     ServerSideEncryptionConfiguration=encryption_configuration
                 )
-                print(f"Server-side encryption enabled for bucket: {bucket_name}")
+
+                status = "Reused existing key" if reused_existing_key else "Created new key"
+                print(f"SSE-KMS encryption enabled for bucket '{bucket_name}' using key: {alias_name} ({status})")
+
+                return {
+                    "BucketName": bucket_name,
+                    "KmsKeyArn": kms_key_arn,
+                    "AliasName": alias_name,
+                    "ReusedExistingKey": reused_existing_key
+                }
+
             except ClientError as e:
                 raise Exception(f"FAILURE: {str(e)}")
             except NoCredentialsError:
-                raise Exception(f"AWS credentials not found. Please configure them.")
+                raise Exception("AWS credentials not found.")
             except PartialCredentialsError:
-                raise Exception(f"Incomplete AWS credentials. Please check your configuration.")
-
+                raise Exception("Incomplete AWS credentials.")
       InputPayload:
-        BucketName: "{{ BucketName }}"
+        BucketName: '{{ BucketName }}'
