@@ -28,7 +28,7 @@ mainSteps:
         Region: '{{ Region }}'
       Script: |
         import boto3
-        from botocore.exceptions import ClientError
+        from botocore.exceptions import ClientError, WaiterError
 
         def main(events, context):
             region = events['Region']
@@ -42,17 +42,25 @@ mainSteps:
                 )
                 cluster = response['CacheClusters'][0]
                 status = cluster.get('CacheClusterStatus')
+                print(f"Current status of cluster '{cluster_id}': {status}")
 
-                if status == "creating":
-                    print(f"Cluster '{cluster_id}' is in 'creating' state. Waiting 10 minutes before retrying deletion...")
-                    time.sleep(600)
-                    response = client.describe_cache_clusters(
-                                CacheClusterId=cluster_id,
-                                ShowCacheNodeInfo=False)
-                    status = response['CacheClusters'][0].get('CacheClusterStatus')
-                
-                if status != "available":
-                    raise Exception(f"Cluster '{cluster_id}' is not in 'available' state (status: {status})")
+                if status.lower() in ["creating", "rebooting cache cluster nodes", "modifying", "snapshotting"]:
+                    print(f"Cluster '{cluster_id}' is in status {status}. Waiting until it becomes 'available'...")
+                    waiter = client.get_waiter('cache_cluster_available')
+                    try:
+                        waiter.wait(
+                            CacheClusterId=cluster_id,
+                            WaiterConfig={
+                                'Delay': 15,          # seconds between attempts
+                                'MaxAttempts': 60     # total wait time: 15*60=900 seconds (15 minutes)
+                            }
+                        )
+                        print(f"Cluster '{cluster_id}' is now available.")
+                    except WaiterError as we:
+                        raise Exception(f"Cluster '{cluster_id}' did not reach 'available' state in time: {we}")
+                else:
+                    if status != "available":
+                        raise Exception(f"Cluster '{cluster_id}' is not in 'available' state (status: {status}).")
                 
                 print(f"Deleting cache cluster '{cluster_id}'...")
                 client.delete_cache_cluster(CacheClusterId=cluster_id)
@@ -73,6 +81,7 @@ mainSteps:
       - Name: ClusterId
         Selector: $.Payload.ClusterId
         Type: String
+
   - name: VerifyRedisDeletion
     action: aws:executeScript
     isEnd: true
