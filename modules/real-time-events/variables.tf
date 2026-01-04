@@ -47,7 +47,7 @@ variable "lambda_layer_name" {
 variable "lambda_layer_s3_source_code_key" {
   description = "The S3 key for the lambda source code"
   type        = string
-  default     = "27ab1c62af9d5b19863d8a540e067d55"
+  default     = "52f4100259c78da11d8af3632e17516a"
 }
 
 variable "lambda_subnet_ids" {
