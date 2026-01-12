@@ -155,7 +155,7 @@ resource "aws_lambda_function" "streamsec_cost_lambda" {
   function_name = var.lambda_name
   role          = aws_iam_role.lambda_execution_role.arn
   handler       = "src/handler.costCollector"
-  runtime       = "nodejs20.x"
+  runtime       = "nodejs22.x"
   memory_size   = var.lambda_cloudwatch_memory_size
   timeout       = var.lambda_cloudwatch_timeout
   s3_bucket     = local.lambda_source_code_bucket

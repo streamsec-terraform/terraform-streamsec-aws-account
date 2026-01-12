@@ -137,7 +137,7 @@ variable "lambda_policy_path" {
 variable "lambda_runtime" {
   description = "(optional) overwrite hardcoded lambda compatible_runtimes and lambda_runtime"
   type        = string
-  default     = "nodejs20.x"
+  default     = "nodejs22.x"
   nullable    = false
 }
 
