@@ -169,7 +169,7 @@ variable "lambda_iam_role_tags" {
   default     = {}
 }
 
-variable "lambda_tags" {
+variable "lambda_function_tags" {
   description = "A map of additional tags to add to the Lambda function"
   type        = map(string)
   default     = {}
@@ -199,13 +199,13 @@ variable "lambda_policy_path" {
   default     = null
 }
 
-variable "lambda_policy_tags" {
+variable "lambda_iam_policy_tags" {
   description = "A map of additional tags to add to the Lambda IAM policy"
   type        = map(string)
   default     = {}
 }
 
-variable "secret_tags" {
+variable "lambda_secret_tags" {
   description = "A map of additional tags to add to the Secrets Manager secret"
   type        = map(string)
   default     = {}
@@ -303,7 +303,7 @@ variable "cur_time_unit" {
   default     = "DAILY"
 }
 
-variable "cur_tags" {
+variable "cur_report_tags" {
   description = "A map of additional tags to add to the CUR report definition"
   type        = map(string)
   default     = {}

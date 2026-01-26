@@ -70,7 +70,7 @@ No modules.
 | <a name="input_create_cost_bucket"></a> [create\_cost\_bucket](#input\_create\_cost\_bucket) | Whether to create an S3 bucket to store the flow logs | `bool` | `false` | no |
 | <a name="input_cur_prefix"></a> [cur\_prefix](#input\_cur\_prefix) | The prefix to use for the CUR report | `string` | `"/streamsec-cost-report"` | no |
 | <a name="input_cur_report_name"></a> [cur\_report\_name](#input\_cur\_report\_name) | Whether to create a CUR report | `string` | `"streamsec-cost-report"` | no |
-| <a name="input_cur_tags"></a> [cur\_tags](#input\_cur\_tags) | A map of additional tags to add to the CUR report definition | `map(string)` | `{}` | no |
+| <a name="input_cur_report_tags"></a> [cur\_report\_tags](#input\_cur\_report\_tags) | A map of additional tags to add to the CUR report definition | `map(string)` | `{}` | no |
 | <a name="input_cur_time_unit"></a> [cur\_time\_unit](#input\_cur\_time\_unit) | The time unit for the CUR report | `string` | `"DAILY"` | no |
 | <a name="input_iam_policy_description"></a> [iam\_policy\_description](#input\_iam\_policy\_description) | Description to use on IAM policy created | `string` | `"Stream Security IAM Policy"` | no |
 | <a name="input_iam_policy_name"></a> [iam\_policy\_name](#input\_iam\_policy\_name) | Name to use on IAM policy created | `string` | `"streamsec-policy"` | no |
@@ -87,6 +87,8 @@ No modules.
 | <a name="input_lambda_cloudwatch_memory_size"></a> [lambda\_cloudwatch\_memory\_size](#input\_lambda\_cloudwatch\_memory\_size) | The amount of memory in MB to allocate to the lambda function | `number` | `128` | no |
 | <a name="input_lambda_cloudwatch_s3_source_code_key"></a> [lambda\_cloudwatch\_s3\_source\_code\_key](#input\_lambda\_cloudwatch\_s3\_source\_code\_key) | The S3 key for the lambda source code | `string` | `"fccdf51e8501d87a570ba11a49eaf12c"` | no |
 | <a name="input_lambda_cloudwatch_timeout"></a> [lambda\_cloudwatch\_timeout](#input\_lambda\_cloudwatch\_timeout) | The amount of time in seconds the lambda function is allowed to run | `number` | `60` | no |
+| <a name="input_lambda_function_tags"></a> [lambda\_function\_tags](#input\_lambda\_function\_tags) | A map of additional tags to add to the Lambda function | `map(string)` | `{}` | no |
+| <a name="input_lambda_iam_policy_tags"></a> [lambda\_iam\_policy\_tags](#input\_lambda\_iam\_policy\_tags) | A map of additional tags to add to the Lambda IAM policy | `map(string)` | `{}` | no |
 | <a name="input_lambda_iam_role_description"></a> [lambda\_iam\_role\_description](#input\_lambda\_iam\_role\_description) | Description to use on IAM role created | `string` | `"Stream Security IAM Role"` | no |
 | <a name="input_lambda_iam_role_name"></a> [lambda\_iam\_role\_name](#input\_lambda\_iam\_role\_name) | Name to use on IAM role created | `string` | `"streamsec-cost-execution-role"` | no |
 | <a name="input_lambda_iam_role_path"></a> [lambda\_iam\_role\_path](#input\_lambda\_iam\_role\_path) | Cluster IAM role path | `string` | `null` | no |
@@ -96,13 +98,11 @@ No modules.
 | <a name="input_lambda_policy_description"></a> [lambda\_policy\_description](#input\_lambda\_policy\_description) | Description to use on IAM policy created | `string` | `"Stream Security IAM Policy for cost lambda"` | no |
 | <a name="input_lambda_policy_name"></a> [lambda\_policy\_name](#input\_lambda\_policy\_name) | Name to use on IAM policy created | `string` | `"streamsec-cost-policy"` | no |
 | <a name="input_lambda_policy_path"></a> [lambda\_policy\_path](#input\_lambda\_policy\_path) | IAM policy path | `string` | `null` | no |
-| <a name="input_lambda_policy_tags"></a> [lambda\_policy\_tags](#input\_lambda\_policy\_tags) | A map of additional tags to add to the Lambda IAM policy | `map(string)` | `{}` | no |
 | <a name="input_lambda_policy_use_name_prefix"></a> [lambda\_policy\_use\_name\_prefix](#input\_lambda\_policy\_use\_name\_prefix) | Determines whether the IAM policy name (`iam_policy_name`) is used as a prefix | `bool` | `true` | no |
+| <a name="input_lambda_secret_tags"></a> [lambda\_secret\_tags](#input\_lambda\_secret\_tags) | A map of additional tags to add to the Secrets Manager secret | `map(string)` | `{}` | no |
 | <a name="input_lambda_security_group_ids"></a> [lambda\_security\_group\_ids](#input\_lambda\_security\_group\_ids) | The security group IDs to use for the lambda function | `list(string)` | `[]` | no |
 | <a name="input_lambda_source_code_bucket_prefix"></a> [lambda\_source\_code\_bucket\_prefix](#input\_lambda\_source\_code\_bucket\_prefix) | The prefix to use for the lambda source code bucket | `string` | `"prod-lightlytics-artifacts"` | no |
 | <a name="input_lambda_subnet_ids"></a> [lambda\_subnet\_ids](#input\_lambda\_subnet\_ids) | The subnet IDs to use for the lambda function | `list(string)` | `[]` | no |
-| <a name="input_lambda_tags"></a> [lambda\_tags](#input\_lambda\_tags) | A map of additional tags to add to the Lambda function | `map(string)` | `{}` | no |
-| <a name="input_secret_tags"></a> [secret\_tags](#input\_secret\_tags) | A map of additional tags to add to the Secrets Manager secret | `map(string)` | `{}` | no |
 | <a name="input_streamsec_account"></a> [streamsec\_account](#input\_streamsec\_account) | The AWS Account ID for the Stream.Security account. | `string` | `"624907860825"` | no |
 | <a name="input_tags"></a> [tags](#input\_tags) | A map of global tags to add to all created resources | `map(string)` | `{}` | no |
 
