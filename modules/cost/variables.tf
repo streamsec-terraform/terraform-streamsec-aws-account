@@ -169,6 +169,12 @@ variable "lambda_iam_role_tags" {
   default     = {}
 }
 
+variable "lambda_tags" {
+  description = "A map of additional tags to add to the Lambda function"
+  type        = map(string)
+  default     = {}
+}
+
 variable "lambda_policy_name" {
   description = "Name to use on IAM policy created"
   type        = string
@@ -191,6 +197,18 @@ variable "lambda_policy_path" {
   description = "IAM policy path"
   type        = string
   default     = null
+}
+
+variable "lambda_policy_tags" {
+  description = "A map of additional tags to add to the Lambda IAM policy"
+  type        = map(string)
+  default     = {}
+}
+
+variable "secret_tags" {
+  description = "A map of additional tags to add to the Secrets Manager secret"
+  type        = map(string)
+  default     = {}
 }
 
 ################################################################################
@@ -283,6 +301,12 @@ variable "cur_time_unit" {
   description = "The time unit for the CUR report"
   type        = string
   default     = "DAILY"
+}
+
+variable "cur_tags" {
+  description = "A map of additional tags to add to the CUR report definition"
+  type        = map(string)
+  default     = {}
 }
 
 ################################################################################

@@ -83,14 +83,17 @@
 | <a name="input_lambda_policy_description"></a> [lambda\_policy\_description](#input\_lambda\_policy\_description) | Description to use on IAM policy created | `string` | `"Stream Security IAM Policy for flowlogs lambda"` | no |
 | <a name="input_lambda_policy_name"></a> [lambda\_policy\_name](#input\_lambda\_policy\_name) | Name to use on IAM policy created | `string` | `"streamsec-flowlogs-policy"` | no |
 | <a name="input_lambda_policy_path"></a> [lambda\_policy\_path](#input\_lambda\_policy\_path) | IAM policy path | `string` | `null` | no |
+| <a name="input_lambda_policy_tags"></a> [lambda\_policy\_tags](#input\_lambda\_policy\_tags) | A map of additional tags to add to the Lambda IAM policy | `map(string)` | `{}` | no |
 | <a name="input_lambda_policy_use_name_prefix"></a> [lambda\_policy\_use\_name\_prefix](#input\_lambda\_policy\_use\_name\_prefix) | Determines whether the IAM policy name (`iam_policy_name`) is used as a prefix | `bool` | `true` | no |
 | <a name="input_lambda_security_group_ids"></a> [lambda\_security\_group\_ids](#input\_lambda\_security\_group\_ids) | The security group IDs to use for the lambda function | `list(string)` | `[]` | no |
 | <a name="input_lambda_source_code_bucket_prefix"></a> [lambda\_source\_code\_bucket\_prefix](#input\_lambda\_source\_code\_bucket\_prefix) | The prefix to use for the lambda source code bucket | `string` | `"prod-lightlytics-artifacts"` | no |
 | <a name="input_lambda_subnet_ids"></a> [lambda\_subnet\_ids](#input\_lambda\_subnet\_ids) | The subnet IDs to use for the lambda function | `list(string)` | `[]` | no |
+| <a name="input_lambda_tags"></a> [lambda\_tags](#input\_lambda\_tags) | A map of additional tags to add to the Lambda function | `map(string)` | `{}` | no |
 | <a name="input_private_subnet_ids"></a> [private\_subnet\_ids](#input\_private\_subnet\_ids) | Private subnet IDs for the Interface Endpoint | `list(string)` | `[]` | no |
 | <a name="input_privatelink_security_group_id"></a> [privatelink\_security\_group\_id](#input\_privatelink\_security\_group\_id) | Optional existing SG ID allowing egress 443 to the endpoint. If null, the module creates one. | `string` | `null` | no |
 | <a name="input_privatelink_service_name"></a> [privatelink\_service\_name](#input\_privatelink\_service\_name) | StreamSecurity AWS PrivateLink service name for your region (from StreamSecurity) | `string` | `null` | no |
 | <a name="input_privatelink_tags"></a> [privatelink\_tags](#input\_privatelink\_tags) | Tags for PrivateLink resources | `map(string)` | `{}` | no |
+| <a name="input_secret_tags"></a> [secret\_tags](#input\_secret\_tags) | A map of additional tags to add to the Secrets Manager secret | `map(string)` | `{}` | no |
 | <a name="input_tags"></a> [tags](#input\_tags) | A map of global tags to add to all created resources | `map(string)` | `{}` | no |
 | <a name="input_vpc_id"></a> [vpc\_id](#input\_vpc\_id) | VPC ID where the Interface Endpoint will be created | `string` | `null` | no |
 | <a name="input_vpc_ids"></a> [vpc\_ids](#input\_vpc\_ids) | The VPC IDs to use for the flow logs | `list(string)` | `[]` | no |
