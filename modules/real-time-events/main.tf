@@ -145,18 +145,28 @@ resource "aws_lambda_function_event_invoke_config" "streamsec_options_cloudwatch
 ################################################################################
 
 resource "aws_cloudwatch_event_rule" "streamsec_cloudwatch_rules" {
-  for_each      = local.cloudwatch_rules
-  name          = each.value["name"]
-  description   = each.value["description"]
-  event_pattern = each.value["event_pattern"]
-  tags          = var.tags
+  for_each       = local.cloudwatch_rules
+  name           = each.value["name"]
+  description    = each.value["description"]
+  event_pattern  = each.value["event_pattern"]
+  event_bus_name = "default"
+  tags           = var.tags
+}
+
+# Allow time for EventBridge rules to propagate before creating targets
+resource "time_sleep" "wait_for_rules" {
+  depends_on      = [aws_cloudwatch_event_rule.streamsec_cloudwatch_rules]
+  create_duration = "10s"
 }
 
 resource "aws_cloudwatch_event_target" "streamsec_lambda_cloudwatch_target" {
-  for_each  = local.cloudwatch_rules
-  rule      = aws_cloudwatch_event_rule.streamsec_cloudwatch_rules[each.key].name
-  target_id = "CloudWatchToLambda"
-  arn       = aws_lambda_function.streamsec_real_time_events_lambda.arn
+  for_each       = local.cloudwatch_rules
+  rule           = aws_cloudwatch_event_rule.streamsec_cloudwatch_rules[each.key].name
+  event_bus_name = "default"
+  target_id      = "CloudWatchToLambda"
+  arn            = aws_lambda_function.streamsec_real_time_events_lambda.arn
+
+  depends_on = [time_sleep.wait_for_rules]
 }
 
 resource "aws_lambda_permission" "streamsec_allow_lambda_cloudwatch_invocation" {
