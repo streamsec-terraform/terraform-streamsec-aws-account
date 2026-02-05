@@ -128,6 +128,7 @@ resource "aws_iam_policy" "lambda_exec_policy" {
       }
     ]
   })
+  tags = merge(var.tags, var.lambda_iam_policy_tags)
 }
 
 resource "aws_iam_role_policy_attachment" "lambda_cost_execution_role_policy_attachment" {
@@ -144,6 +145,7 @@ resource "aws_secretsmanager_secret" "streamsec_collection_secret" {
   name                    = var.collection_cost_token_secret_name
   description             = "Stream Security Collection Token"
   recovery_window_in_days = 0
+  tags                    = merge(var.tags, var.lambda_secret_tags)
 }
 
 resource "aws_secretsmanager_secret_version" "streamsec_collection_secret_version" {
@@ -174,6 +176,7 @@ resource "aws_lambda_function" "streamsec_cost_lambda" {
       NODE_ENV    = "production"
     }
   }
+  tags = merge(var.tags, var.lambda_function_tags)
 }
 
 resource "aws_lambda_function_event_invoke_config" "streamsec_options_cloudwatch" {
@@ -328,6 +331,7 @@ resource "aws_cur_report_definition" "cur_report_definition" {
   s3_bucket                  = data.aws_s3_bucket.cost_bucket.bucket
   s3_region                  = "us-east-1"
   s3_prefix                  = var.cur_prefix
+  tags                       = merge(var.tags, var.cur_report_tags)
 }
 
 resource "streamsec_aws_cost_ack" "this" {

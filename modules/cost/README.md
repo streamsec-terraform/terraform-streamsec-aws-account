@@ -60,7 +60,7 @@ No modules.
 |------|-------------|------|---------|:--------:|
 | <a name="input_collection_cost_token_secret_name"></a> [collection\_cost\_token\_secret\_name](#input\_collection\_cost\_token\_secret\_name) | The name of the secret to use for the lambda function | `string` | `"streamsec-collection-token-cost"` | no |
 | <a name="input_cost_bucket_force_destroy"></a> [cost\_bucket\_force\_destroy](#input\_cost\_bucket\_force\_destroy) | A boolean that indicates all objects should be deleted from the bucket so that the bucket can be destroyed without error | `bool` | `true` | no |
-| <a name="input_cost_bucket_lifecycle_rule"></a> [cost\_bucket\_lifecycle\_rule](#input\_cost\_bucket\_lifecycle\_rule) | A list of lifecycle rules to apply to the S3 bucket | <pre>list(object({<br>    id     = string<br>    prefix = string<br>    status = string<br>    days   = number<br>  }))</pre> | <pre>[<br>  {<br>    "days": 360,<br>    "id": "purge",<br>    "prefix": "AWSLogs/",<br>    "status": "Enabled"<br>  }<br>]</pre> | no |
+| <a name="input_cost_bucket_lifecycle_rule"></a> [cost\_bucket\_lifecycle\_rule](#input\_cost\_bucket\_lifecycle\_rule) | A list of lifecycle rules to apply to the S3 bucket | <pre>list(object({<br/>    id     = string<br/>    prefix = string<br/>    status = string<br/>    days   = number<br/>  }))</pre> | <pre>[<br/>  {<br/>    "days": 360,<br/>    "id": "purge",<br/>    "prefix": "AWSLogs/",<br/>    "status": "Enabled"<br/>  }<br/>]</pre> | no |
 | <a name="input_cost_bucket_name"></a> [cost\_bucket\_name](#input\_cost\_bucket\_name) | The name of the S3 bucket to store the flow logs | `string` | `"streamsec-cost"` | no |
 | <a name="input_cost_bucket_tags"></a> [cost\_bucket\_tags](#input\_cost\_bucket\_tags) | A map of additional tags to add to the S3 bucket created | `map(string)` | `{}` | no |
 | <a name="input_cost_bucket_use_name_prefix"></a> [cost\_bucket\_use\_name\_prefix](#input\_cost\_bucket\_use\_name\_prefix) | Whether to use a prefix for the bucket name | `bool` | `true` | no |
@@ -70,6 +70,7 @@ No modules.
 | <a name="input_create_cost_bucket"></a> [create\_cost\_bucket](#input\_create\_cost\_bucket) | Whether to create an S3 bucket to store the flow logs | `bool` | `false` | no |
 | <a name="input_cur_prefix"></a> [cur\_prefix](#input\_cur\_prefix) | The prefix to use for the CUR report | `string` | `"/streamsec-cost-report"` | no |
 | <a name="input_cur_report_name"></a> [cur\_report\_name](#input\_cur\_report\_name) | Whether to create a CUR report | `string` | `"streamsec-cost-report"` | no |
+| <a name="input_cur_report_tags"></a> [cur\_report\_tags](#input\_cur\_report\_tags) | A map of additional tags to add to the CUR report definition | `map(string)` | `{}` | no |
 | <a name="input_cur_time_unit"></a> [cur\_time\_unit](#input\_cur\_time\_unit) | The time unit for the CUR report | `string` | `"DAILY"` | no |
 | <a name="input_iam_policy_description"></a> [iam\_policy\_description](#input\_iam\_policy\_description) | Description to use on IAM policy created | `string` | `"Stream Security IAM Policy"` | no |
 | <a name="input_iam_policy_name"></a> [iam\_policy\_name](#input\_iam\_policy\_name) | Name to use on IAM policy created | `string` | `"streamsec-policy"` | no |
@@ -86,6 +87,8 @@ No modules.
 | <a name="input_lambda_cloudwatch_memory_size"></a> [lambda\_cloudwatch\_memory\_size](#input\_lambda\_cloudwatch\_memory\_size) | The amount of memory in MB to allocate to the lambda function | `number` | `128` | no |
 | <a name="input_lambda_cloudwatch_s3_source_code_key"></a> [lambda\_cloudwatch\_s3\_source\_code\_key](#input\_lambda\_cloudwatch\_s3\_source\_code\_key) | The S3 key for the lambda source code | `string` | `"fccdf51e8501d87a570ba11a49eaf12c"` | no |
 | <a name="input_lambda_cloudwatch_timeout"></a> [lambda\_cloudwatch\_timeout](#input\_lambda\_cloudwatch\_timeout) | The amount of time in seconds the lambda function is allowed to run | `number` | `60` | no |
+| <a name="input_lambda_function_tags"></a> [lambda\_function\_tags](#input\_lambda\_function\_tags) | A map of additional tags to add to the Lambda function | `map(string)` | `{}` | no |
+| <a name="input_lambda_iam_policy_tags"></a> [lambda\_iam\_policy\_tags](#input\_lambda\_iam\_policy\_tags) | A map of additional tags to add to the Lambda IAM policy | `map(string)` | `{}` | no |
 | <a name="input_lambda_iam_role_description"></a> [lambda\_iam\_role\_description](#input\_lambda\_iam\_role\_description) | Description to use on IAM role created | `string` | `"Stream Security IAM Role"` | no |
 | <a name="input_lambda_iam_role_name"></a> [lambda\_iam\_role\_name](#input\_lambda\_iam\_role\_name) | Name to use on IAM role created | `string` | `"streamsec-cost-execution-role"` | no |
 | <a name="input_lambda_iam_role_path"></a> [lambda\_iam\_role\_path](#input\_lambda\_iam\_role\_path) | Cluster IAM role path | `string` | `null` | no |
@@ -96,6 +99,7 @@ No modules.
 | <a name="input_lambda_policy_name"></a> [lambda\_policy\_name](#input\_lambda\_policy\_name) | Name to use on IAM policy created | `string` | `"streamsec-cost-policy"` | no |
 | <a name="input_lambda_policy_path"></a> [lambda\_policy\_path](#input\_lambda\_policy\_path) | IAM policy path | `string` | `null` | no |
 | <a name="input_lambda_policy_use_name_prefix"></a> [lambda\_policy\_use\_name\_prefix](#input\_lambda\_policy\_use\_name\_prefix) | Determines whether the IAM policy name (`iam_policy_name`) is used as a prefix | `bool` | `true` | no |
+| <a name="input_lambda_secret_tags"></a> [lambda\_secret\_tags](#input\_lambda\_secret\_tags) | A map of additional tags to add to the Secrets Manager secret | `map(string)` | `{}` | no |
 | <a name="input_lambda_security_group_ids"></a> [lambda\_security\_group\_ids](#input\_lambda\_security\_group\_ids) | The security group IDs to use for the lambda function | `list(string)` | `[]` | no |
 | <a name="input_lambda_source_code_bucket_prefix"></a> [lambda\_source\_code\_bucket\_prefix](#input\_lambda\_source\_code\_bucket\_prefix) | The prefix to use for the lambda source code bucket | `string` | `"prod-lightlytics-artifacts"` | no |
 | <a name="input_lambda_subnet_ids"></a> [lambda\_subnet\_ids](#input\_lambda\_subnet\_ids) | The subnet IDs to use for the lambda function | `list(string)` | `[]` | no |

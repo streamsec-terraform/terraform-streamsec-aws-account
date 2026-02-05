@@ -110,6 +110,12 @@ variable "lambda_iam_role_tags" {
   default     = {}
 }
 
+variable "lambda_function_tags" {
+  description = "A map of additional tags to add to the Lambda function"
+  type        = map(string)
+  default     = {}
+}
+
 variable "lambda_policy_name" {
   description = "Name to use on IAM policy created"
   type        = string
@@ -132,6 +138,18 @@ variable "lambda_policy_path" {
   description = "IAM policy path"
   type        = string
   default     = null
+}
+
+variable "lambda_iam_policy_tags" {
+  description = "A map of additional tags to add to the Lambda IAM policy"
+  type        = map(string)
+  default     = {}
+}
+
+variable "lambda_secret_tags" {
+  description = "A map of additional tags to add to the Secrets Manager secret"
+  type        = map(string)
+  default     = {}
 }
 
 ################################################################################
