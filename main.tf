@@ -85,7 +85,7 @@ resource "time_sleep" "wait" {
 
 resource "streamsec_aws_account_ack" "this" {
   cloud_account_id = data.aws_caller_identity.current.account_id
-  stack_region     = data.aws_region.current.name
+  stack_region     = data.aws_region.current.region
   role_arn         = aws_iam_role.this.arn
   depends_on       = [time_sleep.wait]
 }

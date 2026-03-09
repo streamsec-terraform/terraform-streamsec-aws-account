@@ -141,7 +141,7 @@ resource "aws_iam_role_policy" "response_policies" {
 resource "streamsec_aws_response_ack" "this" {
   cloud_account_id  = data.streamsec_aws_account.this.cloud_account_id
   runbook_role_list = [for role in aws_iam_role.response_roles : role.arn]
-  region            = data.aws_region.current.name
+  region            = data.aws_region.current.region
   policy_to_role_map = {
     for response in local.runbook_config.Remediations : response.policy_file_name => aws_iam_role.response_roles[response.name].arn
     if response.runbook_owner == "StreamSecurity" && !contains(var.exclude_runbooks, response.name)
