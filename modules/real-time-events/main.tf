@@ -6,7 +6,7 @@ data "streamsec_aws_account" "this" {
 }
 
 locals {
-  lambda_source_code_bucket = "${var.lambda_source_code_bucket_prefix}-${data.aws_region.current.name}"
+  lambda_source_code_bucket = "${var.lambda_source_code_bucket_prefix}-${data.aws_region.current.region}"
   cloudwatch_rules = { for i in range(length(fileset(path.module, "templates/*.json"))) :
     "streamsec-rule-${i}" => {
       name          = "${var.cloudwatch_event_rules_prefix}rule-${i}"
@@ -178,7 +178,7 @@ resource "aws_lambda_permission" "streamsec_allow_lambda_cloudwatch_invocation" 
 
 resource "streamsec_aws_real_time_events_ack" "this" {
   cloud_account_id = data.aws_caller_identity.current.account_id
-  region           = data.aws_region.current.name
+  region           = data.aws_region.current.region
   depends_on       = [aws_lambda_permission.streamsec_allow_lambda_cloudwatch_invocation]
 }
 

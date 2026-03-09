@@ -6,7 +6,7 @@ data "streamsec_aws_account" "this" {
 }
 
 locals {
-  lambda_source_code_bucket = "${var.lambda_source_code_bucket_prefix}-${data.aws_region.current.name}"
+  lambda_source_code_bucket = "${var.lambda_source_code_bucket_prefix}-${data.aws_region.current.region}"
 
   compatible_runtimes = formatlist(var.lambda_runtime)
 }
