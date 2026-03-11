@@ -39,15 +39,22 @@ mainSteps:
                 for ip_range in ip_ranges:
                     if ip_range.get('CidrIp') == '0.0.0.0/0':
                         # Remove the offending rule
+
+                        permission = {
+                            'IpProtocol': protocol,
+                            'IpRanges': [{'CidrIp': '0.0.0.0/0'}]
+                        }
+        
+                        if from_port is not None:
+                            permission['FromPort'] = from_port
+        
+                        if to_port is not None:
+                            permission['ToPort'] = to_port
+        
                         try:
                             ec2.revoke_security_group_ingress(
                                 GroupId=security_group_id,
-                                IpPermissions=[{
-                                    'IpProtocol': protocol,
-                                    'FromPort': from_port,
-                                    'ToPort': to_port,
-                                    'IpRanges': [{'CidrIp': '0.0.0.0/0'}]
-                                }]
+                                IpPermissions=[permission]
                             )
                             print(f"Removed rule: {protocol} {from_port}-{to_port} 0.0.0.0/0")
                         except Exception as e:
