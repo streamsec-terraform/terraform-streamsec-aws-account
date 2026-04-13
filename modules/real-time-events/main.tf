@@ -123,12 +123,15 @@ resource "aws_lambda_function" "streamsec_real_time_events_lambda" {
   }
 
   environment {
-    variables = {
-      SECRET_NAME = aws_secretsmanager_secret.streamsec_collection_secret.name
-      API_URL     = local.effective_api_url
-      ENV         = "production"
-      NODE_ENV    = "production"
-    }
+    variables = merge(
+      {
+        SECRET_NAME = aws_secretsmanager_secret.streamsec_collection_secret.name
+        API_URL     = local.effective_api_url
+        ENV         = "production"
+        NODE_ENV    = "production"
+      },
+      var.central_vpc_flow_logs_fields != "" ? { DEFAULT_FLOW_LOG_FIELDS = var.central_vpc_flow_logs_fields } : {}
+    )
   }
 
   tags = merge(var.tags, var.lambda_tags)
@@ -189,4 +192,88 @@ resource "aws_iam_role_policy_attachment" "lambda_vpc_access" {
   count      = var.enable_privatelink ? 1 : 0
   role       = aws_iam_role.lambda_execution_role.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+}
+
+################################################################################
+# Centralized CloudWatch Logs Collection
+################################################################################
+
+locals {
+  central_log_groups = {
+    cloudtrail = var.central_cloudtrail_log_group
+    flowlogs   = var.central_vpc_flow_logs_log_group
+    eksaudit   = var.central_eks_audit_log_group
+    route53    = var.central_route53_log_group
+    bedrock    = var.central_bedrock_log_group
+  }
+  active_central_log_groups = { for k, v in local.central_log_groups : k => v if v != "" }
+
+  eks_audit_filter_pattern = <<-EOT
+{(($.sourceIPs[0] != "::1" && $.sourceIPs[0] != "127.0.0.1") || ($.sourceIPs[1] != "::1" && $.sourceIPs[1] != "127.0.0.1")) && $.stage = "ResponseComplete" && $.verb != "watch" && $.user.username != "system:kube*" && $.user.username != "eks:*" && ($.objectRef.resource not exists || ($.objectRef.resource != "events" && $.objectRef.resource != "leases")) && ($.objectRef.subresource not exists || ($.objectRef.subresource != "status" && $.objectRef.subresource != "scale" && $.objectRef.subresource != "proxy" && $.objectRef.subresource != "token" && ($.objectRef.subresource != "binding" || ($.objectRef.subresource = "binding" && $.responseStatus.code != 201))))}
+EOT
+}
+
+resource "aws_lambda_permission" "streamsec_allow_cwlogs_invocation" {
+  count         = length(local.active_central_log_groups) > 0 ? 1 : 0
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.streamsec_real_time_events_lambda.function_name
+  principal     = "logs.${data.aws_region.current.name}.amazonaws.com"
+  source_account = data.aws_caller_identity.current.account_id
+}
+
+resource "aws_cloudwatch_log_subscription_filter" "streamsec_central_log_filters" {
+  for_each        = local.active_central_log_groups
+  name            = "streamsec-${each.key}-to-collector"
+  log_group_name  = each.value
+  filter_pattern  = each.key == "eksaudit" ? trimspace(local.eks_audit_filter_pattern) : ""
+  destination_arn = aws_lambda_function.streamsec_real_time_events_lambda.arn
+
+  depends_on = [aws_lambda_permission.streamsec_allow_cwlogs_invocation]
+}
+
+################################################################################
+# Centralized Kinesis Integration
+################################################################################
+
+resource "aws_iam_policy" "kinesis_read_policy" {
+  count       = var.central_kinesis_stream_arn != "" ? 1 : 0
+  name        = "${var.lambda_name}-kinesis-read"
+  description = "Allow collector Lambda to read from Kinesis stream"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "kinesis:GetRecords",
+          "kinesis:GetShardIterator",
+          "kinesis:DescribeStream",
+          "kinesis:DescribeStreamSummary",
+          "kinesis:ListShards",
+          "kinesis:ListStreams"
+        ]
+        Resource = var.central_kinesis_stream_arn
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "kinesis_read_attachment" {
+  count      = var.central_kinesis_stream_arn != "" ? 1 : 0
+  role       = aws_iam_role.lambda_execution_role.name
+  policy_arn = aws_iam_policy.kinesis_read_policy[0].arn
+}
+
+resource "aws_lambda_event_source_mapping" "kinesis_to_lambda" {
+  count                              = var.central_kinesis_stream_arn != "" ? 1 : 0
+  event_source_arn                   = var.central_kinesis_stream_arn
+  function_name                      = aws_lambda_function.streamsec_real_time_events_lambda.arn
+  starting_position                  = "LATEST"
+  batch_size                         = var.central_kinesis_batch_size
+  maximum_batching_window_in_seconds = var.central_kinesis_batch_window
+  bisect_batch_on_function_error     = true
+  maximum_retry_attempts             = 3
+
+  depends_on = [aws_iam_role_policy_attachment.kinesis_read_attachment]
 }

@@ -209,3 +209,61 @@ variable "privatelink_tags" {
   type        = map(string)
   default     = {}
 }
+
+################################################################################
+# Centralized CloudWatch Logs Collection
+################################################################################
+
+variable "central_cloudtrail_log_group" {
+  description = "(Optional) Name of an existing CloudWatch Logs log group containing CloudTrail logs"
+  type        = string
+  default     = ""
+}
+
+variable "central_vpc_flow_logs_log_group" {
+  description = "(Optional) Name of an existing CloudWatch Logs log group containing VPC Flow Logs"
+  type        = string
+  default     = ""
+}
+
+variable "central_vpc_flow_logs_fields" {
+  description = "(Optional) Space-separated flow log field names. Empty = default 14-field format"
+  type        = string
+  default     = ""
+}
+
+variable "central_eks_audit_log_group" {
+  description = "(Optional) Name of an existing CloudWatch Logs log group containing EKS audit logs"
+  type        = string
+  default     = ""
+}
+
+variable "central_route53_log_group" {
+  description = "(Optional) Name of an existing CloudWatch Logs log group containing Route53 DNS query logs"
+  type        = string
+  default     = ""
+}
+
+variable "central_bedrock_log_group" {
+  description = "(Optional) Name of an existing CloudWatch Logs log group containing Bedrock model invocation logs"
+  type        = string
+  default     = ""
+}
+
+variable "central_kinesis_stream_arn" {
+  description = "(Optional) ARN of an existing Kinesis Data Stream receiving CloudWatch Logs"
+  type        = string
+  default     = ""
+}
+
+variable "central_kinesis_batch_size" {
+  description = "Max records per Lambda invocation from Kinesis"
+  type        = number
+  default     = 100
+}
+
+variable "central_kinesis_batch_window" {
+  description = "Max seconds to buffer Kinesis records before invoking Lambda"
+  type        = number
+  default     = 60
+}
