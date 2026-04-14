@@ -111,7 +111,7 @@ resource "aws_lambda_function" "streamsec_real_time_events_lambda" {
   role          = aws_iam_role.lambda_execution_role.arn
   handler       = "src/handler.cloudWatchCollector"
   runtime       = var.lambda_runtime
-  memory_size   = var.central_kinesis_stream_arn != "" ? var.central_kinesis_memory_size : var.lambda_cloudwatch_memory_size
+  memory_size   = length(var.central_kinesis_stream_arns) > 0 ? var.central_kinesis_memory_size : var.lambda_cloudwatch_memory_size
   timeout       = var.lambda_cloudwatch_timeout
   s3_bucket     = local.lambda_source_code_bucket
   s3_key        = var.lambda_cloudwatch_s3_source_code_key
@@ -236,9 +236,9 @@ resource "aws_cloudwatch_log_subscription_filter" "streamsec_central_log_filters
 ################################################################################
 
 resource "aws_iam_policy" "kinesis_read_policy" {
-  count       = var.central_kinesis_stream_arn != "" ? 1 : 0
+  count       = length(var.central_kinesis_stream_arns) > 0 ? 1 : 0
   name        = "${var.lambda_name}-kinesis-read"
-  description = "Allow collector Lambda to read from Kinesis stream"
+  description = "Allow collector Lambda to read from Kinesis streams"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -253,21 +253,21 @@ resource "aws_iam_policy" "kinesis_read_policy" {
           "kinesis:ListShards",
           "kinesis:ListStreams"
         ]
-        Resource = var.central_kinesis_stream_arn
+        Resource = var.central_kinesis_stream_arns
       }
     ]
   })
 }
 
 resource "aws_iam_role_policy_attachment" "kinesis_read_attachment" {
-  count      = var.central_kinesis_stream_arn != "" ? 1 : 0
+  count      = length(var.central_kinesis_stream_arns) > 0 ? 1 : 0
   role       = aws_iam_role.lambda_execution_role.name
   policy_arn = aws_iam_policy.kinesis_read_policy[0].arn
 }
 
 resource "aws_lambda_event_source_mapping" "kinesis_to_lambda" {
-  count                              = var.central_kinesis_stream_arn != "" ? 1 : 0
-  event_source_arn                   = var.central_kinesis_stream_arn
+  for_each                           = toset(var.central_kinesis_stream_arns)
+  event_source_arn                   = each.value
   function_name                      = aws_lambda_function.streamsec_real_time_events_lambda.arn
   starting_position                  = "LATEST"
   batch_size                         = var.central_kinesis_batch_size

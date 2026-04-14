@@ -250,10 +250,10 @@ variable "central_bedrock_log_group" {
   default     = ""
 }
 
-variable "central_kinesis_stream_arn" {
-  description = "(Optional) ARN of an existing Kinesis Data Stream receiving CloudWatch Logs"
-  type        = string
-  default     = ""
+variable "central_kinesis_stream_arns" {
+  description = "(Optional) List of Kinesis Data Stream ARNs receiving CloudWatch Logs"
+  type        = list(string)
+  default     = []
 }
 
 variable "central_kinesis_memory_size" {

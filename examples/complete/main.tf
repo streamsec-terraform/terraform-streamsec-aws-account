@@ -36,7 +36,7 @@ module "real_time_us_east_1" {
   # central_eks_audit_log_group     = "/aws/eks/my-cluster/cluster"
   # central_route53_log_group       = "/staging/route53dnslogs/cw-test"
   # central_bedrock_log_group       = "/staging/awsbedrocklogs/cw-test"
-  # central_kinesis_stream_arn      = "arn:aws:kinesis:us-east-1:123456789012:stream/my-stream"
+  # central_kinesis_stream_arns     = ["arn:aws:kinesis:us-east-1:123456789012:stream/my-stream"]
 }
 
 module "real_time_us_east_2" {
