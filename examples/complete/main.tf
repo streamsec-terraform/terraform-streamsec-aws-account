@@ -28,6 +28,15 @@ module "real_time_us_east_1" {
     aws = aws.aws-east-1
   }
   depends_on = [module.account]
+
+  # Optional: Centralized CloudWatch Logs collection
+  # central_cloudtrail_log_group    = "aws-cloudtrail-logs-123456789012"
+  # central_vpc_flow_logs_log_group = "/aws/vpc/flowlogs/my-vpc"
+  # central_vpc_flow_logs_fields    = "version account-id action bytes dstaddr end interface-id log-status packets pkt-dstaddr pkt-srcaddr protocol srcaddr srcport dstport start vpc-id subnet-id instance-id tcp-flags region"
+  # central_eks_audit_log_group     = "/aws/eks/my-cluster/cluster"
+  # central_route53_log_group       = "/staging/route53dnslogs/cw-test"
+  # central_bedrock_log_group       = "/staging/awsbedrocklogs/cw-test"
+  # central_kinesis_stream_arns     = ["arn:aws:kinesis:us-east-1:123456789012:stream/my-stream"]
 }
 
 module "real_time_us_east_2" {
