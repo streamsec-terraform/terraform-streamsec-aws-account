@@ -256,10 +256,16 @@ variable "central_kinesis_stream_arn" {
   default     = ""
 }
 
+variable "central_kinesis_memory_size" {
+  description = "Memory in MB for the Lambda function when consuming from Kinesis"
+  type        = number
+  default     = 512
+}
+
 variable "central_kinesis_batch_size" {
   description = "Max records per Lambda invocation from Kinesis"
   type        = number
-  default     = 100
+  default     = 200
 }
 
 variable "central_kinesis_batch_window" {

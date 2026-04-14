@@ -111,7 +111,7 @@ resource "aws_lambda_function" "streamsec_real_time_events_lambda" {
   role          = aws_iam_role.lambda_execution_role.arn
   handler       = "src/handler.cloudWatchCollector"
   runtime       = var.lambda_runtime
-  memory_size   = var.lambda_cloudwatch_memory_size
+  memory_size   = var.central_kinesis_stream_arn != "" ? var.central_kinesis_memory_size : var.lambda_cloudwatch_memory_size
   timeout       = var.lambda_cloudwatch_timeout
   s3_bucket     = local.lambda_source_code_bucket
   s3_key        = var.lambda_cloudwatch_s3_source_code_key
