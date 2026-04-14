@@ -41,7 +41,7 @@ variable "lambda_source_code_bucket_prefix" {
 variable "lambda_cloudwatch_s3_source_code_key" {
   description = "The S3 key for the lambda source code"
   type        = string
-  default     = "b3c47c62a3139f522973182c1752a3ac"
+  default     = "ea9d23bfe951dddaa5f7bbd8642b763d"
 }
 
 variable "lambda_layer_name" {
@@ -53,7 +53,7 @@ variable "lambda_layer_name" {
 variable "lambda_layer_s3_source_code_key" {
   description = "The S3 key for the lambda source code"
   type        = string
-  default     = "17fab7ad0beff010a119e25a1db8265a"
+  default     = "e1bc947a3914aa28965e0ed8643ea6d2"
 }
 
 variable "lambda_subnet_ids" {
