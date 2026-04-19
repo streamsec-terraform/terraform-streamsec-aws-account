@@ -7,7 +7,7 @@ data "streamsec_aws_account" "this" {
 
 locals {
   lambda_source_code_bucket = "${var.lambda_source_code_bucket_prefix}-${data.aws_region.current.region}"
-  cloudwatch_rules = { for i in range(length(fileset(path.module, "templates/*.json"))) :
+  cloudwatch_rules = length(var.central_cloudtrail_log_groups) > 0 ? {} : { for i in range(length(fileset(path.module, "templates/*.json"))) :
     "streamsec-rule-${i}" => {
       name          = "${var.cloudwatch_event_rules_prefix}rule-${i}"
       description   = "Cloud Trail for Stream Security real time events Lambda"
@@ -199,14 +199,22 @@ resource "aws_iam_role_policy_attachment" "lambda_vpc_access" {
 ################################################################################
 
 locals {
-  central_log_groups = {
-    cloudtrail = var.central_cloudtrail_log_group
-    flowlogs   = var.central_vpc_flow_logs_log_group
-    eksaudit   = var.central_eks_audit_log_group
-    route53    = var.central_route53_log_group
-    bedrock    = var.central_bedrock_log_group
+  central_log_groups_by_type = {
+    cloudtrail = var.central_cloudtrail_log_groups
+    flowlogs   = var.central_vpc_flow_logs_log_groups
+    eksaudit   = var.central_eks_audit_log_groups
+    route53    = var.central_route53_log_groups
+    bedrock    = var.central_bedrock_log_groups
   }
-  active_central_log_groups = { for k, v in local.central_log_groups : k => v if v != "" }
+
+  central_log_subscriptions = merge([
+    for type, groups in local.central_log_groups_by_type : {
+      for lg in groups : "${type}:${lg}" => {
+        type      = type
+        log_group = lg
+      }
+    }
+  ]...)
 
   eks_audit_filter_pattern = <<-EOT
 {(($.sourceIPs[0] != "::1" && $.sourceIPs[0] != "127.0.0.1") || ($.sourceIPs[1] != "::1" && $.sourceIPs[1] != "127.0.0.1")) && $.stage = "ResponseComplete" && $.verb != "watch" && $.user.username != "system:kube*" && $.user.username != "eks:*" && ($.objectRef.resource not exists || ($.objectRef.resource != "events" && $.objectRef.resource != "leases")) && ($.objectRef.subresource not exists || ($.objectRef.subresource != "status" && $.objectRef.subresource != "scale" && $.objectRef.subresource != "proxy" && $.objectRef.subresource != "token" && ($.objectRef.subresource != "binding" || ($.objectRef.subresource = "binding" && $.responseStatus.code != 201))))}
@@ -214,7 +222,7 @@ EOT
 }
 
 resource "aws_lambda_permission" "streamsec_allow_cwlogs_invocation" {
-  count         = length(local.active_central_log_groups) > 0 ? 1 : 0
+  count         = length(local.central_log_subscriptions) > 0 ? 1 : 0
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.streamsec_real_time_events_lambda.function_name
   principal     = "logs.${data.aws_region.current.name}.amazonaws.com"
@@ -222,10 +230,10 @@ resource "aws_lambda_permission" "streamsec_allow_cwlogs_invocation" {
 }
 
 resource "aws_cloudwatch_log_subscription_filter" "streamsec_central_log_filters" {
-  for_each        = local.active_central_log_groups
-  name            = "streamsec-${each.key}-to-collector"
-  log_group_name  = each.value
-  filter_pattern  = each.key == "eksaudit" ? trimspace(local.eks_audit_filter_pattern) : ""
+  for_each        = local.central_log_subscriptions
+  name            = "streamsec-${each.value.type}-${substr(md5(each.value.log_group), 0, 8)}-to-collector"
+  log_group_name  = each.value.log_group
+  filter_pattern  = each.value.type == "eksaudit" ? trimspace(local.eks_audit_filter_pattern) : ""
   destination_arn = aws_lambda_function.streamsec_real_time_events_lambda.arn
 
   depends_on = [aws_lambda_permission.streamsec_allow_cwlogs_invocation]
