@@ -214,16 +214,16 @@ variable "privatelink_tags" {
 # Centralized CloudWatch Logs Collection
 ################################################################################
 
-variable "central_cloudtrail_log_group" {
-  description = "(Optional) Name of an existing CloudWatch Logs log group containing CloudTrail logs"
-  type        = string
-  default     = ""
+variable "central_cloudtrail_log_groups" {
+  description = "(Optional) List of existing CloudWatch Logs log groups containing CloudTrail logs"
+  type        = list(string)
+  default     = []
 }
 
-variable "central_vpc_flow_logs_log_group" {
-  description = "(Optional) Name of an existing CloudWatch Logs log group containing VPC Flow Logs"
-  type        = string
-  default     = ""
+variable "central_vpc_flow_logs_log_groups" {
+  description = "(Optional) List of existing CloudWatch Logs log groups containing VPC Flow Logs"
+  type        = list(string)
+  default     = []
 }
 
 variable "central_vpc_flow_logs_fields" {
@@ -232,22 +232,22 @@ variable "central_vpc_flow_logs_fields" {
   default     = ""
 }
 
-variable "central_eks_audit_log_group" {
-  description = "(Optional) Name of an existing CloudWatch Logs log group containing EKS audit logs"
-  type        = string
-  default     = ""
+variable "central_eks_audit_log_groups" {
+  description = "(Optional) List of existing CloudWatch Logs log groups containing EKS audit logs"
+  type        = list(string)
+  default     = []
 }
 
-variable "central_route53_log_group" {
-  description = "(Optional) Name of an existing CloudWatch Logs log group containing Route53 DNS query logs"
-  type        = string
-  default     = ""
+variable "central_route53_log_groups" {
+  description = "(Optional) List of existing CloudWatch Logs log groups containing Route53 DNS query logs"
+  type        = list(string)
+  default     = []
 }
 
-variable "central_bedrock_log_group" {
-  description = "(Optional) Name of an existing CloudWatch Logs log group containing Bedrock model invocation logs"
-  type        = string
-  default     = ""
+variable "central_bedrock_log_groups" {
+  description = "(Optional) List of existing CloudWatch Logs log groups containing Bedrock model invocation logs"
+  type        = list(string)
+  default     = []
 }
 
 variable "central_kinesis_stream_arns" {
