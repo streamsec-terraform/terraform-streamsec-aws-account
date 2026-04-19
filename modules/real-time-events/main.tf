@@ -7,7 +7,7 @@ data "streamsec_aws_account" "this" {
 
 locals {
   lambda_source_code_bucket = "${var.lambda_source_code_bucket_prefix}-${data.aws_region.current.region}"
-  cloudwatch_rules = length(var.central_cloudtrail_log_groups) > 0 ? {} : { for i in range(length(fileset(path.module, "templates/*.json"))) :
+  cloudwatch_rules = (length(var.central_cloudtrail_log_groups) > 0 || length(var.central_kinesis_stream_arns) > 0) ? {} : { for i in range(length(fileset(path.module, "templates/*.json"))) :
     "streamsec-rule-${i}" => {
       name          = "${var.cloudwatch_event_rules_prefix}rule-${i}"
       description   = "Cloud Trail for Stream Security real time events Lambda"
