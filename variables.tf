@@ -18,6 +18,16 @@ variable "aws_account_regions" {
   type        = list(string)
 }
 
+variable "external_id" {
+  description = "Optional pre-shared external ID (8-character uppercase alphanumeric) to use in the IAM role trust policy. If omitted, Stream Security generates one automatically."
+  type        = string
+  default     = null
+  validation {
+    condition     = var.external_id == null || can(regex("^[A-Z0-9]{8}$", var.external_id))
+    error_message = "external_id must be an 8-character uppercase alphanumeric string (A-Z, 0-9)."
+  }
+}
+
 ################################################################################
 # Stream Security IAM Role
 ################################################################################
