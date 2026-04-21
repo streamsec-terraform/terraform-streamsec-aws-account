@@ -53,6 +53,7 @@ No modules.
 | <a name="input_cloudtrail_name"></a> [cloudtrail\_name](#input\_cloudtrail\_name) | Name of the CloudTrail to create | `string` | `"streamsec-real-time-cloudtrail"` | no |
 | <a name="input_cloudtrail_tags"></a> [cloudtrail\_tags](#input\_cloudtrail\_tags) | tags for cloudtrail | `map(string)` | `{}` | no |
 | <a name="input_create_cloudtrail"></a> [create\_cloudtrail](#input\_create\_cloudtrail) | Whether to create a CloudTrail for the AWS account | `bool` | `false` | no |
+| <a name="input_external_id"></a> [external\_id](#input\_external\_id) | Optional pre-shared external ID (8-character uppercase alphanumeric) to use in the IAM role trust policy. If omitted, Stream Security generates one automatically. | `string` | `null` | no |
 | <a name="input_iam_policy_description"></a> [iam\_policy\_description](#input\_iam\_policy\_description) | Description to use on IAM policy created | `string` | `"Stream Security IAM Policy"` | no |
 | <a name="input_iam_policy_name"></a> [iam\_policy\_name](#input\_iam\_policy\_name) | Name to use on IAM policy created | `string` | `"streamsec-policy"` | no |
 | <a name="input_iam_policy_path"></a> [iam\_policy\_path](#input\_iam\_policy\_path) | IAM policy path | `string` | `null` | no |

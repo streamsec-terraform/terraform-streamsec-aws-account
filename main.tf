@@ -6,6 +6,7 @@ resource "streamsec_aws_account" "this" {
   cloud_account_id = data.aws_caller_identity.current.account_id
   display_name     = var.aws_account_display_name
   cloud_regions    = var.aws_account_regions
+  external_id      = var.external_id
 }
 
 locals {
