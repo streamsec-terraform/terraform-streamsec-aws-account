@@ -28,8 +28,9 @@ locals {
     for c in local.target_clusters : c => "/aws/eks/${c}/cluster"
   }
 
-  create_role = var.collector_role_arn == null
-  role_arn    = local.create_role ? aws_iam_role.collector[0].arn : var.collector_role_arn
+  create_role    = var.collector_role_arn == null
+  role_arn       = local.create_role ? aws_iam_role.collector[0].arn : var.collector_role_arn
+  role_name_byob = var.collector_role_arn != null ? element(split("/", var.collector_role_arn), length(split("/", var.collector_role_arn)) - 1) : ""
 
   eks_audit_filter_pattern = <<-EOT
 {(($.sourceIPs[0] != "::1" && $.sourceIPs[0] != "127.0.0.1") || ($.sourceIPs[1] != "::1" && $.sourceIPs[1] != "127.0.0.1")) && $.stage = "ResponseComplete" && $.verb != "watch" && $.user.username != "system:kube*" && $.user.username != "eks:*" && ($.objectRef.resource not exists || ($.objectRef.resource != "events" && $.objectRef.resource != "leases")) && ($.objectRef.subresource not exists || ($.objectRef.subresource != "status" && $.objectRef.subresource != "scale" && $.objectRef.subresource != "proxy" && $.objectRef.subresource != "token" && ($.objectRef.subresource != "binding" || ($.objectRef.subresource = "binding" && $.responseStatus.code != 201))))}
@@ -70,7 +71,7 @@ resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
 
 resource "aws_iam_role_policy" "secrets_access" {
   name = "${local.name_prefix}-eks-audit-secrets-policy-${random_string.suffix.result}"
-  role = local.create_role ? aws_iam_role.collector[0].id : element(split("/", var.collector_role_arn), length(split("/", var.collector_role_arn)) - 1)
+  role = local.create_role ? aws_iam_role.collector[0].id : local.role_name_byob
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -119,12 +120,13 @@ resource "aws_cloudwatch_log_group" "collector" {
 }
 
 resource "aws_lambda_function" "collector" {
-  function_name = "${local.name_prefix}-eks-audit-collector-${random_string.suffix.result}"
-  role          = local.role_arn
-  handler       = "index.handler"
-  runtime       = "python3.13"
-  memory_size   = var.collector_lambda_memory_size
-  timeout       = var.collector_lambda_timeout
+  function_name                  = "${local.name_prefix}-eks-audit-collector-${random_string.suffix.result}"
+  role                           = local.role_arn
+  handler                        = "index.handler"
+  runtime                        = "python3.13"
+  memory_size                    = var.collector_lambda_memory_size
+  timeout                        = var.collector_lambda_timeout
+  reserved_concurrent_executions = var.lambda_reserved_concurrency
 
   filename         = data.archive_file.collector.output_path
   source_code_hash = data.archive_file.collector.output_base64sha256

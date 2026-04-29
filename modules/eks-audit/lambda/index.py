@@ -3,13 +3,14 @@ import urllib3
 import json
 import boto3
 import logging
+from botocore.exceptions import ClientError
 
 logger = logging.getLogger("EKS-Audit-Collector")
 logger.setLevel(logging.INFO)
 
 # module-level for warm Lambda reuse across invocations
 http = urllib3.PoolManager()
-secrets_client = boto3.client('secretsmanager')
+secrets_client = boto3.client('secretsmanager', region_name=os.environ.get('AWS_REGION'))
 
 _cached_token = None
 
@@ -28,7 +29,7 @@ def handler(event, context):
         try:
             secret_response = secrets_client.get_secret_value(SecretId=os.environ['SECRET_NAME'])
             _cached_token = secret_response['SecretString']
-        except Exception as e:
+        except ClientError as e:
             logger.error(f'Failed to retrieve collection token from Secrets Manager: {str(e)}')
             return
 

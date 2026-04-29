@@ -44,6 +44,12 @@ variable "lambda_log_retention_days" {
   default     = 7
 }
 
+variable "lambda_reserved_concurrency" {
+  description = "Reserved concurrent executions for the collector Lambda. Set to -1 for unreserved."
+  type        = number
+  default     = -1
+}
+
 variable "secret_recovery_window_days" {
   description = "Number of days Secrets Manager waits before deleting the secret. Set to 0 for immediate deletion."
   type        = number
