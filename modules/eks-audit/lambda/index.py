@@ -7,6 +7,7 @@ import logging
 logger = logging.getLogger("EKS-Audit-Collector")
 logger.setLevel(logging.INFO)
 
+# module-level for warm Lambda reuse across invocations
 http = urllib3.PoolManager()
 secrets_client = boto3.client('secretsmanager')
 

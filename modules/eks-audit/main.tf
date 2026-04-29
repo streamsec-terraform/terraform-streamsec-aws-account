@@ -93,7 +93,7 @@ resource "aws_iam_role_policy" "secrets_access" {
 resource "aws_secretsmanager_secret" "collection_token" {
   name                    = "${var.collection_token_secret_name}-${random_string.suffix.result}"
   description             = "Stream Security EKS audit collection token"
-  recovery_window_in_days = 0
+  recovery_window_in_days = var.secret_recovery_window_days
   tags                    = var.tags
 }
 
@@ -146,6 +146,7 @@ resource "aws_lambda_function" "collector" {
 ################################################################################
 
 resource "aws_lambda_permission" "allow_cloudwatch_logs" {
+  statement_id  = "AllowEKSAuditCWLogs-${random_string.suffix.result}"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.collector.arn
   principal     = "logs.amazonaws.com"

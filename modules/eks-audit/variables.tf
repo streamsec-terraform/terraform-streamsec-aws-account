@@ -23,7 +23,7 @@ variable "eks_exclude_clusters" {
 variable "collection_token_secret_name" {
   description = "Base name for the Secrets Manager secret storing the collection token"
   type        = string
-  default     = "lightlytics-eks-collection-token"
+  default     = "streamsec-eks-collection-token"
 }
 
 variable "collector_lambda_memory_size" {
@@ -35,13 +35,19 @@ variable "collector_lambda_memory_size" {
 variable "collector_lambda_timeout" {
   description = "The amount of time in seconds the collector Lambda function is allowed to run"
   type        = number
-  default     = 10
+  default     = 30
 }
 
 variable "lambda_log_retention_days" {
   description = "The number of days to retain the collector Lambda CloudWatch logs"
   type        = number
-  default     = 1
+  default     = 7
+}
+
+variable "secret_recovery_window_days" {
+  description = "Number of days Secrets Manager waits before deleting the secret. Set to 0 for immediate deletion."
+  type        = number
+  default     = 0
 }
 
 variable "collector_role_arn" {
