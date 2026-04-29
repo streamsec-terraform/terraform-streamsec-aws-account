@@ -48,6 +48,10 @@ variable "collector_role_arn" {
   description = "If set, skip IAM role creation and use this existing role ARN for the collector Lambda"
   type        = string
   default     = null
+  validation {
+    condition     = var.collector_role_arn == null || can(regex("^arn:aws:iam::", var.collector_role_arn))
+    error_message = "collector_role_arn must be a valid IAM role ARN starting with arn:aws:iam::."
+  }
 }
 
 ################################################################################

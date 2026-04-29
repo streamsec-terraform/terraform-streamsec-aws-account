@@ -70,7 +70,7 @@ resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
 
 resource "aws_iam_role_policy" "secrets_access" {
   name = "${local.name_prefix}-eks-audit-secrets-policy-${random_string.suffix.result}"
-  role = local.create_role ? aws_iam_role.collector[0].id : regex("[^/]+$", var.collector_role_arn)
+  role = local.create_role ? aws_iam_role.collector[0].id : element(split("/", var.collector_role_arn), length(split("/", var.collector_role_arn)) - 1)
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -149,7 +149,7 @@ resource "aws_lambda_permission" "allow_cloudwatch_logs" {
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.collector.arn
   principal     = "logs.amazonaws.com"
-  source_arn    = "arn:aws:logs:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:log-group:/aws/eks/*"
+  source_arn    = "arn:aws:logs:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:log-group:/aws/eks/*/cluster"
 }
 
 resource "aws_cloudwatch_log_subscription_filter" "eks_audit" {
