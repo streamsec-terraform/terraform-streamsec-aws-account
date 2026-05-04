@@ -48,6 +48,10 @@ variable "lambda_reserved_concurrency" {
   description = "Reserved concurrent executions for the collector Lambda. Set to -1 for unreserved."
   type        = number
   default     = -1
+  validation {
+    condition     = var.lambda_reserved_concurrency >= -1
+    error_message = "lambda_reserved_concurrency must be -1 (unreserved) or a non-negative integer."
+  }
 }
 
 variable "secret_recovery_window_days" {

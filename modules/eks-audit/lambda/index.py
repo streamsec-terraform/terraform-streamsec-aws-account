@@ -4,6 +4,7 @@ import json
 import boto3
 import logging
 from botocore.exceptions import ClientError
+from urllib3.exceptions import HTTPError
 
 logger = logging.getLogger("EKS-Audit-Collector")
 logger.setLevel(logging.INFO)
@@ -44,7 +45,7 @@ def handler(event, context):
             timeout=urllib3.Timeout(connect=2, read=5),
             retries=urllib3.util.Retry(total=2, status_forcelist=[500, 502, 503, 504])
         )
-    except Exception as e:
+    except HTTPError as e:
         logger.error(f'Failed to forward logs: {str(e)}')
         return
 
