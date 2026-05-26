@@ -70,3 +70,21 @@ module "response" {
   source     = "../../modules/response"
   depends_on = [module.account]
 }
+
+module "eks_audit_us_east_1" {
+  source = "../../modules/eks-audit"
+  providers = {
+    aws = aws.aws-east-1
+  }
+  depends_on = [module.account]
+}
+
+module "eks_audit_us_east_2" {
+  source               = "../../modules/eks-audit"
+  resource_prefix      = "acme"
+  eks_exclude_clusters = ["test-cluster"]
+  providers = {
+    aws = aws.aws-east-2
+  }
+  depends_on = [module.account]
+}

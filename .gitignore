@@ -10,6 +10,7 @@ crash.log
 crash.*.log
 
 local-tests/
+*.zip
 examples/local
 **.terraform
 **.terraform.lock.hcl
