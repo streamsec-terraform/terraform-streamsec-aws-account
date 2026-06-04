@@ -121,6 +121,6 @@ No modules.
 | <a name="output_collector_lambda_name"></a> [collector\_lambda\_name](#output\_collector\_lambda\_name) | Name of the EKS audit collector Lambda function |
 | <a name="output_collector_role_arn"></a> [collector\_role\_arn](#output\_collector\_role\_arn) | ARN of the IAM role used by the collector Lambda |
 | <a name="output_secret_arn"></a> [secret\_arn](#output\_secret\_arn) | ARN of the Secrets Manager secret storing the collection token |
-| <a name="output_skipped_clusters"></a> [skipped\_clusters](#output\_skipped\_clusters) | Map of EKS cluster name => reason for clusters that were skipped (no control-plane log group / audit logging disabled) |
+| <a name="output_skipped_clusters"></a> [skipped\_clusters](#output\_skipped\_clusters) | Map of EKS cluster name => reason for clusters that were skipped (no control-plane log group / audit logging disabled). Enable audit logging on a skipped cluster and re-run apply to start collecting it. |
 | <a name="output_subscribed_clusters"></a> [subscribed\_clusters](#output\_subscribed\_clusters) | List of EKS cluster names that have subscription filters |
 <!-- END_TF_DOCS -->

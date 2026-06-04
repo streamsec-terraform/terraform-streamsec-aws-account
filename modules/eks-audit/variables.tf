@@ -65,8 +65,8 @@ variable "collector_role_arn" {
   type        = string
   default     = null
   validation {
-    condition     = var.collector_role_arn == null || can(regex("^arn:aws:iam::[0-9]{12}:role/", var.collector_role_arn))
-    error_message = "collector_role_arn must be a valid IAM role ARN of the form arn:aws:iam::<account-id>:role/<name>."
+    condition     = var.collector_role_arn == null || can(regex("^arn:aws[^:]*:iam::[0-9]{12}:role/", var.collector_role_arn))
+    error_message = "collector_role_arn must be a valid IAM role ARN of the form arn:<partition>:iam::<account-id>:role/<name>."
   }
 }
 

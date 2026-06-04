@@ -24,6 +24,6 @@ output "subscribed_clusters" {
 }
 
 output "skipped_clusters" {
-  description = "Map of EKS cluster name => reason for clusters that were skipped (no control-plane log group / audit logging disabled)"
+  description = "Map of EKS cluster name => reason for clusters that were skipped (no control-plane log group / audit logging disabled). Enable audit logging on a skipped cluster and re-run apply to start collecting it."
   value       = local.skipped_clusters
 }
