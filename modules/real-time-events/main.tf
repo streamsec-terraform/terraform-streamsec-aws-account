@@ -225,7 +225,7 @@ resource "aws_lambda_permission" "streamsec_allow_cwlogs_invocation" {
   count         = length(local.central_log_subscriptions) > 0 ? 1 : 0
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.streamsec_real_time_events_lambda.function_name
-  principal     = "logs.${data.aws_region.current.name}.amazonaws.com"
+  principal     = "logs.${data.aws_region.current.region}.amazonaws.com"
   source_account = data.aws_caller_identity.current.account_id
 }
 
