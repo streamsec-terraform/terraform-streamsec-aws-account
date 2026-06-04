@@ -61,7 +61,7 @@ variable "secret_recovery_window_days" {
 }
 
 variable "collector_role_arn" {
-  description = "If set, skip IAM role creation and use this existing role ARN for the collector Lambda"
+  description = "If set, skip IAM role creation and use this existing role ARN for the collector Lambda. The role must trust lambda.amazonaws.com and already grant CloudWatch Logs write permissions (e.g. AWSLambdaBasicExecutionRole); the module adds only Secrets Manager read access."
   type        = string
   default     = null
   validation {

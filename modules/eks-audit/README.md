@@ -51,6 +51,12 @@ module "eks_audit_us_west_2" {
 }
 ```
 
+> **Note on `collector_role_arn` (bring-your-own-role).** When you supply your own
+> role, the module does **not** attach CloudWatch Logs permissions to it — your role
+> must already allow the Lambda to write its logs (e.g. the
+> `AWSLambdaBasicExecutionRole` managed policy) and trust `lambda.amazonaws.com`. The
+> module adds only Secrets Manager read access for the collection token.
+
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
 
@@ -104,7 +110,7 @@ No modules.
 | <a name="input_collection_token_secret_name"></a> [collection\_token\_secret\_name](#input\_collection\_token\_secret\_name) | Base name for the Secrets Manager secret storing the collection token | `string` | `"streamsec-eks-collection-token"` | no |
 | <a name="input_collector_lambda_memory_size"></a> [collector\_lambda\_memory\_size](#input\_collector\_lambda\_memory\_size) | The amount of memory in MB to allocate to the collector Lambda function | `number` | `128` | no |
 | <a name="input_collector_lambda_timeout"></a> [collector\_lambda\_timeout](#input\_collector\_lambda\_timeout) | The amount of time in seconds the collector Lambda function is allowed to run | `number` | `30` | no |
-| <a name="input_collector_role_arn"></a> [collector\_role\_arn](#input\_collector\_role\_arn) | If set, skip IAM role creation and use this existing role ARN for the collector Lambda | `string` | `null` | no |
+| <a name="input_collector_role_arn"></a> [collector\_role\_arn](#input\_collector\_role\_arn) | If set, skip IAM role creation and use this existing role ARN for the collector Lambda. The role must trust lambda.amazonaws.com and already grant CloudWatch Logs write permissions (e.g. AWSLambdaBasicExecutionRole); the module adds only Secrets Manager read access. | `string` | `null` | no |
 | <a name="input_eks_exclude_clusters"></a> [eks\_exclude\_clusters](#input\_eks\_exclude\_clusters) | Skip these EKS clusters from subscription | `list(string)` | `[]` | no |
 | <a name="input_eks_include_clusters"></a> [eks\_include\_clusters](#input\_eks\_include\_clusters) | Only subscribe these EKS clusters. If empty, all clusters in the region are included. | `list(string)` | `[]` | no |
 | <a name="input_lambda_log_retention_days"></a> [lambda\_log\_retention\_days](#input\_lambda\_log\_retention\_days) | The number of days to retain the collector Lambda CloudWatch logs | `number` | `7` | no |
