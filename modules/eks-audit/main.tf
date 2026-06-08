@@ -45,11 +45,13 @@ locals {
     if local.cluster_has_log_group[c]
   }
 
-  # Targeted clusters dropped because their control-plane log group is absent
-  # (control-plane/audit logging disabled). Surfaced via output as a map of
+  # Targeted clusters dropped because their control-plane log group is absent.
+  # The group may be missing because control-plane logging is disabled, or
+  # because it simply hasn't been created/discovered yet (plan-time evaluation;
+  # see the two-pass apply note). Surfaced via output as a map of
   # cluster name => reason, so the skip is both visible and self-explanatory.
   skipped_clusters = {
-    for c in local.target_clusters : c => "no audit log group (/aws/eks/${c}/cluster) — enable control-plane audit logging on this cluster"
+    for c in local.target_clusters : c => "control-plane log group (/aws/eks/${c}/cluster) not found — enable control-plane logging on this cluster, or re-apply once it has been created"
     if !local.cluster_has_log_group[c]
   }
 

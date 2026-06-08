@@ -4,7 +4,7 @@ Terraform module for collecting EKS audit logs and forwarding them to Stream Sec
 
 This module auto-discovers EKS clusters in the region, creates CloudWatch Log subscription filters on their audit log groups, and deploys a collector Lambda that forwards the logs to the Stream Security API.
 
-Only clusters that have audit logging enabled are connected. Clusters without audit logging are skipped (and listed in the `skipped_clusters` output) — they won't cause errors.
+Only clusters that have a control-plane log group (`/aws/eks/<cluster>/cluster`) are connected. Clusters without one are skipped (and listed in the `skipped_clusters` output) — they won't cause errors. Note that this log group holds all control-plane log types, so its presence indicates control-plane logging is enabled but does not by itself guarantee the `audit` type specifically is turned on.
 
 > **First-time setup: run `terraform apply` twice.**
 > This module needs your Stream Security account to be set up before it can run. If you're deploying both for the first time in the same configuration, apply the account module first, then apply everything:
