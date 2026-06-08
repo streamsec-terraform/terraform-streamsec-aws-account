@@ -4,6 +4,17 @@ Terraform module for collecting EKS audit logs and forwarding them to Stream Sec
 
 This module auto-discovers EKS clusters in the region, creates CloudWatch Log subscription filters on their audit log groups, and deploys a collector Lambda that forwards the logs to the Stream Security API.
 
+Only clusters that have a control-plane log group (`/aws/eks/<cluster>/cluster`) are connected. Clusters without one are skipped (and listed in the `skipped_clusters` output) — they won't cause errors. Note that this log group holds all control-plane log types, so its presence indicates control-plane logging is enabled but does not by itself guarantee the `audit` type specifically is turned on.
+
+> **First-time setup: run `terraform apply` twice.**
+> This module needs your Stream Security account to be set up before it can run. If you're deploying both for the first time in the same configuration, apply the account module first, then apply everything:
+> ```bash
+> # Replace "account" with the name you gave the Stream Security account module
+> terraform apply -target=module.account
+> terraform apply
+> ```
+> After that, normal `terraform apply` works as usual.
+
 ## Usage
 
 ```hcl
@@ -40,6 +51,12 @@ module "eks_audit_us_west_2" {
 }
 ```
 
+> **Note on `collector_role_arn` (bring-your-own-role).** When you supply your own
+> role, the module does **not** attach CloudWatch Logs permissions to it — your role
+> must already allow the Lambda to write its logs (e.g. the
+> `AWSLambdaBasicExecutionRole` managed policy) and trust `lambda.amazonaws.com`. The
+> module adds only Secrets Manager read access for the collection token.
+
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
 
@@ -60,6 +77,10 @@ module "eks_audit_us_west_2" {
 | <a name="provider_random"></a> [random](#provider\_random) | >= 3.0 |
 | <a name="provider_streamsec"></a> [streamsec](#provider\_streamsec) | >= 1.7 |
 
+## Modules
+
+No modules.
+
 ## Resources
 
 | Name | Type |
@@ -74,7 +95,9 @@ module "eks_audit_us_west_2" {
 | [aws_secretsmanager_secret.collection_token](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret) | resource |
 | [aws_secretsmanager_secret_version.collection_token](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret_version) | resource |
 | [random_string.suffix](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/string) | resource |
+| [archive_file.collector](https://registry.terraform.io/providers/hashicorp/archive/latest/docs/data-sources/file) | data source |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
+| [aws_cloudwatch_log_groups.eks](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/cloudwatch_log_groups) | data source |
 | [aws_eks_clusters.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/eks_clusters) | data source |
 | [aws_region.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/region) | data source |
 | [streamsec_aws_account.this](https://registry.terraform.io/providers/streamsec-terraform/streamsec/latest/docs/data-sources/aws_account) | data source |
@@ -87,10 +110,11 @@ module "eks_audit_us_west_2" {
 | <a name="input_collection_token_secret_name"></a> [collection\_token\_secret\_name](#input\_collection\_token\_secret\_name) | Base name for the Secrets Manager secret storing the collection token | `string` | `"streamsec-eks-collection-token"` | no |
 | <a name="input_collector_lambda_memory_size"></a> [collector\_lambda\_memory\_size](#input\_collector\_lambda\_memory\_size) | The amount of memory in MB to allocate to the collector Lambda function | `number` | `128` | no |
 | <a name="input_collector_lambda_timeout"></a> [collector\_lambda\_timeout](#input\_collector\_lambda\_timeout) | The amount of time in seconds the collector Lambda function is allowed to run | `number` | `30` | no |
-| <a name="input_collector_role_arn"></a> [collector\_role\_arn](#input\_collector\_role\_arn) | If set, skip IAM role creation and use this existing role ARN for the collector Lambda | `string` | `null` | no |
+| <a name="input_collector_role_arn"></a> [collector\_role\_arn](#input\_collector\_role\_arn) | If set, skip IAM role creation and use this existing role ARN for the collector Lambda. The role must trust lambda.amazonaws.com and already grant CloudWatch Logs write permissions (e.g. AWSLambdaBasicExecutionRole); the module adds only Secrets Manager read access. | `string` | `null` | no |
 | <a name="input_eks_exclude_clusters"></a> [eks\_exclude\_clusters](#input\_eks\_exclude\_clusters) | Skip these EKS clusters from subscription | `list(string)` | `[]` | no |
 | <a name="input_eks_include_clusters"></a> [eks\_include\_clusters](#input\_eks\_include\_clusters) | Only subscribe these EKS clusters. If empty, all clusters in the region are included. | `list(string)` | `[]` | no |
 | <a name="input_lambda_log_retention_days"></a> [lambda\_log\_retention\_days](#input\_lambda\_log\_retention\_days) | The number of days to retain the collector Lambda CloudWatch logs | `number` | `7` | no |
+| <a name="input_lambda_reserved_concurrency"></a> [lambda\_reserved\_concurrency](#input\_lambda\_reserved\_concurrency) | Reserved concurrent executions for the collector Lambda. Set to -1 for unreserved. | `number` | `-1` | no |
 | <a name="input_resource_prefix"></a> [resource\_prefix](#input\_resource\_prefix) | Optional prefix prepended before StreamSecurity in all resource names | `string` | `""` | no |
 | <a name="input_secret_recovery_window_days"></a> [secret\_recovery\_window\_days](#input\_secret\_recovery\_window\_days) | Number of days Secrets Manager waits before deleting the secret. Set to 0 for immediate deletion. | `number` | `0` | no |
 | <a name="input_tags"></a> [tags](#input\_tags) | A map of global tags to add to all created resources | `map(string)` | `{}` | no |
@@ -103,5 +127,6 @@ module "eks_audit_us_west_2" {
 | <a name="output_collector_lambda_name"></a> [collector\_lambda\_name](#output\_collector\_lambda\_name) | Name of the EKS audit collector Lambda function |
 | <a name="output_collector_role_arn"></a> [collector\_role\_arn](#output\_collector\_role\_arn) | ARN of the IAM role used by the collector Lambda |
 | <a name="output_secret_arn"></a> [secret\_arn](#output\_secret\_arn) | ARN of the Secrets Manager secret storing the collection token |
+| <a name="output_skipped_clusters"></a> [skipped\_clusters](#output\_skipped\_clusters) | Map of EKS cluster name => reason for clusters that were skipped (no control-plane log group / audit logging disabled). Enable audit logging on a skipped cluster and re-run apply to start collecting it. |
 | <a name="output_subscribed_clusters"></a> [subscribed\_clusters](#output\_subscribed\_clusters) | List of EKS cluster names that have subscription filters |
 <!-- END_TF_DOCS -->

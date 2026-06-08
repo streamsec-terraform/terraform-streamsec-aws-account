@@ -7,6 +7,13 @@ data "streamsec_aws_account" "this" {
 
 data "aws_eks_clusters" "this" {}
 
+# Used to skip clusters whose control-plane log group doesn't exist yet (audit/
+# control-plane logging disabled). Subscribing to a missing log group fails the
+# whole apply with ResourceNotFoundException.
+data "aws_cloudwatch_log_groups" "eks" {
+  log_group_name_prefix = "/aws/eks/"
+}
+
 resource "random_string" "suffix" {
   length  = 6
   upper   = false
@@ -24,8 +31,28 @@ locals {
 
   target_clusters = [for c in local.included_clusters : c if !contains(var.eks_exclude_clusters, c)]
 
+  # Single source of truth: does each targeted cluster have a control-plane log
+  # group? Note this is read at plan time, so a cluster whose audit logging was
+  # just enabled may not be discovered until a later apply.
+  cluster_has_log_group = {
+    for c in local.target_clusters : c => contains(data.aws_cloudwatch_log_groups.eks.log_group_names, "/aws/eks/${c}/cluster")
+  }
+
+  # Only subscribe clusters whose log group actually exists; skipping the rest
+  # avoids a ResourceNotFoundException that would fail the entire apply.
   cluster_log_groups = {
     for c in local.target_clusters : c => "/aws/eks/${c}/cluster"
+    if local.cluster_has_log_group[c]
+  }
+
+  # Targeted clusters dropped because their control-plane log group is absent.
+  # The group may be missing because control-plane logging is disabled, or
+  # because it simply hasn't been created/discovered yet (plan-time evaluation;
+  # see the two-pass apply note). Surfaced via output as a map of
+  # cluster name => reason, so the skip is both visible and self-explanatory.
+  skipped_clusters = {
+    for c in local.target_clusters : c => "control-plane log group (/aws/eks/${c}/cluster) not found — enable control-plane logging on this cluster, or re-apply once it has been created"
+    if !local.cluster_has_log_group[c]
   }
 
   create_role    = var.collector_role_arn == null
@@ -154,7 +181,7 @@ resource "aws_lambda_permission" "allow_cloudwatch_logs" {
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.collector.arn
   principal     = "logs.amazonaws.com"
-  source_arn    = "arn:aws:logs:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:log-group:/aws/eks/*/cluster"
+  source_arn    = "arn:aws:logs:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:log-group:/aws/eks/*/cluster:*"
 }
 
 resource "aws_cloudwatch_log_subscription_filter" "eks_audit" {

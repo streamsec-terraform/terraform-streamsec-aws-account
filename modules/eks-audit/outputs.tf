@@ -20,5 +20,10 @@ output "secret_arn" {
 
 output "subscribed_clusters" {
   description = "List of EKS cluster names that have subscription filters"
-  value       = local.target_clusters
+  value       = [for c in local.target_clusters : c if local.cluster_has_log_group[c]]
+}
+
+output "skipped_clusters" {
+  description = "Map of EKS cluster name => reason for clusters that were skipped (no control-plane log group / audit logging disabled). Enable audit logging on a skipped cluster and re-run apply to start collecting it."
+  value       = local.skipped_clusters
 }

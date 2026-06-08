@@ -61,12 +61,12 @@ variable "secret_recovery_window_days" {
 }
 
 variable "collector_role_arn" {
-  description = "If set, skip IAM role creation and use this existing role ARN for the collector Lambda"
+  description = "If set, skip IAM role creation and use this existing role ARN for the collector Lambda. The role must trust lambda.amazonaws.com and already grant CloudWatch Logs write permissions (e.g. AWSLambdaBasicExecutionRole); the module adds only Secrets Manager read access."
   type        = string
   default     = null
   validation {
-    condition     = var.collector_role_arn == null || can(regex("^arn:aws:iam::", var.collector_role_arn))
-    error_message = "collector_role_arn must be a valid IAM role ARN starting with arn:aws:iam::."
+    condition     = var.collector_role_arn == null || can(regex("^arn:aws[^:]*:iam::[0-9]{12}:role/[a-zA-Z0-9+=,.@_/-]+$", var.collector_role_arn))
+    error_message = "collector_role_arn must be a valid IAM role ARN of the form arn:<partition>:iam::<account-id>:role/<name>."
   }
 }
 
