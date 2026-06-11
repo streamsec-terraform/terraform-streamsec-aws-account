@@ -1,0 +1,146 @@
+schemaVersion: '0.3'
+description: |
+  Add a DENY ingress entry for the supplied IP/CIDR to every Network ACL associated with
+  the EKS cluster's subnets. Used to block a malicious source from reaching pods running
+  in those subnets without taking the cluster down.
+
+  Every subnet in AWS always has exactly one associated NACL (custom or the VPC default).
+  Multiple subnets typically share the same NACL — especially the VPC default — so this
+  script dedupes by NetworkAclId before writing, otherwise we'd add N duplicate deny
+  entries to the same NACL and burn through rule numbers.
+
+  Rule numbers are picked dynamically per NACL: the script scans existing ingress entries
+  and inserts at the lowest unused number starting from 1 so the deny rule evaluates
+  before any permissive rules at higher numbers. Bare IPs are normalized to /32.
+
+assumeRole: '{{ AutomationAssumeRole }}'
+
+parameters:
+  AutomationAssumeRole:
+    type: String
+    description: (Optional) The ARN of the role that allows Automation to perform actions on your behalf.
+    default: ''
+  SubnetIds:
+    type: StringList
+    description: List of subnet IDs whose Network ACLs should be updated.
+  IpAddress:
+    type: String
+    description: IP address or CIDR to block (bare IPs are normalized to /32).
+
+mainSteps:
+  - name: AddDenyEntryToSubnetAcls
+    action: aws:executeScript
+    isEnd: true
+    inputs:
+      Runtime: python3.11
+      Handler: main
+      InputPayload:
+        SubnetIds: '{{ SubnetIds }}'
+        IpAddress: '{{ IpAddress }}'
+      Script: |
+        import boto3
+
+        def _normalize_cidr(ip):
+            return ip if '/' in ip else f"{ip}/32"
+
+        def _next_free_rule_number(entries, start=1, end=32766):
+            used = {e['RuleNumber'] for e in entries if not e.get('Egress', False)}
+            for n in range(start, end + 1):
+                if n not in used:
+                    return n
+            raise RuntimeError("no free ingress rule numbers available on NACL")
+
+        def _existing_matching_deny(entries, cidr):
+            """Idempotency check: is there already an ingress DENY for this CIDR with
+            Protocol=-1 (all protocols)? If yes, return its RuleNumber so we can skip
+            adding a duplicate. Multiple successive runs must converge — this runbook
+            is invoked once per detection, but the same attacker IP may trigger
+            multiple detections that all route to the same NACL."""
+            for e in entries:
+                if e.get('Egress', False):
+                    continue
+                if (
+                    e.get('CidrBlock') == cidr
+                    and e.get('RuleAction') == 'deny'
+                    and str(e.get('Protocol')) == '-1'
+                ):
+                    return e['RuleNumber']
+            return None
+
+
+        def main(events, context):
+            ec2 = boto3.client('ec2')
+            subnet_ids = events.get('SubnetIds', []) or []
+            cidr = _normalize_cidr(events['IpAddress'])
+
+            # One describe_network_acls call covers every subnet — the response
+            # tells us which NACL each subnet is associated with, so we can dedupe
+            # by NACL id (multiple subnets typically share the VPC default NACL).
+            acl_resp = ec2.describe_network_acls(
+                Filters=[{"Name": "association.subnet-id", "Values": subnet_ids}]
+            )
+
+            # acl_id -> list of subnet_ids covered by this NACL (for reporting only)
+            acl_to_subnets = {}
+            # acl_id -> NACL object (used for picking the next free rule number)
+            acl_by_id = {}
+            for acl in acl_resp.get('NetworkAcls', []):
+                acl_id = acl['NetworkAclId']
+                acl_by_id[acl_id] = acl
+                for assoc in acl.get('Associations', []):
+                    s_id = assoc.get('SubnetId')
+                    if s_id in subnet_ids:
+                        acl_to_subnets.setdefault(acl_id, []).append(s_id)
+
+            covered_subnets = {s for subs in acl_to_subnets.values() for s in subs}
+            missing = [s for s in subnet_ids if s not in covered_subnets]
+            if missing:
+                # Real-world this should be empty — every existing subnet has an
+                # associated NACL. Treat as a hard failure rather than silently
+                # skipping so a stale SubnetIds list (deleted subnets) is visible.
+                raise RuntimeError(
+                    f"could not resolve NACL for subnets: {missing}. "
+                    f"They may have been deleted; refresh the EKS inventory."
+                )
+
+            results = []
+            for acl_id, subs in acl_to_subnets.items():
+                acl = acl_by_id[acl_id]
+                entries = acl.get('Entries', [])
+                # Idempotency: if a matching ingress DENY for this CIDR already
+                # exists (any rule number), skip the create_network_acl_entry call
+                # entirely. Without this, repeated invocations on the same NACL
+                # bloat it with semantically identical deny rules at successive
+                # rule numbers — each takes a slot and the per-NACL slot count
+                # is finite (32766).
+                existing = _existing_matching_deny(entries, cidr)
+                if existing is not None:
+                    results.append({
+                        "network_acl_id": acl_id,
+                        "is_default": acl.get('IsDefault', False),
+                        "covers_subnets": subs,
+                        "rule_number": existing,
+                        "cidr": cidr,
+                        "status": "already_denied",
+                    })
+                    continue
+                rule_number = _next_free_rule_number(entries)
+                ec2.create_network_acl_entry(
+                    NetworkAclId=acl_id,
+                    RuleNumber=rule_number,
+                    Protocol='-1',  # all protocols
+                    RuleAction='deny',
+                    Egress=False,
+                    CidrBlock=cidr,
+                )
+                results.append({
+                    "network_acl_id": acl_id,
+                    "is_default": acl.get('IsDefault', False),
+                    "covers_subnets": subs,
+                    "rule_number": rule_number,
+                    "cidr": cidr,
+                    "status": "denied",
+                })
+
+            print(f"Applied DENY for {cidr} on {len(results)} NACL(s): {results}")
+            return {"results": results}

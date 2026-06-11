@@ -112,7 +112,7 @@ variable "lambda_source_code_bucket_prefix" {
 variable "lambda_cloudwatch_s3_source_code_key" {
   description = "The S3 key for the lambda source code"
   type        = string
-  default     = "218189702e5d51c62d0acd8c37e70398"
+  default     = "654c3911ef720c007be05d2923b9ef97"
 }
 
 variable "lambda_subnet_ids" {

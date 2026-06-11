@@ -1,0 +1,177 @@
+main:
+  params: [input]
+  steps:
+    # Adds an IP-based IAM condition to a specific binding identified by
+    # Member + Role on the project IAM policy.
+    # Org/folder scope is not supported in project-level deployments.
+    # If the binding already has a condition, the IP restriction is appended
+    # with && so existing conditions are preserved.
+    # Single IPs use: origin.ip == 'x.x.x.x'
+    # CIDRs use: 'x.x.x.x/n'.inIpRange(origin.ip)
+    # Multiple entries are joined with || so any trusted IP grants access.
+    - parseInputs:
+        assign:
+          - scope: ${input.Scope}
+          - scope_id: ${input.ScopeId}
+          - member: ${input.Member}
+          - role: ${input.Role}
+          - allowed_ips: ${text.split(text.replace_all(string(input.AllowedIps), " ", ""), ",")}
+
+    - logInput:
+        call: sys.log
+        args:
+          text: ${"Runbook started. Scope='" + scope + "', ScopeId='" + scope_id + "', Member='" + member + "', Role='" + role + "', AllowedIps=" + json.encode_to_string(allowed_ips)}
+          severity: INFO
+
+    - checkScope:
+        switch:
+          - condition: ${scope != "project"}
+            return:
+              status_code: "skipped"
+              message: ${"Scope '" + scope + "' is not supported for project-level deployments. Only 'project' scope is supported."}
+
+    - validateIps:
+        switch:
+          - condition: ${len(allowed_ips) == 0}
+            raise:
+              status_code: "error"
+              message: "AllowedIps must contain at least one IP address or CIDR range."
+
+    - buildResource:
+        assign:
+          - resource: ${"projects/" + scope_id}
+
+    - initClauses:
+        assign:
+          - ip_clauses: []
+
+    # Build a CEL expression from the IP list.
+    # CIDR entries (contain '/') use inIpRange(); plain IPs use equality.
+    - buildConditionLoop:
+        for:
+          value: ip
+          in: ${allowed_ips}
+          steps:
+            - checkCidr:
+                switch:
+                  - condition: ${text.find_all(ip, "/") != []}
+                    steps:
+                      - addCidrClause:
+                          assign:
+                            - ip_clauses: ${list.concat(ip_clauses, "'" + ip + "'.inIpRange(origin.ip)")}
+                  - condition: true
+                    steps:
+                      - addIpClause:
+                          assign:
+                            - ip_clauses: ${list.concat(ip_clauses, "origin.ip == '" + ip + "'")}
+
+    - initJoin:
+        assign:
+          - ip_expression: ""
+
+    - joinLoop:
+        for:
+          value: clause
+          in: ${ip_clauses}
+          steps:
+            - appendClause:
+                switch:
+                  - condition: ${ip_expression == ""}
+                    assign:
+                      - ip_expression: ${clause}
+                  - condition: true
+                    assign:
+                      - ip_expression: ${ip_expression + " || " + clause}
+
+    # Policy version 3 is required to read and write IAM conditions.
+    - getPolicy:
+        try:
+          call: googleapis.cloudresourcemanager.v3.projects.getIamPolicy
+          args:
+            resource: ${resource}
+            body:
+              options:
+                requestedPolicyVersion: 3
+          result: policy
+        except:
+          as: er
+          raise:
+            status_code: "error"
+            message: ${"Failed to getIamPolicy; " + default(er.body.error.message, json.encode_to_string(er))}
+
+    - initBindings:
+        assign:
+          - newBindings: []
+          - updated: false
+
+    # Find the specific binding matching Member + Role and append the IP condition.
+    # All other bindings are copied unchanged.
+    - iterateBindings:
+        for:
+          value: binding
+          in: ${default(policy.bindings, [])}
+          steps:
+            - checkBinding:
+                switch:
+                  - condition: ${binding.role == role and text.find_all(json.encode_to_string(default(binding.members, [])), member) != []}
+                    steps:
+                      - buildExpression:
+                          switch:
+                            - condition: ${binding.condition != null}
+                              assign:
+                                - existing: ${default(binding.condition.expression, "")}
+                            - condition: true
+                              assign:
+                                - existing: ""
+                      - mergeExpression:
+                          switch:
+                            - condition: ${existing == ""}
+                              assign:
+                                - merged: ${ip_expression}
+                            - condition: true
+                              assign:
+                                - merged: ${"(" + existing + ") && (" + ip_expression + ")"}
+                      - applyCondition:
+                          assign:
+                            - newBinding:
+                                role: ${binding.role}
+                                members: ${binding.members}
+                                condition:
+                                  expression: ${merged}
+                                  title: "stream-security-ip-restriction"
+                                  description: "IP restriction applied by Stream Security"
+                            - newBindings: ${list.concat(newBindings, newBinding)}
+                            - updated: true
+                  - condition: true
+                    steps:
+                      - keepBinding:
+                          assign:
+                            - newBindings: ${list.concat(newBindings, binding)}
+
+    - checkUpdated:
+        switch:
+          - condition: ${not(updated)}
+            return:
+              status_code: "success"
+              message: ${"Binding for member '" + member + "' with role '" + role + "' not found on project " + scope_id + "; no changes made."}
+
+    - setPolicy:
+        try:
+          call: googleapis.cloudresourcemanager.v3.projects.setIamPolicy
+          args:
+            resource: ${resource}
+            body:
+              policy:
+                bindings: ${newBindings}
+                etag: ${policy.etag}
+          result: updated_policy
+        except:
+          as: er
+          raise:
+            status_code: "error"
+            message: ${"Failed to setIamPolicy; " + default(er.body.error.message, json.encode_to_string(er))}
+
+    - done:
+        return:
+          status_code: "success"
+          message: ${"Added IP restriction to binding '" + member + "' / '" + role + "' on project " + scope_id + ". Allowed IPs " + json.encode_to_string(allowed_ips)}

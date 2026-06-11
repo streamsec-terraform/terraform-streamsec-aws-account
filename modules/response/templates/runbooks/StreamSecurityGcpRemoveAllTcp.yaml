@@ -1,0 +1,207 @@
+main:
+  params: [input]
+  steps:
+    # Step 1: Parse firewall_id
+    - parseFirewallId:
+        assign:
+          - firewall_id: ${input.FirewallId}
+          - parts: ${text.split(firewall_id, "/")}
+
+    - logInput:
+        call: sys.log
+        args:
+          text: ${"Runbook started. Received parameter firewall_id = '" + firewall_id + "'"}
+          severity: INFO
+
+    - validateParts:
+        switch:
+          - condition: ${len(parts) < 5}
+            raise:
+              status_code: "error"
+              message: ${"Invalid FirewallId format. Expected 'projects/<project_id>/global/firewalls/<firewall_name>', got; " + firewall_id}
+
+    - extractIds:
+        assign:
+          - project_id: ${parts[1]}
+          - firewall_name: ${parts[4]}
+
+    # Step 2: Get firewall
+    - getRule:
+        try:
+          call: googleapis.compute.v1.firewalls.get
+          args:
+            project: ${project_id}
+            firewall: ${firewall_name}
+          result: fw
+        except:
+          as: e
+          switch:
+            - condition: ${e.body.error.code != 409}
+              raise:
+                status_code: "error"
+                message: ${e.body.error.message}
+
+    # Step 3: If already disabled
+    - checkDisabled:
+        switch:
+          - condition: ${fw.disabled == true}
+            next: alreadyDisabled
+        next: checkSourceRanges
+
+    - alreadyDisabled:
+        return:
+          status_code: "ok"
+          message: ${"Firewall rule " + firewall_name + " is already disabled."}
+
+    # Step 4: Check if public
+    - checkSourceRanges:
+        assign:
+          - isPublic: ${"0.0.0.0/0" in fw.sourceRanges}
+
+    - skipIfNotPublic:
+        switch:
+          - condition: ${not isPublic}
+            next: noChange
+
+    # Step 5: Init flags
+    - initFlags:
+        assign:
+          - hasTcpAll: false
+          - onlyTcpAll: false
+          - hasOtherProtocols: false
+          - hasSctp: false            # ← Added SCTP flag
+          - newAllowed: []
+          - i: 0
+
+    # Step 6: Loop over allowed
+    - loopAllowed:
+        switch:
+          - condition: ${i < len(fw.allowed)}
+            next: setRule
+        next: finishCheck
+
+    - setRule:
+        assign:
+          - rule: ${fw.allowed[i]}
+        next: checkProtocol
+
+    # Protocol handling
+    - checkProtocol:
+        switch:
+          - condition: ${rule.IPProtocol == "all"}
+            next: splitAll
+          - condition: ${rule.IPProtocol == "tcp"}
+            next: checkPorts
+          - condition: ${rule.IPProtocol == "udp" or rule.IPProtocol == "icmp" or rule.IPProtocol == "sctp"}   # ← Added SCTP
+            next: markOther
+        next: keepRule
+
+    # Split "all" → keep udp+icmp+sctp, remove tcp
+    - splitAll:
+        assign:
+          - hasTcpAll: true
+          - hasOtherProtocols: true   # all includes udp+icmp+sctp
+          - udpRule:
+              IPProtocol: "udp"
+          - icmpRule:
+              IPProtocol: "icmp"
+          - sctpRule:                 # ← Added SCTP
+              IPProtocol: "sctp"
+          - newAllowed: ${list.concat(newAllowed, [udpRule, icmpRule, sctpRule])}
+        next: nextIter
+
+    - checkPorts:
+        switch:
+          - condition: ${"1-65535" in rule.ports or "0-65535" in rule.ports}
+            next: markTcpAll
+        next: keepRule
+
+    - markTcpAll:
+        assign:
+          - hasTcpAll: true
+          - onlyTcpAll: true
+        next: nextIter
+
+    - markOther:
+        assign:
+          - hasOtherProtocols: true
+        next: keepRule
+
+    - keepRule:
+        assign:
+          - newAllowed: ${list.concat(newAllowed, [rule])}
+        next: nextIter
+
+    - nextIter:
+        assign:
+          - i: ${i + 1}
+        next: loopAllowed
+
+    # Step 7: Decide what to do
+    - finishCheck:
+        switch:
+          - condition: ${hasTcpAll and onlyTcpAll and not hasOtherProtocols}
+            next: disableRule
+          - condition: ${hasTcpAll}
+            next: patchRule
+        next: noChange
+
+    # Step 8a: Disable if only TCP all
+    - disableRule:
+        try:
+          call: googleapis.compute.v1.firewalls.patch
+          args:
+            project: ${project_id}
+            firewall: ${firewall_name}
+            body:
+              name: ${fw.name}
+              network: ${fw.network}
+              direction: ${fw.direction}
+              priority: ${fw.priority}
+              sourceRanges: ${fw.sourceRanges}
+              allowed: ${fw.allowed}
+              targetTags: ${default(fw.targetTags, [])}
+              disabled: true
+        except:
+          as: e
+          # 409 is intentionally re-raised: a conflict on PATCH means the modification
+          # was not confirmed applied. Swallowing it would return success on a no-op.
+          raise:
+            status_code: "error"
+            message: ${string(e)}
+        next: done
+
+    # Step 8b: Patch (after splitAll / remove tcp)
+    - patchRule:
+        try:
+          call: googleapis.compute.v1.firewalls.patch
+          args:
+            project: ${project_id}
+            firewall: ${firewall_name}
+            body:
+              name: ${fw.name}
+              network: ${fw.network}
+              direction: ${fw.direction}
+              priority: ${fw.priority}
+              sourceRanges: ${fw.sourceRanges}
+              allowed: ${newAllowed}
+              targetTags: ${default(fw.targetTags, [])}
+        except:
+          as: e
+          # 409 is intentionally re-raised: concurrent patch = modification unconfirmed.
+          raise:
+            status_code: "error"
+            message: ${string(e)}
+        next: done
+
+    # Step 9: No change
+    - noChange:
+        return:
+          status_code: "ok"
+          message: ${"Firewall rule " + firewall_name + " does not allow all TCP ports publicly."}
+
+    # Step 10: Done
+    - done:
+        return:
+          status_code: "success"
+          message: ${"Firewall rule " + firewall_name + " disabled or patched successfully"}
