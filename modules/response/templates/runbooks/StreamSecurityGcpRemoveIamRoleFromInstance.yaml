@@ -1,0 +1,106 @@
+main:
+  params: [input]
+  steps:
+    # Step 1: Parse vm_id string from input dict
+    - parseVMId:
+        assign:
+          - vm_id: ${input.VmId}
+          - parts: ${text.split(vm_id, "/")}
+
+     # Step 1.0: Log the received vm_id
+    - logInput:
+        try:
+            call: sys.log
+            args:
+                text: ${"Runbook started. Received parameter vm_id = '" + vm_id + "'"}
+                severity: INFO
+        except:
+          as: er
+          raise:
+            status_code: "error"
+            message: ${"Error occurred while logging; " + er.body.error.message}
+
+    # Step 1.1: Validate parts length
+    - validateParts:
+        switch:
+          - condition: ${len(parts) != 6}
+            raise:
+              status_code: "error"
+              message: ${"Invalid VmId format. Expected 'projects/<project_id>/zones/<zone>/instances/<instance_name>', got; " + vm_id}
+
+    # Step 1.2: Extract IDs
+    - extractIds:
+        assign:
+          - project_id: ${parts[1]}
+          - zone: ${parts[3]}
+          - instance_name: ${parts[5]}
+
+    # Step 1: Get the current IAM policy
+    - getInstancePolicy:
+        try:
+            call: googleapis.compute.v1.instances.getIamPolicy
+            args:
+                project: ${project_id}
+                zone: ${zone}
+                resource: ${instance_name}
+            result: instance_policy
+        except:
+          as: er
+          raise:
+            status_code: "error"
+            message: ${"Failed to getIamPolicy in VM " + vm_id + er.body.error.message}
+
+    # Step 2: Check whether the key 'bindings' exists
+    - checkKey:
+        switch:
+          - condition: ${not("bindings" in instance_policy)}
+            next: noBindings
+
+     # Step 3: Check if no bindings exist or the list is empty
+    - checkBindings:
+        switch:
+          - condition: ${not("bindings" in instance_policy) or len(instance_policy.bindings) == 0}
+            next: noBindings
+
+    # Step 4: Clear all IAM roles
+    - clearPolicy:
+        try:
+            call: googleapis.compute.v1.instances.setIamPolicy
+            args:
+                project: ${project_id}
+                zone: ${zone}
+                resource: ${instance_name}
+                body:
+                    bindings: []
+                    etag: ${instance_policy.etag}
+            result: cleared_policy
+        except:
+          as: er
+          raise:
+            status_code: "error"
+            message: ${"Failed to setIamPolicy in VM " + vm_id + er.body.error.message}
+
+    # Step 5: Verify after clearing
+    - verifyPolicy:
+        try:
+            call: googleapis.compute.v1.instances.getIamPolicy
+            args:
+                project: ${project_id}
+                zone: ${zone}
+                resource: ${instance_name}
+            result: verified_policy
+        except:
+          as: er
+          raise:
+            status_code: "error"
+            message: ${"Failed to setIamPolicy in VM " + vm_id + er.body.error.message}
+
+    - done:
+        return:
+          status_code: "success"
+          message: ${"All IAM roles removed successfully from " + instance_name}
+
+    - noBindings:
+        return:
+          status_code: "ok"
+          message: ${"No IAM roles found for " + instance_name}

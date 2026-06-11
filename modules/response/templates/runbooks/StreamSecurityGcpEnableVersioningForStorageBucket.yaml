@@ -1,0 +1,62 @@
+main:
+  params: [input]
+  steps:
+    # Step 1: Extract bucket name from input
+    - parseInput:
+        assign:
+          - bucket_name: ${input.BucketName}
+
+    # Step 2: Log the action
+    - logStart:
+        call: sys.log
+        args:
+          text: ${"Runbook started. Enabling Object Versioning for bucket " + bucket_name}
+          severity: INFO
+
+    # Step 3: Enable Object Versioning via patch
+    - enableVersioning:
+        try:
+          call: googleapis.storage.v1.buckets.patch
+          args:
+            bucket: ${bucket_name}
+            body:
+              versioning:
+                enabled: true
+
+        except:
+          as: versioning_error
+          raise:
+            status_code: "error"
+            message: ${"Failed to enable versioning for bucket " + bucket_name + versioning_error.body.error.message}
+
+    # Step 4: Verify the update
+    - verifyBucket:
+        try:
+          call: googleapis.storage.v1.buckets.get
+          args:
+            bucket: ${bucket_name}
+          result: updated_bucket
+        except:
+          as: get_error
+          raise:
+            status_code: "error"
+            message: ${"Failed to verify versioning status for bucket " + bucket_name + get_error.body.error.message}
+
+    # Step 5: Check if versioning is enabled
+    - checkVersioningStatus:
+        assign:
+          - versioning_enabled: ${updated_bucket.versioning.enabled == true}
+
+    # Step 6: Return result
+    - assertEnabled:
+        switch:
+          - condition: ${versioning_enabled}
+            return:
+              status_code: "success"
+              message: ${"Object Versioning successfully enabled for bucket " + bucket_name}
+        next: raiseFailure
+
+    - raiseFailure:
+        raise:
+          status_code: "error"
+          message: ${"Versioning does not appear to be enabled on bucket " + bucket_name}

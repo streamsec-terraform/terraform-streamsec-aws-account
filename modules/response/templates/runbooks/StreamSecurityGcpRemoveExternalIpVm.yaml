@@ -1,0 +1,126 @@
+main:
+  params: [input]
+  steps:
+    # Step 1.0: Validate parts length
+    - validateParts:
+        switch:
+          - condition: ${len(text.split(input.VmId, "/")) != 6}
+            raise:
+              status_code: "error"
+              message: ${"Invalid VmId format. Expected 'projects/<project_id>/zones/<zone>/instances/<instance_name>', got; " + input.VmId}
+
+    # Step 1: Parse input to extract project_id, zone, and instance_name
+    - parseInput:
+        assign:
+          - full_id: ${input.VmId}
+          - parts: ${text.split(full_id, "/")}
+          - project_id: ${parts[1]}
+          - zone: ${parts[3]}
+          - instance_name: ${parts[5]}
+
+    # Step 2: Get current instance details
+    - getInstance:
+        try:
+          call: googleapis.compute.v1.instances.get
+          args:
+            project: ${project_id}
+            zone: ${zone}
+            instance: ${instance_name}
+          result: instance
+        except:
+          as: er
+          raise:
+            status_code: "error"
+            message: ${"Failed to retrieve instance details for" + er.body.error.message}
+
+    # Step 3: Iterate over all network interfaces
+    - iterateNICs:
+        try:
+          for:
+            value: nic
+            in: ${instance.networkInterfaces}
+            steps:
+              - checkAccessConfig:
+                  assign:
+                    - has_external_ip: ${"accessConfigs" in nic and len(nic.accessConfigs) > 0}
+              - removeIfExists:
+                  switch:
+                    - condition: ${has_external_ip}
+                      steps:
+                        - deleteAccessConfig:
+                            call: googleapis.compute.v1.instances.deleteAccessConfig
+                            args:
+                              project: ${project_id}
+                              zone: ${zone}
+                              instance: ${instance_name}
+                              networkInterface: ${nic.name}
+                              accessConfig: ${nic.accessConfigs[0].name}
+                        - waitAfterDelete:
+                            call: sys.sleep
+                            args:
+                              seconds: 3
+        except:
+          as: er
+          raise:
+            status_code: "error"
+            message: ${"Error occurred while removing external IPs; " + er.body.error.message}
+
+
+
+
+    # Step 4: Verify all external IPs removed
+    - verifyRemoval:
+        try:
+          call: googleapis.compute.v1.instances.get
+          args:
+            project: ${project_id}
+            zone: ${zone}
+            instance: ${instance_name}
+          result: updated_instance
+        except:
+            as: er
+            raise:
+                status_code: "error"
+                message: ${"Failed to retrieve instance details for verification; " + er.body.error.message}
+
+    # Step 5: Initialize check flag
+    - initFlag:
+        assign:
+          - all_removed: true
+
+    # Step 6: Loop again to verify no external IPs remain
+    - checkAllNics:
+        try:
+          for:
+            value: nic2
+            in: ${updated_instance.networkInterfaces}
+            steps:
+              - hasAccessConfig:
+                  assign:
+                    - has_external: ${"accessConfigs" in nic2 and len(nic2.accessConfigs) > 0}
+              - markFailureIfAny:
+                  switch:
+                    - condition: ${has_external}
+                      steps:
+                        - markNotAllRemoved:
+                            assign:
+                              - all_removed: false
+        except:
+            as: er
+            raise:
+                status_code: "error"
+                message: ${"Error occurred while verifying external IP removal; " + er.body.error.message}
+
+    # Step 7: Return result
+    - handleResult:
+        switch:
+          - condition: ${all_removed}
+            return:
+              status_code: "success"
+              message: ${"All external IPs removed successfully from instance '" + instance_name + "' in zone '" + zone + "'."}
+        next: raiseFailure
+
+    - raiseFailure:
+        raise:
+          status_code: "error"
+          message: ${"Instance '" + instance_name + "' still has external IPs after attempted removal."}

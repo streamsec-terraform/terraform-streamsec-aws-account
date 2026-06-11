@@ -1,0 +1,112 @@
+main:
+  params: [input]
+  steps:
+    # Step 1: Parse bucket_id string from input dict
+    - parseBucketId:
+        assign:
+          - bucket_id: ${input.BucketId}
+          - parts: ${text.split(bucket_id, "/")}
+
+    # Step 1.0: Log the received bucket_id
+    - logInput:
+        call: sys.log
+        args:
+          text: ${"Runbook started. Received parameter BucketId = '" + bucket_id + "'"}
+          severity: INFO
+
+    # Step 1.1: Validate parts length
+    - validateParts:
+        switch:
+          - condition: ${len(parts) < 4}
+            raise:
+              status_code: "error"
+              message: ${"Invalid BucketId format. Expected 'projects/_/buckets/<bucket_name>', got; " + bucket_id}
+
+    # Step 1.2: Extract Name
+    - extractIds:
+        assign:
+          - bucket_name: ${parts[3]}
+
+    # Step 2: Get IamPolicy
+    - getPolicy:
+        try:
+            call: googleapis.storage.v1.buckets.getIamPolicy
+            args:
+                bucket: ${bucket_name}
+                optionsRequestedPolicyVersion: 3
+            result: policy
+        except:
+          as: er
+          raise:
+            status_code: "error"
+            message: ${"Failed to getIamPolicy " + er.body.error.message }
+
+    - logPolicy:
+        call: sys.log
+        args:
+            text: ${policy}
+
+    # Step 3: Filter out public members
+    - filterBindings:
+        assign:
+          - newBindings: []
+
+    - iterateBindings:
+        try:
+            for:
+              value: binding
+              in: ${policy.bindings}
+              steps:
+                - initMembers:
+                    assign:
+                    - members: []
+                - loopMembers:
+                    for:
+                      value: m
+                      in: ${binding.members}
+                      steps:
+                        - checkMember:
+                            switch:
+                            - condition: ${m != "allUsers" and m != "allAuthenticatedUsers"}
+                              steps:
+                                - addMember:
+                                    assign:
+                                        - members: ${list.concat(members, m)}
+                - checkKeep:
+                    switch:
+                    - condition: ${len(members) > 0}
+                      steps:
+                        - buildBinding:
+                            assign:
+                            - newBinding:
+                                role: ${binding.role}
+                                members: ${members}
+                        - addBinding:
+                            assign:
+                                - newBindings: ${list.concat(newBindings, newBinding)}
+        except:
+          as: er
+          raise:
+            status_code: "error"
+            message: ${"Failed to iterateBindings " + er.body.error.message }
+
+
+    # Step 4: Set new policy
+    - setPolicy:
+        try:
+            call: googleapis.storage.v1.buckets.setIamPolicy
+            args:
+                bucket: ${bucket_name}
+                body:
+                    bindings: ${newBindings}
+            result: updated
+        except:
+          as: er
+          raise:
+            status_code: "error"
+            message: ${"Failed to setIamPolicy " + er.body.error.message }
+
+    - done:
+        return:
+          status_code: "success"
+          message: ${"Bucket " + bucket_name + " is now private. Updated bindings; " + json.encode_to_string(updated.bindings)}

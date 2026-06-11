@@ -1,0 +1,81 @@
+main:
+  params: [input]
+  steps:
+    # Applies an IAM Deny Policy at org, folder, or project level to block a
+    # principal from a set of permissions. Scope accepts "organization",
+    # "folder", or "project". Default permission set blocks Cloud Storage
+    # read/list — matching the Tines "apply IAM deny policy" containment step.
+    - parseInputs:
+        assign:
+          - scope: ${default(input.Scope, "project")}
+          - scope_id: ${input.ScopeId}
+          - principal_raw: ${input.Principal}
+          - permissions_raw: ${default(input.DeniedPermissions, "")}
+          - policy_id: ${default(input.PolicyId, "streamsec-deny-" + string(int(sys.now())))}
+
+    - logInput:
+        call: sys.log
+        args:
+          text: ${"Runbook started. Scope='" + scope + "', ScopeId='" + scope_id + "', Principal='" + principal_raw + "', PolicyId='" + policy_id + "'"}
+          severity: INFO
+
+    - validateInputs:
+        switch:
+          - condition: ${scope_id == ""}
+            raise:
+              status_code: "error"
+              message: "ScopeId is required."
+
+    # Build the parent resource path based on scope.
+    - buildParent:
+        switch:
+          - condition: ${scope == "organization"}
+            assign:
+              - parent: ${"cloudresourcemanager.googleapis.com/organizations/" + scope_id}
+          - condition: ${scope == "folder"}
+            assign:
+              - parent: ${"cloudresourcemanager.googleapis.com/folders/" + scope_id}
+          - condition: ${scope == "project"}
+            assign:
+              - parent: ${"cloudresourcemanager.googleapis.com/projects/" + scope_id}
+          - condition: true
+            raise:
+              status_code: "error"
+              message: ${"Unrecognized Scope. Expected 'organization', 'folder', or 'project'; got " + scope}
+
+    - resolvePermissions:
+        switch:
+          - condition: ${permissions_raw == ""}
+            assign:
+              - permissions:
+                  - "storage.googleapis.com/objects.get"
+                  - "storage.googleapis.com/objects.list"
+          - condition: true
+            assign:
+              - permissions: ${text.split(permissions_raw, ",")}
+
+    - createDenyPolicy:
+        try:
+          call: http.post
+          args:
+            url: ${"https://iam.googleapis.com/v2/policies/" + text.url_encode(parent) + "/denypolicies?policyId=" + policy_id}
+            auth:
+              type: OAuth2
+            body:
+              displayName: ${"Stream Security auto-remediation deny for " + principal_raw}
+              rules:
+                - denyRule:
+                    deniedPrincipals:
+                      - ${principal_raw}
+                    deniedPermissions: ${permissions}
+          result: response
+        except:
+          as: er
+          raise:
+            status_code: "error"
+            message: ${"Failed to create deny policy; " + default(er.body.error.message, json.encode_to_string(er))}
+
+    - done:
+        return:
+          status_code: "success"
+          message: ${"Created IAM Deny Policy " + policy_id + " on " + scope + " " + scope_id + " blocking " + principal_raw + " from " + json.encode_to_string(permissions)}

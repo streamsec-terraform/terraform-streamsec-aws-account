@@ -1,0 +1,60 @@
+main:
+  params: [input]
+  steps:
+    # Step 1: Parse input
+    - parseInput:
+        assign:
+          - function_id: ${input.GcpRunFunctionId}
+
+    # Step 1.0: Log input
+    - logInput:
+        call: sys.log
+        args:
+          text: ${"Runbook started. Disabling Cloud Run function " + function_id}
+          severity: INFO
+
+    # Step 2: Disable the Cloud Run service by setting manualInstanceCount to 0
+    - disableService:
+        try:
+          call: googleapis.run.v2.projects.locations.services.patch
+          args:
+            name: ${function_id}
+            updateMask: "scaling.manualInstanceCount"
+            body:
+              scaling:
+                manualInstanceCount: 0
+        except:
+          as: disable_error
+          raise:
+            status_code: "error"
+            message: ${"Failed to disable Cloud Run service; " + disable_error.body.error.message}
+
+    # Step 3: Verify the updated service
+    - verifyService:
+        try:
+          call: googleapis.run.v2.projects.locations.services.get
+          args:
+            name: ${function_id}
+          result: service
+        except:
+          as: get_error
+          raise:
+            status_code: "error"
+            message: ${"Failed to retrieve Cloud Run service details " + get_error.body.error.message}
+    # Step 4: Check if scaling section is missing or empty
+    - checkScaling:
+        assign:
+          - valid: ${"scaling" in service and "manualInstanceCount" in service.scaling and service.scaling.manualInstanceCount == 0}
+    # Step 5: Return success or failure
+    - assertDisabled:
+        switch:
+          - condition: ${valid}
+            return:
+              status_code: "success"
+              message: "Successfully disabled Cloud Run function by setting scaling to zero."
+        next: raiseFailure
+
+    - raiseFailure:
+        raise:
+          status_code: "error"
+          message: "Cloud Run function was not disabled as expected."

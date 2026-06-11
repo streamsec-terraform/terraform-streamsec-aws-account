@@ -1,0 +1,289 @@
+main:
+  params: [input]
+  steps:
+    - parseFirewallId:
+        assign:
+          - firewall_id: ${input.FirewallId}
+          - parts: ${text.split(firewall_id, "/")}
+
+    - logInput:
+        call: sys.log
+        args:
+          text: ${"Runbook started. Received parameter firewall_id = '" + firewall_id + "'"}
+          severity: INFO
+
+    - validateParts:
+        switch:
+          - condition: ${len(parts) != 5}
+            raise:
+              status_code: "error"
+              message: ${"Invalid FirewallId format. Expected 'projects/<project_id>/global/firewalls/<firewall_name>', got; " + firewall_id}
+
+    - extractIds:
+        assign:
+          - project_id: ${parts[1]}
+          - firewall_name: ${parts[4]}
+
+    - getRule:
+        try:
+            call: googleapis.compute.v1.firewalls.get
+            args:
+              project: ${project_id}
+              firewall: ${firewall_name}
+            result: fw
+        except:
+          as: e
+          switch:
+            - condition: ${e.body.error.code != 409}
+              raise:
+                status_code: "error"
+                message: ${e.body.error.message}
+
+    - checkDisabled:
+        switch:
+          - condition: ${fw.disabled}
+            next: noChange
+
+    - checkSourceRanges:
+        assign:
+          - isPublic: ${"0.0.0.0/0" in fw.sourceRanges}
+
+    - skipIfNotPublic:
+        switch:
+          - condition: ${not isPublic}
+            next: noChange
+
+    - initFlags:
+        assign:
+          - hasPort22: false
+          - only22: false
+          - hasOtherProtocols: false
+          - newAllowed: []
+          - i: 0
+
+    - loopAllowed:
+        switch:
+          - condition: ${i < len(fw.allowed)}
+            next: setRule
+        next: finishCheck
+
+    - setRule:
+        assign:
+          - rule: ${fw.allowed[i]}
+          - cleanedPorts: []
+          - j: 0
+        next: checkProtocol
+
+    - checkProtocol:
+        switch:
+          - condition: ${rule.IPProtocol == "all"}
+            next: splitAll
+          - condition: ${rule.IPProtocol == "tcp"}
+            next: loopPorts
+        next: markOther
+
+    - markOther:
+        assign:
+          - hasOtherProtocols: true
+        next: keepRule
+
+    - loopPorts:
+        switch:
+          - condition: ${j < len(rule.ports)}
+            next: processPort
+        next: finishRule
+
+    - processPort:
+        assign:
+          - port: ${rule.ports[j]}
+        next: decidePort
+
+    - decidePort:
+        switch:
+          - condition: ${port == "22" and len(rule.ports) == 1}
+            next: markOnly22
+          - condition: ${port == "22"}
+            next: markFound
+        next: checkRangeAssign
+
+    - markOnly22:
+        assign:
+          - hasPort22: true
+          - only22: true
+        next: nextIter
+
+    - markFound:
+        assign:
+          - hasPort22: true
+        next: nextPort
+
+    - checkRangeAssign:
+        assign:
+          - partsRange: ${text.split(port, "-")}
+        next: checkRangeSwitch
+
+    - checkRangeSwitch:
+        switch:
+          - condition: ${len(partsRange) == 2 and int(partsRange[0]) <= 22 and 22 <= int(partsRange[1])}
+            next: splitRange
+        next: keepPort
+
+    - splitRange:
+        assign:
+          - startVal: ${int(partsRange[0])}
+          - endVal: ${int(partsRange[1])}
+          - hasPort22: true
+        next: maybeLower
+
+    - maybeLower:
+        switch:
+          - condition: ${startVal < 22}
+            next: addLower
+        next: maybeUpper
+
+    - addLower:
+        assign:
+          - cleanedPorts: ${list.concat(cleanedPorts, [string(startVal) + "-21"])}
+        next: maybeUpper
+
+    - maybeUpper:
+        switch:
+          - condition: ${endVal > 22}
+            next: addUpper
+        next: nextPort
+
+    - addUpper:
+        assign:
+          - cleanedPorts: ${list.concat(cleanedPorts, ["23-" + string(endVal)])}
+        next: nextPort
+
+    - keepPort:
+        assign:
+          - cleanedPorts: ${list.concat(cleanedPorts, [port])}
+        next: nextPort
+
+    - nextPort:
+        assign:
+          - j: ${j + 1}
+        next: loopPorts
+
+    - finishRule:
+        switch:
+          - condition: ${len(cleanedPorts) > 0}
+            next: addNewRule
+        next: nextIter
+
+    - addNewRule:
+        assign:
+          - newRule:
+              IPProtocol: ${rule.IPProtocol}
+              ports: ${cleanedPorts}
+          - newAllowed: ${list.concat(newAllowed, [newRule])}
+        next: nextIter
+
+    - keepRule:
+        assign:
+          - newAllowed: ${list.concat(newAllowed, [rule])}
+        next: nextIter
+
+    - splitAll:
+        assign:
+          - hasPort22: true
+          - tcpRule:
+              IPProtocol: "tcp"
+              ports: ["0-21","23-65535"]
+          - newAllowed: [${tcpRule}]
+          - k: 0
+        next: loopOther
+
+    - loopOther:
+        switch:
+          - condition: ${k < len(fw.allowed)}
+            next: checkOther
+        next: nextIter
+
+    - checkOther:
+        switch:
+          - condition: ${fw.allowed[k].IPProtocol != "tcp" and fw.allowed[k].IPProtocol != "all"}
+            next: addOther
+        next: nextOther
+
+    - addOther:
+        assign:
+          - newAllowed: ${list.concat(newAllowed, [fw.allowed[k]])}
+        next: nextOther
+
+    - nextOther:
+        assign:
+          - k: ${k + 1}
+        next: loopOther
+
+    - nextIter:
+        assign:
+          - i: ${i + 1}
+        next: loopAllowed
+
+    - finishCheck:
+        switch:
+          - condition: ${hasPort22 and only22 and not hasOtherProtocols and len(newAllowed) == 0}
+            next: disableRule
+          - condition: ${hasPort22}
+            next: fixRule
+        next: noChange
+
+    - disableRule:
+        try:
+            call: googleapis.compute.v1.firewalls.patch
+            args:
+                project: ${project_id}
+                firewall: ${firewall_name}
+                body:
+                    name: ${fw.name}
+                    network: ${fw.network}
+                    direction: ${fw.direction}
+                    priority: ${fw.priority}
+                    sourceRanges: ${fw.sourceRanges}
+                    allowed: ${fw.allowed}
+                    targetTags: ${default(fw.targetTags, [])}
+                    disabled: true
+            result: disable_resp
+        except:
+          as: e
+          # 409 is intentionally re-raised: concurrent patch = modification unconfirmed.
+          raise:
+            status_code: "error"
+            message: ${string(e)}
+        next: done
+
+    - fixRule:
+        try:
+            call: googleapis.compute.v1.firewalls.patch
+            args:
+              project: ${project_id}
+              firewall: ${firewall_name}
+              body:
+                name: ${fw.name}
+                network: ${fw.network}
+                direction: ${fw.direction}
+                priority: ${fw.priority}
+                sourceRanges: ${fw.sourceRanges}
+                allowed: ${newAllowed}
+                targetTags: ${default(fw.targetTags, [])}
+            result: patch_resp
+        except:
+          as: e
+          # 409 is intentionally re-raised: concurrent patch = modification unconfirmed.
+          raise:
+            status_code: "error"
+            message: ${string(e)}
+        next: done
+
+    - noChange:
+        return:
+          status_code: "ok"
+          message: ${"Firewall rule " + firewall_name + " does not expose port 22."}
+
+    - done:
+        return:
+          status_code: "success"
+          message: ${"Firewall rule " + firewall_name + " fixed successfully"}

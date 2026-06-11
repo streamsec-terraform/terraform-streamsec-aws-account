@@ -1,0 +1,75 @@
+main:
+  params: [input]
+  steps:
+    - parseId:
+        assign:
+          - vm_id: ${input.VmId}
+          - parts: ${text.split(vm_id, "/")}
+
+    - logInput:
+        call: sys.log
+        args:
+          text: ${"Runbook started. Received parameter vm_id = '" + vm_id + "'"}
+          severity: INFO
+
+    - validateParts:
+        switch:
+          - condition: ${len(parts) != 6}
+            raise:
+              status_code: "error"
+              message: ${"Invalid VmId format. Expected projects/PROJECT/zones/ZONE/instances/NAME; got " + vm_id}
+
+    - extractIds:
+        assign:
+          - project: ${parts[1]}
+          - zone: ${parts[3]}
+          - instance: ${parts[5]}
+
+    - resetVM:
+        try:
+          call: googleapis.compute.v1.instances.reset
+          args:
+            project: ${project}
+            zone: ${zone}
+            instance: ${instance}
+        except:
+          as: reset_error
+          raise:
+            status_code: "error"
+            message: ${"VM reset failed; " + reset_error.body.error.message}
+
+    - wait:
+        call: sys.sleep
+        args:
+          seconds: 30
+
+    - getStatus:
+        try:
+          call: googleapis.compute.v1.instances.get
+          args:
+            project: ${project}
+            zone: ${zone}
+            instance: ${instance}
+          result: vmInfo
+        except:
+          as: get_error
+          raise:
+            status_code: "error"
+            message: ${"Failed to retrieve VM status after reset; " + get_error.body.error.message}
+
+    - verifyStatus:
+        switch:
+          - condition: ${vmInfo.status == "RUNNING"}
+            next: done
+          - condition: true
+            next: failed
+
+    - done:
+        return:
+          status_code: "success"
+          message: ${"VM " + vm_id + " was successfully reset and is now running."}
+
+    - failed:
+        raise:
+          status_code: "error"
+          message: ${"VM reset did not complete successfully. Current status is " + vmInfo.status}

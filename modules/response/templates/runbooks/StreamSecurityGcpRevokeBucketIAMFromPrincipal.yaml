@@ -1,0 +1,143 @@
+main:
+  params: [input]
+  steps:
+    - parseInputs:
+        assign:
+          - member: ${input.Member}
+          - role: ${input.Role}
+          - scope: ${default(input.Scope, "project")}
+          - scope_id: ${input.ScopeId}
+
+    - logInput:
+        call: sys.log
+        args:
+          text: ${"Runbook started. Scope='" + scope + "', ScopeId='" + scope_id + "', Role='" + role + "', Member='" + member + "'"}
+          severity: INFO
+
+    - validateScope:
+        switch:
+          - condition: ${scope != "project"}
+            raise:
+              status_code: "error"
+              message: ${"Unsupported scope '" + scope + "'. This runbook only supports project scope."}
+
+    - buildResource:
+        assign:
+          - resource: ${"projects/" + scope_id}
+
+    - getPolicy:
+        try:
+          call: http.post
+          args:
+            url: ${"https://cloudresourcemanager.googleapis.com/v3/" + resource + ":getIamPolicy"}
+            auth:
+              type: OAuth2
+            body:
+              options:
+                requestedPolicyVersion: 3
+          result: policyResp
+        except:
+          as: er
+          raise:
+            status_code: "error"
+            message: ${"Failed to getIamPolicy on " + resource + "; " + default(er.body.error.message, json.encode_to_string(er))}
+
+    - checkPolicyStatus:
+        switch:
+          - condition: ${policyResp.code >= 400}
+            raise:
+              status_code: "error"
+              message: ${"Failed to getIamPolicy on " + resource + "; HTTP " + string(policyResp.code)}
+
+    - filterBindings:
+        assign:
+          - policy: ${policyResp.body}
+          - newBindings: []
+          - removed: false
+
+    - iterateBindings:
+        try:
+          for:
+            value: binding
+            in: ${default(policy.bindings, [])}
+            steps:
+              - checkRole:
+                  switch:
+                    - condition: ${binding.role != role}
+                      steps:
+                        - keepOtherRole:
+                            assign:
+                              - newBindings: ${list.concat(newBindings, binding)}
+                    - condition: true
+                      steps:
+                        - initMembers:
+                            assign:
+                              - members: []
+                        - loopMembers:
+                            for:
+                              value: m
+                              in: ${default(binding.members, [])}
+                              steps:
+                                - checkMember:
+                                    switch:
+                                      - condition: ${m != member}
+                                        steps:
+                                          - keepMember:
+                                              assign:
+                                                - members: ${list.concat(members, m)}
+                                      - condition: true
+                                        steps:
+                                          - markRemoved:
+                                              assign:
+                                                - removed: true
+                        - rebuildBinding:
+                            assign:
+                              - newBinding:
+                                  role: ${binding.role}
+                                  members: ${members}
+                        - addBinding:
+                            assign:
+                              - newBindings: ${list.concat(newBindings, newBinding)}
+        except:
+          as: er
+          raise:
+            status_code: "error"
+            message: ${"Failed to iterateBindings; " + default(er.body.error.message, json.encode_to_string(er))}
+
+    - checkNoChange:
+        switch:
+          - condition: ${not(removed)}
+            return:
+              status_code: "success"
+              message: ${"Member " + member + " not found in role " + role + " on project " + scope_id + "; nothing to revoke."}
+
+    - setPolicy:
+        try:
+          call: http.post
+          args:
+            url: ${"https://cloudresourcemanager.googleapis.com/v3/" + resource + ":setIamPolicy"}
+            auth:
+              type: OAuth2
+            body:
+              policy:
+                version: ${policy.version}
+                bindings: ${newBindings}
+                etag: ${policy.etag}
+          result: setResp
+        except:
+          as: er
+          raise:
+            status_code: "error"
+            message: ${"Failed to setIamPolicy on " + resource + "; " + default(er.body.error.message, json.encode_to_string(er))}
+
+    - checkSetStatus:
+        switch:
+          - condition: ${setResp.code >= 400}
+            raise:
+              status_code: "error"
+              message: ${"Failed to setIamPolicy on " + resource + "; HTTP " + string(setResp.code)}
+
+    - done:
+        return:
+          status_code: "success"
+          message: ${"Removed " + member + " from role " + role + " on project " + scope_id + "."}

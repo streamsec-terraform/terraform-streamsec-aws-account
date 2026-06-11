@@ -1,0 +1,135 @@
+main:
+  params: [input]
+  steps:
+
+    # Step 1: Validate parts length
+    - validateParts:
+        switch:
+          - condition: ${len(text.split(input.InstanceId, "/")) != 4}
+            raise:
+              status_code: "error"
+              message: ${"Invalid id format. Expected 'projects/<project_id>/instances/<instance_name>', got; " + input.InstanceId}
+
+    # Step 1.0: Parse input to extract project_id and instance_name
+    - parseInput:
+        assign:
+          - full_id: ${input.InstanceId}
+          - parts: ${text.split(full_id, "/")}
+          - project_id: ${parts[1]}
+          - instance_name: ${parts[3]}
+
+    # Step 1.1: Log the received vm_id
+    - logInput:
+        call: sys.log
+        args:
+          text: ${"Runbook started. Received parameter full_id = '" + full_id + "'"}
+          severity: INFO
+
+
+
+    # Step 2: Fetch current instance details
+    - getCurrentInstance:
+        try:
+          call: googleapis.sqladmin.v1beta4.instances.get
+          args:
+            project: ${project_id}
+            instance: ${instance_name}
+          result: current_instance
+        except:
+            as: get_error
+            raise:
+                status_code: "error"
+                message: ${"Failed to get instance details for instance " + instance_name + get_error.body.error.message}
+
+    # Step 3: Remove authorized networks if they exist
+    - clearAuthorizedNetworks:
+        try:
+          switch:
+            - condition: ${"authorizedNetworks" in current_instance.settings.ipConfiguration and len(current_instance.settings.ipConfiguration.authorizedNetworks) > 0}
+              steps:
+                - removeNetworks:
+                    call: googleapis.sqladmin.v1beta4.instances.patch
+                    args:
+                      project: ${project_id}
+                      instance: ${instance_name}
+                      body:
+                        settings:
+                          ipConfiguration:
+                            authorizedNetworks: []
+                - waitAfterRemoval:
+                    call: sys.sleep
+                    args:
+                      seconds: 3
+        except:
+            as: patch_error
+            raise:
+                status_code: "error"
+                message: ${"Failed to remove authorized networks for instance " + instance_name + patch_error.body.error.message}
+
+    # Step 4: Check if instance has private network
+    - checkPrivate:
+        assign:
+          - has_private: ${"privateNetwork" in current_instance.settings.ipConfiguration}
+
+    # Step 5: Disable public IPv4 only if private network is configured
+    - disablePublicIP:
+        try:
+          switch:
+            - condition: ${has_private}
+              steps:
+                - patchDisablePublic:
+                    call: googleapis.sqladmin.v1beta4.instances.patch
+                    args:
+                      project: ${project_id}
+                      instance: ${instance_name}
+                      body:
+                        settings:
+                          ipConfiguration:
+                            ipv4Enabled: false
+                - waitAfterPatch:
+                    call: sys.sleep
+                    args:
+                      seconds: 3
+        except:
+            as: disable_error
+            raise:
+                status_code: "error"
+                message: ${"Failed to disable public IP for instance " + instance_name + disable_error.body.error.message}
+
+    # Step 6: Fetch updated instance
+    - getUpdatedInstance:
+        try:
+          call: googleapis.sqladmin.v1beta4.instances.get
+          args:
+            project: ${project_id}
+            instance: ${instance_name}
+          result: updated_instance
+        except:
+            as: get_error
+            raise:
+                status_code: "error"
+                message: ${"Failed to get updated instance details for instance " + instance_name + get_error.body.error.message}
+
+
+    # Step 7: Determine result
+    - checkIfDisabled:
+        assign:
+          - is_disabled: ${"ipv4Enabled" in updated_instance.settings.ipConfiguration and updated_instance.settings.ipConfiguration.ipv4Enabled == false}
+          - warning_only: ${not has_private}
+    
+    - handleFinalResult:
+        switch:
+          - condition: ${is_disabled}
+            return:
+              status_code: "success"
+              message: ${"Public access fully disabled for instance " + instance_name}
+          - condition: ${warning_only}
+            return:
+              status_code: "warning"
+              message: ${"Instance '" + instance_name + "' still has a public IP because no private network is configured, but all authorized networks were removed to restrict access."}
+        next: raiseFailure
+    
+    - raiseFailure:
+        raise:
+          status_code: "error"
+          message: ${"Instance '" + instance_name + "' still has public IPs after patch."}

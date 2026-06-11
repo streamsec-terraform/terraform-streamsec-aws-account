@@ -1,0 +1,112 @@
+main:
+  params: [input]
+  steps:
+    # Step 1: Parse vm_id string from input dict
+    - parseVMId:
+        assign:
+          - vm_id: ${input.VmId}
+          - parts: ${text.split(vm_id, "/")}
+
+    # Step 1.0: Log the received vm_id
+    - logInput:
+        call: sys.log
+        args:
+          text: ${"Runbook started. Received parameter vm_id = '" + vm_id + "'"}
+          severity: INFO
+
+    # Step 1.1: Validate parts length
+    - validateParts:
+        switch:
+          - condition: ${len(parts) != 6}
+            raise:
+              status_code: "error"
+              message: ${"Invalid VmId format. Expected 'projects/<project_id>/zones/<zone>/instances/<instance_name>', got; " + vm_id}
+
+    # Step 1.2: Extract project/zone/instance
+    - extractIds:
+        assign:
+          - project_id: ${parts[1]}
+          - zone: ${parts[3]}
+          - instance_name: ${parts[5]}
+
+    #Step 1.3: Log extracted IDs
+    - logExtractedIds:
+        call: sys.log
+        args:
+          text: ${"Extracted project_id = '" + project_id + "', zone = '" + zone + "', instance_name = '" + instance_name + "'"}
+          severity: INFO
+
+    # Step 2: Get instance details
+    - getInstance:
+        try:
+          call: googleapis.compute.v1.instances.get
+          args:
+            project: ${project_id}
+            zone: ${zone}
+            instance: ${instance_name}
+          result: instanceData
+        except:
+          as: er
+          raise:
+            status_code: "error"
+            message: ${"Failed to retrieve instance details " + er.body.error.message}
+
+    # Step 3: Extract attached disks
+    - extractDisks:
+        assign:
+          - disks: ${default(instanceData.disks, [])}
+
+    # Step 4: Iterate and create snapshots for persistent disks
+    - createSnapshots:
+        for:
+          value: disk
+          in: ${disks}
+          steps:
+            # Step 4.1: Check if persistent
+            - isPersistentDisk:
+                switch:
+                  - condition: ${"source" in disk and disk.type == "PERSISTENT"}
+                    next: extractDiskName
+                next: skipDisk
+
+            - skipDisk:
+                call: sys.log
+                args:
+                    text: "Skipping non-persistent disk"
+                    severity: INFO
+
+            # Step 4.2: Extract disk name and snapshot name
+            - extractDiskName:
+                try:
+                  assign:
+                    - sourceParts: ${text.split(disk.source, "/")}
+                    - diskName: ${sourceParts[len(sourceParts) - 1]}
+                    - snapshotName: ${"snapshot-" + text.replace_all(diskName, "_", "-") + "-" + text.replace_all(string(sys.now()), ".", "-")}
+                except:
+                  as: extract_error
+                  raise:
+                    status_code: "error"
+                    message: ${"Failed to extract disk name from source URL " + disk.source + " " + extract_error.body.error.message}
+                next: doSnapshot
+
+            # Step 4.3: Create the snapshot
+            - doSnapshot:
+                try:
+                  call: googleapis.compute.v1.disks.createSnapshot
+                  args:
+                    project: ${project_id}
+                    zone: ${zone}
+                    disk: ${diskName}
+                    body:
+                      name: ${snapshotName}
+                except:
+                  as: snapshot_error
+                  raise:
+                    status_code: "error"
+                    message: ${"Snapshot creation failed for disk " + diskName + " " + snapshot_error.body.error.message}
+
+    # Final Step
+    - done:
+        return:
+          status_code: "success"
+          message: ${"Snapshots created for all persistent disks attached to VM " + vm_id}

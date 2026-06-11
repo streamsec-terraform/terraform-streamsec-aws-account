@@ -1,0 +1,37 @@
+main:
+  params: [input]
+  steps:
+    - parseInputs:
+        assign:
+          - api_key_id: ${input.ApiKeyId}
+
+    - logInput:
+        call: sys.log
+        args:
+          text: ${"Runbook started. ApiKeyId='" + api_key_id + "'"}
+          severity: INFO
+
+    - deleteKey:
+        try:
+          call: http.delete
+          args:
+            url: ${"https://apikeys.googleapis.com/v2/" + api_key_id}
+            auth:
+              type: OAuth2
+          result: deleteResp
+        except:
+          as: er
+          raise:
+            status_code: "error"
+            message: ${"Failed to delete API key " + api_key_id + "; " + default(er.body.error.message, json.encode_to_string(er))}
+    - checkDeleteStatus:
+        switch:
+          - condition: ${deleteResp.code >= 400}
+            raise:
+              status_code: "error"
+              message: ${"Failed to delete API key " + api_key_id + "; HTTP " + string(deleteResp.code)}
+
+    - done:
+        return:
+          status_code: "success"
+          message: ${"Deleted API key " + api_key_id + ". Any credentials issued with this key are immediately revoked."}

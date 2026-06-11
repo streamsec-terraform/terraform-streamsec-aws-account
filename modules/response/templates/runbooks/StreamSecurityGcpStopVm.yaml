@@ -1,0 +1,51 @@
+main:
+  params: [input]
+  steps:
+    # Step 1: Parse vm_id string from input dict
+    - parseVMId:
+        assign:
+          - vm_id: ${input.VmId}
+          - parts: ${text.split(vm_id, "/")}
+
+    # Step 1.0: Log the received vm_id
+    - logInput:
+        call: sys.log
+        args:
+          text: ${"Runbook started. Received parameter vm_id = '" + vm_id + "'"}
+          severity: INFO
+
+    # Step 1.1: Validate parts length
+    - validateParts:
+        switch:
+          - condition: ${len(parts) != 6}
+            raise:
+              status_code: "error"
+              message: ${"Invalid VmId format. Expected 'projects/<project_id>/zones/<zone>/instances/<instance_name>', got; " + vm_id}
+
+    # Step 1.2: Extract IDs
+    - extractIds:
+        assign:
+          - project_id: ${parts[1]}
+          - zone: ${parts[3]}
+          - instance_name: ${parts[5]}
+
+    # Step 2: Stop VM
+    - stopVM:
+        try:
+          call: googleapis.compute.v1.instances.stop
+          args:
+            project: ${project_id}
+            zone: ${zone}
+            instance: ${instance_name}
+          result: stopResult
+        except:
+          as: er
+          raise:
+            status_code: "error"
+            message: ${"Failed to stop VM " + er.body.error.message}
+
+    # Final Step
+    - done:
+        return:
+          status_code: "success"
+          message: ${"VM " + vm_id + " stopped successfully."}

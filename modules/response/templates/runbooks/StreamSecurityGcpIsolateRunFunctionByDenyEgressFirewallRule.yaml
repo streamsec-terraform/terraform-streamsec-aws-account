@@ -1,0 +1,138 @@
+main:
+  params: [input]
+  steps:
+
+    # Step 1: Parse resource ID and extract identifiers
+    - parseFunctionId:
+        assign:
+          - function_id: ${input.FunctionId}
+          - parts: ${text.split(function_id, "/")}
+
+    # Step 2: Log start
+    - logStart:
+        call: sys.log
+        args:
+          text: ${"Starting isolation process for function; " + function_id}
+          severity: INFO
+
+    - validateParts:
+        switch:
+          - condition: ${len(parts) != 6}
+            raise:
+              status_code: "error"
+              message: ${"Invalid FunctionId format. Expected 'projects/<project_id>/locations/<location>/services/<function_name>', got; " + function_id}
+
+    - extractIds:
+        assign:
+          - project_id: ${parts[1]}
+          - location: ${parts[3]}
+          - function_name: ${parts[5]}
+
+
+    # Step 3: Get function details
+    - getFunction:
+        try:
+            call: googleapis.run.v2.projects.locations.services.get
+            args:
+                name: ${"projects/" + project_id + "/locations/" + location + "/services/" + function_name}
+            result: function
+        except:
+          as: e
+          switch:
+            - condition: ${e.body.error.code != 409}
+              raise:
+                status_code: "error"
+                message: ${e.body.error.message}
+
+
+
+    # Step 4: Check if function is connected to a VPC
+    - checkVpcConnection:
+        try:
+            switch:
+                - condition: ${not("vpcAccess" in function.template)}
+                  return:
+                    status_code: "ok"
+                    message: ${"Service is not connected to a VPC. No action taken."}
+        except:
+            as: er
+            raise:
+                status_code: "error"
+                message: ${ er }
+
+     # Step 5a: Check if VPC exists before accessing networkInterfaces
+    - checkVpcInterfaces:
+        switch:
+          - condition: ${not("vpcAccess" in function.template) or not("networkInterfaces" in function.template.vpcAccess) or len(function.template.vpcAccess.networkInterfaces) == 0}
+            return:
+              status_code: "ok"
+              message: ${"Service is not connected to a VPC. No action taken."}
+        next: extractVpcName
+
+    # Step 5b: Extract network name from the full resource URL
+    - extractVpcName:
+        assign:
+          - network_full_url: ${function.template.vpcAccess.networkInterfaces[0].network}
+          - network_parts: ${text.split(network_full_url, "/")}
+          - vpc_name: ${network_parts[len(network_parts) - 1]}
+
+    # Step 6: Define firewall And Network
+    - defineFirewallAndNetwork:
+        assign:
+            - firewall_egress: ${"isolated-function-egress-stream-" + vpc_name}
+            - network_url: ${"https://www.googleapis.com/compute/v1/projects/" + project_id + "/global/networks/" + vpc_name}
+
+    # Step 7: Create new deny-all EGRESS firewall rule
+    - createEgress:
+        try:
+            call: googleapis.compute.v1.firewalls.insert
+            args:
+                project: ${project_id}
+                body:
+                    name: ${firewall_egress}
+                    network: ${network_url}
+                    direction: "EGRESS"
+                    priority: 100
+                    denied:
+                    - IPProtocol: "all"
+                    destinationRanges:
+                    - "0.0.0.0/0"
+                    targetTags: ["isolatedfunctionegressstream"]
+        except:
+          as: e
+          switch:
+            - condition: ${e.body.error.code != 409}
+              raise:
+                status_code: "error"
+                message: ${e.body.error.message}
+
+
+    # Step 8: Add the target network tag to the function
+    - updateFunctionTags:
+        try:
+            call: googleapis.run.v2.projects.locations.services.patch
+            args:
+                name: ${"projects/" + project_id + "/locations/" + location + "/services/" + function_name}
+                updateMask: "template.vpcAccess.networkInterfaces"
+                body:
+                    template:
+                        vpcAccess:
+                            networkInterfaces:
+                                - network: ${function.template.vpcAccess.networkInterfaces[0].network}
+                                  subnetwork: ${function.template.vpcAccess.networkInterfaces[0].subnetwork}
+                                  tags: ["isolatedfunctionegressstream"]
+
+        except:
+            as: e
+            switch:
+                - condition: ${e.body.error.code != 409}
+                  raise:
+                    status_code: "error"
+                    message: ${e.body.error.message}
+
+
+    # Final step: return success
+    - done:
+        return:
+          status_code: "success"
+          message: ${"Function " + function_name + " is now isolated via firewall rule on VPC " }
