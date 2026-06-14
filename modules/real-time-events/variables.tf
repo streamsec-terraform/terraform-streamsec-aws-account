@@ -35,7 +35,7 @@ variable "lambda_source_code_bucket_prefix" {
 variable "lambda_cloudwatch_s3_source_code_key" {
   description = "The S3 key for the lambda source code"
   type        = string
-  default     = "fab64013a5af58077df6da9eb506b4a5"
+  default     = "74fe114d709c2efece809dfbd6a7577e"
 }
 
 variable "lambda_layer_name" {
