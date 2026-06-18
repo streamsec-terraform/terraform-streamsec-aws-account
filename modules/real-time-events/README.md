@@ -13,9 +13,9 @@
 
 | Name | Version |
 | ---- | ------- |
-| <a name="provider_aws"></a> [aws](#provider\_aws) | 6.51.0 |
-| <a name="provider_streamsec"></a> [streamsec](#provider\_streamsec) | 1.13.3 |
-| <a name="provider_time"></a> [time](#provider\_time) | 0.14.0 |
+| <a name="provider_aws"></a> [aws](#provider\_aws) | ~> 6.0 |
+| <a name="provider_streamsec"></a> [streamsec](#provider\_streamsec) | >= 1.7 |
+| <a name="provider_time"></a> [time](#provider\_time) | >= 0.11 |
 
 ## Modules
 
