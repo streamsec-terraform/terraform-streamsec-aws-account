@@ -3,16 +3,16 @@
 ## Requirements
 
 | Name | Version |
-|------|---------|
-| <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.0 |
-| <a name="requirement_aws"></a> [aws](#requirement\_aws) | >= 3.0 |
+| ---- | ------- |
+| <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.2 |
+| <a name="requirement_aws"></a> [aws](#requirement\_aws) | >= 6.0 |
 | <a name="requirement_streamsec"></a> [streamsec](#requirement\_streamsec) | >= 1.7 |
 
 ## Providers
 
 | Name | Version |
-|------|---------|
-| <a name="provider_aws"></a> [aws](#provider\_aws) | >= 3.0 |
+| ---- | ------- |
+| <a name="provider_aws"></a> [aws](#provider\_aws) | >= 6.0 |
 | <a name="provider_streamsec"></a> [streamsec](#provider\_streamsec) | >= 1.7 |
 
 ## Modules
@@ -22,8 +22,10 @@ No modules.
 ## Resources
 
 | Name | Type |
-|------|------|
+| ---- | ---- |
+| [aws_cloudwatch_event_rule.collection_bucket_trigger](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_event_rule) | resource |
 | [aws_cloudwatch_event_rule.iam_activity_s3_eventbridge_trigger](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_event_rule) | resource |
+| [aws_cloudwatch_event_target.collection_bucket_target](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_event_target) | resource |
 | [aws_cloudwatch_event_target.iam_activity_s3_eventbridge_target](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_event_target) | resource |
 | [aws_iam_policy.lambda_exec_policy](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_policy) | resource |
 | [aws_iam_role.lambda_execution_role](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
@@ -32,6 +34,7 @@ No modules.
 | [aws_lambda_function.streamsec_iam_activity_lambda](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_function) | resource |
 | [aws_lambda_function_event_invoke_config.streamsec_options_cloudwatch](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_function_event_invoke_config) | resource |
 | [aws_lambda_layer_version.streamsec_lambda_layer](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_layer_version) | resource |
+| [aws_lambda_permission.collection_bucket_allow_invoke](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_permission) | resource |
 | [aws_lambda_permission.iam_activity_s3_allow_invoke](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_permission) | resource |
 | [aws_lambda_permission.streamsec_iam_activity_allow_s3_invoke](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_permission) | resource |
 | [aws_s3_bucket_notification.bucket_notification](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_notification) | resource |
@@ -40,6 +43,7 @@ No modules.
 | [aws_secretsmanager_secret_version.streamsec_collection_secret_version](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret_version) | resource |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
 | [aws_region.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/region) | data source |
+| [aws_s3_bucket.collection_bucket](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/s3_bucket) | data source |
 | [aws_s3_bucket.iam_activity_bucket](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/s3_bucket) | data source |
 | [streamsec_aws_account.this](https://registry.terraform.io/providers/streamsec-terraform/streamsec/latest/docs/data-sources/aws_account) | data source |
 | [streamsec_host.this](https://registry.terraform.io/providers/streamsec-terraform/streamsec/latest/docs/data-sources/host) | data source |
@@ -47,7 +51,16 @@ No modules.
 ## Inputs
 
 | Name | Description | Type | Default | Required |
-|------|-------------|------|---------|:--------:|
+| ---- | ----------- | ---- | ------- | :------: |
+| <a name="input_alb_access_logs_bucket_name"></a> [alb\_access\_logs\_bucket\_name](#input\_alb\_access\_logs\_bucket\_name) | (Optional) Name of an EXISTING S3 bucket (in the same region as this module's provider) that is the target of ALB/ELB access logging. PREREQUISITE: EventBridge notifications must be enabled on the bucket, see: https://docs.streamsec.io/docs/configure-s3-event-notifications-with-amazon-eventbridge. When set, the module creates an EventBridge rule that forwards new objects to the collector Lambda. The bucket is NOT created or modified by this module. Must be a static string known at plan time, and must differ from iam\_activity\_bucket\_name. | `string` | `null` | no |
+| <a name="input_alb_access_logs_key_prefix"></a> [alb\_access\_logs\_key\_prefix](#input\_alb\_access\_logs\_key\_prefix) | (Optional) S3 key prefix of the ALB access log objects (the prefix configured on the load balancer's access\_logs attribute). When set, the EventBridge rule only matches objects under this prefix and the Lambda's s3:GetObject permission is scoped to it. | `string` | `null` | no |
+| <a name="input_alb_access_logs_kms_key_arn"></a> [alb\_access\_logs\_kms\_key\_arn](#input\_alb\_access\_logs\_kms\_key\_arn) | (Optional) ARN of the KMS key used to encrypt objects in the ALB access logs bucket (SSE-KMS). When set, the Lambda execution role is granted kms:Decrypt on this key. | `string` | `null` | no |
+| <a name="input_apigateway_bucket_name"></a> [apigateway\_bucket\_name](#input\_apigateway\_bucket\_name) | (Optional) Name of an EXISTING S3 bucket (in the same region as this module's provider) that already receives API Gateway access logs (e.g. delivered via Kinesis Data Firehose). PREREQUISITE: EventBridge notifications must be enabled on the bucket, see: https://docs.streamsec.io/docs/configure-s3-event-notifications-with-amazon-eventbridge. When set, the module creates an EventBridge rule that forwards new objects to the collector Lambda. The bucket is NOT created or modified by this module. Must be a static string known at plan time, and must differ from iam\_activity\_bucket\_name. | `string` | `null` | no |
+| <a name="input_apigateway_kms_key_arn"></a> [apigateway\_kms\_key\_arn](#input\_apigateway\_kms\_key\_arn) | (Optional) ARN of the KMS key used to encrypt objects in the API Gateway bucket (SSE-KMS). When set, the Lambda execution role is granted kms:Decrypt on this key. | `string` | `null` | no |
+| <a name="input_apigateway_log_format"></a> [apigateway\_log\_format](#input\_apigateway\_log\_format) | The API Gateway access log format string configured on the API stage (JSON or delimited $context.* format). REQUIRED when apigateway\_bucket\_name is set — the collector uses it to parse the log lines and ignores API Gateway objects without it. | `string` | `null` | no |
+| <a name="input_apigateway_s3_eventbridge_rule_description"></a> [apigateway\_s3\_eventbridge\_rule\_description](#input\_apigateway\_s3\_eventbridge\_rule\_description) | The description of the EventBridge rule to create for the API Gateway access logs S3 bucket | `string` | `"Stream Security API Gateway Access Logs S3 EventBridge Rule"` | no |
+| <a name="input_apigateway_s3_eventbridge_rule_name"></a> [apigateway\_s3\_eventbridge\_rule\_name](#input\_apigateway\_s3\_eventbridge\_rule\_name) | The name of the EventBridge rule to create for the API Gateway access logs S3 bucket. Defaults to a unique name derived from the bucket name. | `string` | `null` | no |
+| <a name="input_apigateway_s3_key_prefix"></a> [apigateway\_s3\_key\_prefix](#input\_apigateway\_s3\_key\_prefix) | (Optional) S3 key prefix of the API Gateway access log objects (e.g. the Firehose delivery prefix). When set, the EventBridge rule only matches objects under this prefix, the Lambda's s3:GetObject permission is scoped to it, and the collector filters object keys by it. | `string` | `null` | no |
 | <a name="input_collection_iam_activity_token_secret_name"></a> [collection\_iam\_activity\_token\_secret\_name](#input\_collection\_iam\_activity\_token\_secret\_name) | The name of the secret to use for the lambda function | `string` | `"streamsec-collection-token-iam-activity"` | no |
 | <a name="input_iam_activity_bucket_name"></a> [iam\_activity\_bucket\_name](#input\_iam\_activity\_bucket\_name) | The name of the S3 bucket to store the iam activity logs | `string` | n/a | yes |
 | <a name="input_iam_activity_s3_eventbridge_rule_description"></a> [iam\_activity\_s3\_eventbridge\_rule\_description](#input\_iam\_activity\_s3\_eventbridge\_rule\_description) | The description of the eventbridge rule to create for the S3 bucket | `string` | `"Stream Security IAM Activity S3 EventBridge Rule"` | no |
@@ -58,7 +71,7 @@ No modules.
 | <a name="input_lambda_cloudwatch_max_event_age"></a> [lambda\_cloudwatch\_max\_event\_age](#input\_lambda\_cloudwatch\_max\_event\_age) | The maximum age of a request that Lambda sends to a function for processing, in seconds | `number` | `21600` | no |
 | <a name="input_lambda_cloudwatch_max_retry"></a> [lambda\_cloudwatch\_max\_retry](#input\_lambda\_cloudwatch\_max\_retry) | The maximum number of times to retry when the function returns an error | `number` | `2` | no |
 | <a name="input_lambda_cloudwatch_memory_size"></a> [lambda\_cloudwatch\_memory\_size](#input\_lambda\_cloudwatch\_memory\_size) | The amount of memory in MB to allocate to the lambda function | `number` | `256` | no |
-| <a name="input_lambda_cloudwatch_s3_source_code_key"></a> [lambda\_cloudwatch\_s3\_source\_code\_key](#input\_lambda\_cloudwatch\_s3\_source\_code\_key) | The S3 key for the lambda source code | `string` | `"4f9189e262201912b0b9b86fdf6ffebb"` | no |
+| <a name="input_lambda_cloudwatch_s3_source_code_key"></a> [lambda\_cloudwatch\_s3\_source\_code\_key](#input\_lambda\_cloudwatch\_s3\_source\_code\_key) | The S3 key for the lambda source code | `string` | `"4a752d836232381fc3c72ac51458c1bc"` | no |
 | <a name="input_lambda_cloudwatch_timeout"></a> [lambda\_cloudwatch\_timeout](#input\_lambda\_cloudwatch\_timeout) | The amount of time in seconds the lambda function is allowed to run | `number` | `60` | no |
 | <a name="input_lambda_iam_role_description"></a> [lambda\_iam\_role\_description](#input\_lambda\_iam\_role\_description) | Description to use on IAM role created | `string` | `"Stream Security IAM Role"` | no |
 | <a name="input_lambda_iam_role_name"></a> [lambda\_iam\_role\_name](#input\_lambda\_iam\_role\_name) | Name to use on IAM role created | `string` | `"streamsec-iam-activity-execution-role"` | no |
@@ -66,7 +79,7 @@ No modules.
 | <a name="input_lambda_iam_role_tags"></a> [lambda\_iam\_role\_tags](#input\_lambda\_iam\_role\_tags) | A map of additional tags to add to the IAM role created | `map(string)` | `{}` | no |
 | <a name="input_lambda_iam_role_use_name_prefix"></a> [lambda\_iam\_role\_use\_name\_prefix](#input\_lambda\_iam\_role\_use\_name\_prefix) | Determines whether the IAM role name (`iam_role_name`) is used as a prefix | `bool` | `true` | no |
 | <a name="input_lambda_layer_name"></a> [lambda\_layer\_name](#input\_lambda\_layer\_name) | The name of the lambda layer | `string` | `"streamsec-iam-activity-layer"` | no |
-| <a name="input_lambda_layer_s3_source_code_key"></a> [lambda\_layer\_s3\_source\_code\_key](#input\_lambda\_layer\_s3\_source\_code\_key) | The S3 key for the lambda source code | `string` | `"98919b98292d9b3ec577cb43bd280a2a"` | no |
+| <a name="input_lambda_layer_s3_source_code_key"></a> [lambda\_layer\_s3\_source\_code\_key](#input\_lambda\_layer\_s3\_source\_code\_key) | The S3 key for the lambda source code | `string` | `"1e8d00c5c5513f60c336658713ee2cd5"` | no |
 | <a name="input_lambda_name"></a> [lambda\_name](#input\_lambda\_name) | Name of the lambda function | `string` | `"streamsec-iam-activity-lambda"` | no |
 | <a name="input_lambda_policy_description"></a> [lambda\_policy\_description](#input\_lambda\_policy\_description) | Description to use on IAM policy created | `string` | `"Stream Security IAM Policy for iam_activity lambda"` | no |
 | <a name="input_lambda_policy_name"></a> [lambda\_policy\_name](#input\_lambda\_policy\_name) | Name to use on IAM policy created | `string` | `"streamsec-iam-activity-policy"` | no |
@@ -77,6 +90,9 @@ No modules.
 | <a name="input_lambda_source_code_bucket_prefix"></a> [lambda\_source\_code\_bucket\_prefix](#input\_lambda\_source\_code\_bucket\_prefix) | The prefix to use for the lambda source code bucket | `string` | `"prod-lightlytics-artifacts"` | no |
 | <a name="input_lambda_subnet_ids"></a> [lambda\_subnet\_ids](#input\_lambda\_subnet\_ids) | The subnet IDs to use for the lambda function | `list(string)` | `[]` | no |
 | <a name="input_lambda_tags"></a> [lambda\_tags](#input\_lambda\_tags) | A map of tags to add to the lambda created | `map(string)` | `{}` | no |
+| <a name="input_s3_access_logs_bucket_name"></a> [s3\_access\_logs\_bucket\_name](#input\_s3\_access\_logs\_bucket\_name) | (Optional) Name of an EXISTING S3 bucket (in the same region as this module's provider) that is the target of S3 server access logging. PREREQUISITE: EventBridge notifications must be enabled on the bucket, see: https://docs.streamsec.io/docs/configure-s3-event-notifications-with-amazon-eventbridge. When set, the module creates an EventBridge rule that forwards new objects to the collector Lambda. The bucket is NOT created or modified by this module. Must be a static string known at plan time, and must differ from iam\_activity\_bucket\_name. | `string` | `null` | no |
+| <a name="input_s3_access_logs_key_prefix"></a> [s3\_access\_logs\_key\_prefix](#input\_s3\_access\_logs\_key\_prefix) | (Optional) S3 key prefix of the S3 access log objects (the target prefix configured on server access logging). When set, the EventBridge rule only matches objects under this prefix and the Lambda's s3:GetObject permission is scoped to it. | `string` | `null` | no |
+| <a name="input_s3_access_logs_kms_key_arn"></a> [s3\_access\_logs\_kms\_key\_arn](#input\_s3\_access\_logs\_kms\_key\_arn) | (Optional) ARN of the KMS key used to encrypt objects in the S3 access logs bucket (SSE-KMS). When set, the Lambda execution role is granted kms:Decrypt on this key. | `string` | `null` | no |
 | <a name="input_tags"></a> [tags](#input\_tags) | A map of global tags to add to all created resources | `map(string)` | `{}` | no |
 
 ## Outputs

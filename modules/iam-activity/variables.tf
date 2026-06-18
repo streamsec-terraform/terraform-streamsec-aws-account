@@ -183,6 +183,102 @@ variable "iam_activity_s3_eventbridge_rule_description" {
 }
 
 ################################################################################
+# API Gateway Access Logs S3 (existing bucket)
+################################################################################
+
+variable "apigateway_bucket_name" {
+  description = "(Optional) Name of an EXISTING S3 bucket (in the same region as this module's provider) that already receives API Gateway access logs (e.g. delivered via Kinesis Data Firehose). PREREQUISITE: EventBridge notifications must be enabled on the bucket, see: https://docs.streamsec.io/docs/configure-s3-event-notifications-with-amazon-eventbridge. When set, the module creates an EventBridge rule that forwards new objects to the collector Lambda. The bucket is NOT created or modified by this module. Must be a static string known at plan time, and must differ from iam_activity_bucket_name."
+  type        = string
+  default     = null
+  validation {
+    condition     = var.apigateway_bucket_name == null || can(regex("^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$", var.apigateway_bucket_name))
+    error_message = "apigateway_bucket_name must be a valid S3 bucket name (3-63 chars, lowercase letters, numbers, dots, hyphens)."
+  }
+}
+
+variable "apigateway_log_format" {
+  description = "The API Gateway access log format string configured on the API stage (JSON or delimited $context.* format). REQUIRED when apigateway_bucket_name is set — the collector uses it to parse the log lines and ignores API Gateway objects without it."
+  type        = string
+  default     = null
+}
+
+variable "apigateway_s3_key_prefix" {
+  description = "(Optional) S3 key prefix of the API Gateway access log objects (e.g. the Firehose delivery prefix). When set, the EventBridge rule only matches objects under this prefix, the Lambda's s3:GetObject permission is scoped to it, and the collector filters object keys by it."
+  type        = string
+  default     = null
+}
+
+variable "apigateway_kms_key_arn" {
+  description = "(Optional) ARN of the KMS key used to encrypt objects in the API Gateway bucket (SSE-KMS). When set, the Lambda execution role is granted kms:Decrypt on this key."
+  type        = string
+  default     = null
+}
+
+variable "apigateway_s3_eventbridge_rule_name" {
+  description = "The name of the EventBridge rule to create for the API Gateway access logs S3 bucket. Defaults to a unique name derived from the bucket name."
+  type        = string
+  default     = null
+}
+
+variable "apigateway_s3_eventbridge_rule_description" {
+  description = "The description of the EventBridge rule to create for the API Gateway access logs S3 bucket"
+  type        = string
+  default     = "Stream Security API Gateway Access Logs S3 EventBridge Rule"
+}
+
+################################################################################
+# S3 Access Logs S3 (existing bucket)
+################################################################################
+
+variable "s3_access_logs_bucket_name" {
+  description = "(Optional) Name of an EXISTING S3 bucket (in the same region as this module's provider) that is the target of S3 server access logging. PREREQUISITE: EventBridge notifications must be enabled on the bucket, see: https://docs.streamsec.io/docs/configure-s3-event-notifications-with-amazon-eventbridge. When set, the module creates an EventBridge rule that forwards new objects to the collector Lambda. The bucket is NOT created or modified by this module. Must be a static string known at plan time, and must differ from iam_activity_bucket_name."
+  type        = string
+  default     = null
+  validation {
+    condition     = var.s3_access_logs_bucket_name == null || can(regex("^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$", var.s3_access_logs_bucket_name))
+    error_message = "s3_access_logs_bucket_name must be a valid S3 bucket name (3-63 chars, lowercase letters, numbers, dots, hyphens)."
+  }
+}
+
+variable "s3_access_logs_key_prefix" {
+  description = "(Optional) S3 key prefix of the S3 access log objects (the target prefix configured on server access logging). When set, the EventBridge rule only matches objects under this prefix and the Lambda's s3:GetObject permission is scoped to it."
+  type        = string
+  default     = null
+}
+
+variable "s3_access_logs_kms_key_arn" {
+  description = "(Optional) ARN of the KMS key used to encrypt objects in the S3 access logs bucket (SSE-KMS). When set, the Lambda execution role is granted kms:Decrypt on this key."
+  type        = string
+  default     = null
+}
+
+################################################################################
+# ALB Access Logs S3 (existing bucket)
+################################################################################
+
+variable "alb_access_logs_bucket_name" {
+  description = "(Optional) Name of an EXISTING S3 bucket (in the same region as this module's provider) that is the target of ALB/ELB access logging. PREREQUISITE: EventBridge notifications must be enabled on the bucket, see: https://docs.streamsec.io/docs/configure-s3-event-notifications-with-amazon-eventbridge. When set, the module creates an EventBridge rule that forwards new objects to the collector Lambda. The bucket is NOT created or modified by this module. Must be a static string known at plan time, and must differ from iam_activity_bucket_name."
+  type        = string
+  default     = null
+  validation {
+    condition     = var.alb_access_logs_bucket_name == null || can(regex("^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$", var.alb_access_logs_bucket_name))
+    error_message = "alb_access_logs_bucket_name must be a valid S3 bucket name (3-63 chars, lowercase letters, numbers, dots, hyphens)."
+  }
+}
+
+variable "alb_access_logs_key_prefix" {
+  description = "(Optional) S3 key prefix of the ALB access log objects (the prefix configured on the load balancer's access_logs attribute). When set, the EventBridge rule only matches objects under this prefix and the Lambda's s3:GetObject permission is scoped to it."
+  type        = string
+  default     = null
+}
+
+variable "alb_access_logs_kms_key_arn" {
+  description = "(Optional) ARN of the KMS key used to encrypt objects in the ALB access logs bucket (SSE-KMS). When set, the Lambda execution role is granted kms:Decrypt on this key."
+  type        = string
+  default     = null
+}
+
+################################################################################
 # General
 ################################################################################
 

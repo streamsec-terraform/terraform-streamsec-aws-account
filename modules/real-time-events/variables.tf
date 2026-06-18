@@ -250,6 +250,18 @@ variable "central_bedrock_log_groups" {
   default     = []
 }
 
+variable "central_apigateway_log_groups" {
+  description = "(Optional) List of existing CloudWatch Logs log groups containing API Gateway access logs (REST, HTTP, or WebSocket APIs)"
+  type        = list(string)
+  default     = []
+}
+
+variable "central_apigateway_log_format" {
+  description = "The API Gateway access log format string configured on the API stage(s) feeding central_apigateway_log_groups / central_kinesis_stream_arns. REQUIRED for the collector to parse those logs; without it API Gateway log lines are skipped."
+  type        = string
+  default     = null
+}
+
 variable "central_kinesis_stream_arns" {
   description = "(Optional) List of Kinesis Data Stream ARNs receiving CloudWatch Logs"
   type        = list(string)

@@ -130,11 +130,21 @@ resource "aws_lambda_function" "streamsec_real_time_events_lambda" {
         ENV         = "production"
         NODE_ENV    = "production"
       },
-      var.central_vpc_flow_logs_fields != "" ? { DEFAULT_FLOW_LOG_FIELDS = var.central_vpc_flow_logs_fields } : {}
+      var.central_vpc_flow_logs_fields != "" ? { DEFAULT_FLOW_LOG_FIELDS = var.central_vpc_flow_logs_fields } : {},
+      # required for the collector to parse API Gateway access logs arriving via
+      # central_apigateway_log_groups (CloudWatch Logs) or central_kinesis_stream_arns
+      var.central_apigateway_log_format != null ? { API_GATEWAY_LOG_FORMAT = var.central_apigateway_log_format } : {}
     )
   }
 
   tags = merge(var.tags, var.lambda_tags)
+
+  lifecycle {
+    precondition {
+      condition     = length(var.central_apigateway_log_groups) == 0 || var.central_apigateway_log_format != null
+      error_message = "central_apigateway_log_format is required when central_apigateway_log_groups is set: without it the collector cannot parse API Gateway access logs and silently drops them."
+    }
+  }
 }
 
 resource "aws_lambda_function_event_invoke_config" "streamsec_options_cloudwatch" {
@@ -148,11 +158,11 @@ resource "aws_lambda_function_event_invoke_config" "streamsec_options_cloudwatch
 ################################################################################
 
 resource "aws_cloudwatch_event_rule" "streamsec_cloudwatch_rules" {
-  for_each       = local.cloudwatch_rules
-  name           = each.value["name"]
-  description    = each.value["description"]
-  event_pattern  = each.value["event_pattern"]
-  tags           = var.tags
+  for_each      = local.cloudwatch_rules
+  name          = each.value["name"]
+  description   = each.value["description"]
+  event_pattern = each.value["event_pattern"]
+  tags          = var.tags
 }
 
 # Allow time for EventBridge rules to propagate before creating targets
@@ -162,10 +172,10 @@ resource "time_sleep" "wait_for_rules" {
 }
 
 resource "aws_cloudwatch_event_target" "streamsec_lambda_cloudwatch_target" {
-  for_each       = local.cloudwatch_rules
-  rule           = aws_cloudwatch_event_rule.streamsec_cloudwatch_rules[each.key].name
-  target_id      = "CloudWatchToLambda"
-  arn            = aws_lambda_function.streamsec_real_time_events_lambda.arn
+  for_each  = local.cloudwatch_rules
+  rule      = aws_cloudwatch_event_rule.streamsec_cloudwatch_rules[each.key].name
+  target_id = "CloudWatchToLambda"
+  arn       = aws_lambda_function.streamsec_real_time_events_lambda.arn
 
   depends_on = [time_sleep.wait_for_rules]
 }
@@ -205,6 +215,7 @@ locals {
     eksaudit   = var.central_eks_audit_log_groups
     route53    = var.central_route53_log_groups
     bedrock    = var.central_bedrock_log_groups
+    apigateway = var.central_apigateway_log_groups
   }
 
   central_log_subscriptions = merge([
@@ -222,10 +233,10 @@ EOT
 }
 
 resource "aws_lambda_permission" "streamsec_allow_cwlogs_invocation" {
-  count         = length(local.central_log_subscriptions) > 0 ? 1 : 0
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.streamsec_real_time_events_lambda.function_name
-  principal     = "logs.${data.aws_region.current.region}.amazonaws.com"
+  count          = length(local.central_log_subscriptions) > 0 ? 1 : 0
+  action         = "lambda:InvokeFunction"
+  function_name  = aws_lambda_function.streamsec_real_time_events_lambda.function_name
+  principal      = "logs.${data.aws_region.current.region}.amazonaws.com"
   source_account = data.aws_caller_identity.current.account_id
 }
 
