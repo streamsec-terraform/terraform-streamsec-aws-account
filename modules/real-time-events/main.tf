@@ -140,6 +140,11 @@ resource "aws_lambda_function" "streamsec_real_time_events_lambda" {
   tags = merge(var.tags, var.lambda_tags)
 
   lifecycle {
+    # Only the central_apigateway_log_groups path can be enforced here. The
+    # Kinesis path (central_kinesis_stream_arns) is a generic carrier that may
+    # deliver any log type, so we cannot require the API Gateway format whenever
+    # Kinesis is used without breaking non-API-Gateway Kinesis deployments. For
+    # the Kinesis path the format requirement is documented on the variable.
     precondition {
       condition     = length(var.central_apigateway_log_groups) == 0 || var.central_apigateway_log_format != null
       error_message = "central_apigateway_log_format is required when central_apigateway_log_groups is set: without it the collector cannot parse API Gateway access logs and silently drops them."

@@ -15,6 +15,10 @@ locals {
   # Additional EXISTING buckets whose new objects are forwarded to the collector
   # Lambda via EventBridge. Each entry becomes a rule/target/permission set and
   # an s3:GetObject grant (scoped to key_prefix when provided).
+  # NOTE: every source is declared here even when its bucket_name is null; the
+  # collection_buckets local below filters those out. Always consume
+  # collection_buckets (not collection_bucket_sources) so disabled sources are
+  # never processed.
   collection_bucket_sources = {
     apigateway = {
       bucket_name      = var.apigateway_bucket_name
@@ -23,14 +27,14 @@ locals {
       rule_name        = var.apigateway_s3_eventbridge_rule_name
       rule_description = var.apigateway_s3_eventbridge_rule_description
     }
-    s3-access-logs = {
+    s3_access_logs = {
       bucket_name      = var.s3_access_logs_bucket_name
       key_prefix       = var.s3_access_logs_key_prefix
       kms_key_arn      = var.s3_access_logs_kms_key_arn
       rule_name        = null
       rule_description = "Stream Security S3 Access Logs S3 EventBridge Rule"
     }
-    alb-access-logs = {
+    alb_access_logs = {
       bucket_name      = var.alb_access_logs_bucket_name
       key_prefix       = var.alb_access_logs_key_prefix
       kms_key_arn      = var.alb_access_logs_kms_key_arn
@@ -39,6 +43,7 @@ locals {
     }
   }
 
+  # Drop sources whose bucket_name is null (feature not enabled for that type).
   collection_buckets = { for k, v in local.collection_bucket_sources : k => v if v.bucket_name != null }
 
   collection_kms_key_arns = distinct([for v in values(local.collection_buckets) : v.kms_key_arn if v.kms_key_arn != null])
@@ -291,7 +296,7 @@ data "aws_s3_bucket" "collection_bucket" {
     }
     precondition {
       condition     = length([for v in values(local.collection_buckets) : v.bucket_name if v.bucket_name == each.value.bucket_name]) == 1
-      error_message = "Each collection bucket name must be used by only one source (apigateway / s3_access_logs / alb_access_logs): pointing two sources at the same bucket creates two EventBridge rules and double-invokes the collector Lambda per object."
+      error_message = "Each collection bucket name must be used by only one source (apigateway / s3_access_logs / alb_access_logs). Two sources on the same bucket create two EventBridge rules whose object-key patterns can overlap, double-invoking the collector Lambda for the same object."
     }
   }
 }
