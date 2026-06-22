@@ -3,42 +3,50 @@
 ## Requirements
 
 | Name | Version |
-|------|---------|
-| <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.0 |
-| <a name="requirement_aws"></a> [aws](#requirement\_aws) | >= 3.0 |
+| ---- | ------- |
+| <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.2 |
+| <a name="requirement_aws"></a> [aws](#requirement\_aws) | ~> 6.0 |
 | <a name="requirement_streamsec"></a> [streamsec](#requirement\_streamsec) | >= 1.7 |
+| <a name="requirement_time"></a> [time](#requirement\_time) | >= 0.11 |
 
 ## Providers
 
 | Name | Version |
-|------|---------|
-| <a name="provider_aws"></a> [aws](#provider\_aws) | >= 3.0 |
+| ---- | ------- |
+| <a name="provider_aws"></a> [aws](#provider\_aws) | ~> 6.0 |
 | <a name="provider_streamsec"></a> [streamsec](#provider\_streamsec) | >= 1.7 |
+| <a name="provider_time"></a> [time](#provider\_time) | >= 0.11 |
 
 ## Modules
 
 | Name | Source | Version |
-|------|--------|---------|
+| ---- | ------ | ------- |
 | <a name="module_privatelink"></a> [privatelink](#module\_privatelink) | ../private-link | n/a |
 
 ## Resources
 
 | Name | Type |
-|------|------|
+| ---- | ---- |
 | [aws_cloudwatch_event_rule.streamsec_cloudwatch_rules](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_event_rule) | resource |
 | [aws_cloudwatch_event_target.streamsec_lambda_cloudwatch_target](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_event_target) | resource |
+| [aws_cloudwatch_log_subscription_filter.streamsec_central_log_filters](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_log_subscription_filter) | resource |
+| [aws_iam_policy.kinesis_read_policy](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_policy) | resource |
 | [aws_iam_policy.lambda_exec_policy](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_policy) | resource |
 | [aws_iam_role.lambda_execution_role](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
+| [aws_iam_role_policy_attachment.kinesis_read_attachment](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_iam_role_policy_attachment.lambda_basic_execution_role_policy_attachment](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_iam_role_policy_attachment.lambda_exec_policy_attachment](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_iam_role_policy_attachment.lambda_vpc_access](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
+| [aws_lambda_event_source_mapping.kinesis_to_lambda](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_event_source_mapping) | resource |
 | [aws_lambda_function.streamsec_real_time_events_lambda](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_function) | resource |
 | [aws_lambda_function_event_invoke_config.streamsec_options_cloudwatch](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_function_event_invoke_config) | resource |
 | [aws_lambda_layer_version.streamsec_lambda_layer](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_layer_version) | resource |
+| [aws_lambda_permission.streamsec_allow_cwlogs_invocation](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_permission) | resource |
 | [aws_lambda_permission.streamsec_allow_lambda_cloudwatch_invocation](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_permission) | resource |
 | [aws_secretsmanager_secret.streamsec_collection_secret](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret) | resource |
 | [aws_secretsmanager_secret_version.streamsec_collection_secret_version](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret_version) | resource |
 | [streamsec_aws_real_time_events_ack.this](https://registry.terraform.io/providers/streamsec-terraform/streamsec/latest/docs/resources/aws_real_time_events_ack) | resource |
+| [time_sleep.wait_for_rules](https://registry.terraform.io/providers/hashicorp/time/latest/docs/resources/sleep) | resource |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
 | [aws_region.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/region) | data source |
 | [streamsec_aws_account.this](https://registry.terraform.io/providers/streamsec-terraform/streamsec/latest/docs/data-sources/aws_account) | data source |
@@ -47,7 +55,19 @@
 ## Inputs
 
 | Name | Description | Type | Default | Required |
-|------|-------------|------|---------|:--------:|
+| ---- | ----------- | ---- | ------- | :------: |
+| <a name="input_central_apigateway_log_format"></a> [central\_apigateway\_log\_format](#input\_central\_apigateway\_log\_format) | The API Gateway access log format string configured on the API stage(s) feeding central\_apigateway\_log\_groups / central\_kinesis\_stream\_arns. REQUIRED for the collector to parse those logs; without it API Gateway log lines are skipped. | `string` | `null` | no |
+| <a name="input_central_apigateway_log_groups"></a> [central\_apigateway\_log\_groups](#input\_central\_apigateway\_log\_groups) | (Optional) List of existing CloudWatch Logs log groups containing API Gateway access logs (REST, HTTP, or WebSocket APIs) | `list(string)` | `[]` | no |
+| <a name="input_central_bedrock_log_groups"></a> [central\_bedrock\_log\_groups](#input\_central\_bedrock\_log\_groups) | (Optional) List of existing CloudWatch Logs log groups containing Bedrock model invocation logs | `list(string)` | `[]` | no |
+| <a name="input_central_cloudtrail_log_groups"></a> [central\_cloudtrail\_log\_groups](#input\_central\_cloudtrail\_log\_groups) | (Optional) List of existing CloudWatch Logs log groups containing CloudTrail logs | `list(string)` | `[]` | no |
+| <a name="input_central_eks_audit_log_groups"></a> [central\_eks\_audit\_log\_groups](#input\_central\_eks\_audit\_log\_groups) | (Optional) List of existing CloudWatch Logs log groups containing EKS audit logs | `list(string)` | `[]` | no |
+| <a name="input_central_kinesis_batch_size"></a> [central\_kinesis\_batch\_size](#input\_central\_kinesis\_batch\_size) | Max records per Lambda invocation from Kinesis | `number` | `200` | no |
+| <a name="input_central_kinesis_batch_window"></a> [central\_kinesis\_batch\_window](#input\_central\_kinesis\_batch\_window) | Max seconds to buffer Kinesis records before invoking Lambda | `number` | `60` | no |
+| <a name="input_central_kinesis_memory_size"></a> [central\_kinesis\_memory\_size](#input\_central\_kinesis\_memory\_size) | Memory in MB for the Lambda function when consuming from Kinesis | `number` | `512` | no |
+| <a name="input_central_kinesis_stream_arns"></a> [central\_kinesis\_stream\_arns](#input\_central\_kinesis\_stream\_arns) | (Optional) List of Kinesis Data Stream ARNs receiving CloudWatch Logs | `list(string)` | `[]` | no |
+| <a name="input_central_route53_log_groups"></a> [central\_route53\_log\_groups](#input\_central\_route53\_log\_groups) | (Optional) List of existing CloudWatch Logs log groups containing Route53 DNS query logs | `list(string)` | `[]` | no |
+| <a name="input_central_vpc_flow_logs_fields"></a> [central\_vpc\_flow\_logs\_fields](#input\_central\_vpc\_flow\_logs\_fields) | (Optional) Space-separated flow log field names. Empty = default 14-field format | `string` | `""` | no |
+| <a name="input_central_vpc_flow_logs_log_groups"></a> [central\_vpc\_flow\_logs\_log\_groups](#input\_central\_vpc\_flow\_logs\_log\_groups) | (Optional) List of existing CloudWatch Logs log groups containing VPC Flow Logs | `list(string)` | `[]` | no |
 | <a name="input_cloudwatch_event_rules_prefix"></a> [cloudwatch\_event\_rules\_prefix](#input\_cloudwatch\_event\_rules\_prefix) | Prefix to use for the CloudWatch event rules | `string` | `"streamsec-"` | no |
 | <a name="input_enable_privatelink"></a> [enable\_privatelink](#input\_enable\_privatelink) | Create an Interface VPC Endpoint for StreamSecurity | `bool` | `false` | no |
 | <a name="input_enable_privatelink_private_dns"></a> [enable\_privatelink\_private\_dns](#input\_enable\_privatelink\_private\_dns) | Enable Private DNS on the VPC Endpoint (recommended) | `bool` | `true` | no |
@@ -55,7 +75,7 @@
 | <a name="input_lambda_cloudwatch_max_event_age"></a> [lambda\_cloudwatch\_max\_event\_age](#input\_lambda\_cloudwatch\_max\_event\_age) | The maximum age of a request that Lambda sends to a function for processing, in seconds | `number` | `21600` | no |
 | <a name="input_lambda_cloudwatch_max_retry"></a> [lambda\_cloudwatch\_max\_retry](#input\_lambda\_cloudwatch\_max\_retry) | The maximum number of times to retry when the function returns an error | `number` | `2` | no |
 | <a name="input_lambda_cloudwatch_memory_size"></a> [lambda\_cloudwatch\_memory\_size](#input\_lambda\_cloudwatch\_memory\_size) | The amount of memory in MB to allocate to the lambda function | `number` | `256` | no |
-| <a name="input_lambda_cloudwatch_s3_source_code_key"></a> [lambda\_cloudwatch\_s3\_source\_code\_key](#input\_lambda\_cloudwatch\_s3\_source\_code\_key) | The S3 key for the lambda source code | `string` | `"9cf1709dd6146fb541e090981f983c1d"` | no |
+| <a name="input_lambda_cloudwatch_s3_source_code_key"></a> [lambda\_cloudwatch\_s3\_source\_code\_key](#input\_lambda\_cloudwatch\_s3\_source\_code\_key) | The S3 key for the lambda source code | `string` | `"4a752d836232381fc3c72ac51458c1bc"` | no |
 | <a name="input_lambda_cloudwatch_timeout"></a> [lambda\_cloudwatch\_timeout](#input\_lambda\_cloudwatch\_timeout) | The amount of time in seconds the lambda function is allowed to run | `number` | `60` | no |
 | <a name="input_lambda_collection_secret_name"></a> [lambda\_collection\_secret\_name](#input\_lambda\_collection\_secret\_name) | The name of the secret to use for the lambda function | `string` | `"streamsec-collection-token"` | no |
 | <a name="input_lambda_iam_role_description"></a> [lambda\_iam\_role\_description](#input\_lambda\_iam\_role\_description) | Description to use on IAM role created | `string` | `"Stream Security IAM Role"` | no |
@@ -64,7 +84,7 @@
 | <a name="input_lambda_iam_role_tags"></a> [lambda\_iam\_role\_tags](#input\_lambda\_iam\_role\_tags) | A map of additional tags to add to the IAM role created | `map(string)` | `{}` | no |
 | <a name="input_lambda_iam_role_use_name_prefix"></a> [lambda\_iam\_role\_use\_name\_prefix](#input\_lambda\_iam\_role\_use\_name\_prefix) | Determines whether the IAM role name (`iam_role_name`) is used as a prefix | `bool` | `true` | no |
 | <a name="input_lambda_layer_name"></a> [lambda\_layer\_name](#input\_lambda\_layer\_name) | The name of the lambda layer | `string` | `"streamsec-real-time-events-layer"` | no |
-| <a name="input_lambda_layer_s3_source_code_key"></a> [lambda\_layer\_s3\_source\_code\_key](#input\_lambda\_layer\_s3\_source\_code\_key) | The S3 key for the lambda source code | `string` | `"98919b98292d9b3ec577cb43bd280a2a"` | no |
+| <a name="input_lambda_layer_s3_source_code_key"></a> [lambda\_layer\_s3\_source\_code\_key](#input\_lambda\_layer\_s3\_source\_code\_key) | The S3 key for the lambda source code | `string` | `"1e8d00c5c5513f60c336658713ee2cd5"` | no |
 | <a name="input_lambda_name"></a> [lambda\_name](#input\_lambda\_name) | Name of the lambda function | `string` | `"streamsec-real-time-events-lambda"` | no |
 | <a name="input_lambda_policy_description"></a> [lambda\_policy\_description](#input\_lambda\_policy\_description) | Description to use on IAM policy created | `string` | `"Stream Security IAM Policy for real time events lambda"` | no |
 | <a name="input_lambda_policy_name"></a> [lambda\_policy\_name](#input\_lambda\_policy\_name) | Name to use on IAM policy created | `string` | `"streamsec-events-lambda-policy"` | no |
