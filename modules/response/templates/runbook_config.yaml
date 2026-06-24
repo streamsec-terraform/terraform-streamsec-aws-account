@@ -1603,9 +1603,17 @@ Remediations:
         type: String
         resource_name: true
 
-
-
-
-
-
-
+  - name: StreamSecurityGcpRotateServiceAccountKeys
+    description: Immediately deletes all USER_MANAGED keys from a service account. Does not create replacement keys.
+    disabled_reason: Action is not applicable because the service account has no user-managed keys.
+    display_name: Delete Service Account Keys
+    remediation_type: runbook
+    cloud_provider: gcp
+    resource_type: gcp_service_account
+    runbook_owner: StreamSecurity
+    role_name: GCP Stream Delete Service Account Keys Role
+    role_file: gcp_revoke_service_account_keys.json
+    Parameters:
+      - name: ServiceAccountId
+        type: String
+        resource_name: true
