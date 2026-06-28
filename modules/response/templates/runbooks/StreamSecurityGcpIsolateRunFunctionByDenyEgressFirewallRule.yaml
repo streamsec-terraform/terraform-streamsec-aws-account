@@ -2,13 +2,11 @@ main:
   params: [input]
   steps:
 
-    # Step 1: Parse resource ID and extract identifiers
     - parseFunctionId:
         assign:
           - function_id: ${input.FunctionId}
           - parts: ${text.split(function_id, "/")}
 
-    # Step 2: Log start
     - logStart:
         call: sys.log
         args:
@@ -28,8 +26,6 @@ main:
           - location: ${parts[3]}
           - function_name: ${parts[5]}
 
-
-    # Step 3: Get function details
     - getFunction:
         try:
             call: googleapis.run.v2.projects.locations.services.get
@@ -44,70 +40,81 @@ main:
                 status_code: "error"
                 message: ${e.body.error.message}
 
-
-
-    # Step 4: Check if function is connected to a VPC
+    # No VPC at all — nothing to block.
     - checkVpcConnection:
-        try:
-            switch:
-                - condition: ${not("vpcAccess" in function.template)}
-                  return:
-                    status_code: "ok"
-                    message: ${"Service is not connected to a VPC. No action taken."}
-        except:
-            as: er
-            raise:
-                status_code: "error"
-                message: ${ er }
-
-     # Step 5a: Check if VPC exists before accessing networkInterfaces
-    - checkVpcInterfaces:
         switch:
-          - condition: ${not("vpcAccess" in function.template) or not("networkInterfaces" in function.template.vpcAccess) or len(function.template.vpcAccess.networkInterfaces) == 0}
+          - condition: ${not("vpcAccess" in function.template)}
             return:
               status_code: "ok"
-              message: ${"Service is not connected to a VPC. No action taken."}
-        next: extractVpcName
+              message: ${"Service is not connected to a VPC. No egress isolation applied."}
 
-    # Step 5b: Extract network name from the full resource URL
-    - extractVpcName:
+    # VPC Connector services share connector VMs across multiple Cloud Run services.
+    # A firewall rule on the connector would block all services using it, not just
+    # this one. Surgical egress isolation is only possible via Direct VPC Egress.
+    - checkVpcType:
+        switch:
+          - condition: ${"connector" in function.template.vpcAccess}
+            return:
+              status_code: "not_applicable"
+              message: ${"Service uses a VPC Connector. Firewall-based egress isolation cannot target a single service — rules apply at the shared connector level and would affect all services using it. Use the scale-to-zero runbook to isolate this service."}
+          - condition: ${not("networkInterfaces" in function.template.vpcAccess) or len(function.template.vpcAccess.networkInterfaces) == 0}
+            return:
+              status_code: "ok"
+              message: ${"Service has no Direct VPC Egress network interfaces. No egress isolation applied."}
+
+    # ── Direct VPC Egress ─────────────────────────────────────────────────────
+    # For every NIC:
+    #   a) Create a priority-0 deny-all egress firewall rule (IPv4 + IPv6).
+    #      409 = already exists, ignored so the runbook is idempotent.
+    #   b) Append the isolation tag to that NIC's existing tags (idempotent guard).
+    # All NICs are patched in a single PATCH call at the end.
+
+    - initLoop:
         assign:
-          - network_full_url: ${function.template.vpcAccess.networkInterfaces[0].network}
-          - network_parts: ${text.split(network_full_url, "/")}
-          - vpc_name: ${network_parts[len(network_parts) - 1]}
+          - updated_interfaces: []
 
-    # Step 6: Define firewall And Network
-    - defineFirewallAndNetwork:
-        assign:
-            - firewall_egress: ${"isolated-function-egress-stream-" + vpc_name}
-            - network_url: ${"https://www.googleapis.com/compute/v1/projects/" + project_id + "/global/networks/" + vpc_name}
+    - createFirewallRulesPerVPC:
+        for:
+          value: nic
+          in: ${function.template.vpcAccess.networkInterfaces}
+          steps:
+            - extractNicVpc:
+                assign:
+                  - network_full_url: ${nic.network}
+                  - network_parts: ${text.split(network_full_url, "/")}
+                  - vpc_name: ${network_parts[len(network_parts) - 1]}
+                  - network_url: ${"https://www.googleapis.com/compute/v1/projects/" + project_id + "/global/networks/" + vpc_name}
+                  - firewall_egress: ${"isolated-function-egress-stream-" + vpc_name}
+            - createEgress:
+                try:
+                    call: googleapis.compute.v1.firewalls.insert
+                    args:
+                        project: ${project_id}
+                        body:
+                            name: ${firewall_egress}
+                            network: ${network_url}
+                            direction: "EGRESS"
+                            priority: 0
+                            denied:
+                            - IPProtocol: "all"
+                            destinationRanges:
+                            - "0.0.0.0/0"
+                            targetTags: ["isolatedfunctionegressstream"]
+                except:
+                  as: e
+                  switch:
+                    - condition: ${e.body.error.code != 409}
+                      raise:
+                        status_code: "error"
+                        message: ${e.body.error.message}
+            - buildUpdatedNic:
+                assign:
+                  - existing_nic_tags: ${default(map.get(nic, "tags"), [])}
+                  - new_nic_tags: ${if("isolatedfunctionegressstream" in existing_nic_tags, existing_nic_tags, list.concat(existing_nic_tags, ["isolatedfunctionegressstream"]))}
+                  - updated_nic: ${nic}
+                  - updated_nic.tags: ${new_nic_tags}
+                  - updated_interfaces: ${list.concat(updated_interfaces, [updated_nic])}
 
-    # Step 7: Create new deny-all EGRESS firewall rule
-    - createEgress:
-        try:
-            call: googleapis.compute.v1.firewalls.insert
-            args:
-                project: ${project_id}
-                body:
-                    name: ${firewall_egress}
-                    network: ${network_url}
-                    direction: "EGRESS"
-                    priority: 100
-                    denied:
-                    - IPProtocol: "all"
-                    destinationRanges:
-                    - "0.0.0.0/0"
-                    targetTags: ["isolatedfunctionegressstream"]
-        except:
-          as: e
-          switch:
-            - condition: ${e.body.error.code != 409}
-              raise:
-                status_code: "error"
-                message: ${e.body.error.message}
-
-
-    # Step 8: Add the target network tag to the function
     - updateFunctionTags:
         try:
             call: googleapis.run.v2.projects.locations.services.patch
@@ -117,11 +124,7 @@ main:
                 body:
                     template:
                         vpcAccess:
-                            networkInterfaces:
-                                - network: ${function.template.vpcAccess.networkInterfaces[0].network}
-                                  subnetwork: ${function.template.vpcAccess.networkInterfaces[0].subnetwork}
-                                  tags: ["isolatedfunctionegressstream"]
-
+                            networkInterfaces: ${updated_interfaces}
         except:
             as: e
             switch:
@@ -130,9 +133,7 @@ main:
                     status_code: "error"
                     message: ${e.body.error.message}
 
-
-    # Final step: return success
     - done:
         return:
           status_code: "success"
-          message: ${"Function " + function_name + " is now isolated via firewall rule on VPC " }
+          message: ${"Function " + function_name + " is now isolated via deny-all egress firewall rules on all connected VPCs."}
