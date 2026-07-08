@@ -46,7 +46,13 @@ locals {
   # Drop sources whose bucket_name is null (feature not enabled for that type).
   collection_buckets = { for k, v in local.collection_bucket_sources : k => v if v.bucket_name != null }
 
-  collection_kms_key_arns = distinct([for v in values(local.collection_buckets) : v.kms_key_arn if v.kms_key_arn != null])
+  # KMS keys the collector Lambda must be able to decrypt with: the IAM activity
+  # bucket's key (when SSE-KMS encrypted) plus every connected collection
+  # bucket's key.
+  kms_decrypt_key_arns = distinct(concat(
+    var.iam_activity_kms_key_arn != null ? [var.iam_activity_kms_key_arn] : [],
+    [for v in values(local.collection_buckets) : v.kms_key_arn if v.kms_key_arn != null],
+  ))
 
   # Buckets the collector Lambda is allowed to read from: always the IAM activity
   # bucket, plus every connected collection bucket.
@@ -115,14 +121,15 @@ resource "aws_iam_policy" "lambda_exec_policy" {
           Resource = local.s3_read_resources
         },
       ],
-      # decrypt SSE-KMS objects in the connected collection buckets
-      length(local.collection_kms_key_arns) > 0 ? [
+      # decrypt SSE-KMS objects in the IAM activity bucket and the connected
+      # collection buckets
+      length(local.kms_decrypt_key_arns) > 0 ? [
         {
           Action = [
             "kms:Decrypt",
           ],
           Effect   = "Allow",
-          Resource = local.collection_kms_key_arns
+          Resource = local.kms_decrypt_key_arns
         },
       ] : []
     )
@@ -227,8 +234,19 @@ data "aws_s3_bucket" "iam_activity_bucket" {
   bucket = var.iam_activity_bucket_name
 }
 
+# With an unmanaged notification and the default trigger mode the module creates
+# no trigger at all — valid only when the collector Lambda is driven by a
+# self-managed EventBridge rule; documented on the variable. Deliberately NOT
+# guarded by a check block: a failing check is a hard, unsuppressible error in
+# consumers' `terraform test` (expect_failures cannot reference a child-module
+# check), and check blocks would raise required_version from 1.2 to 1.5.
+#
+# Both notification resources below write the bucket's ENTIRE notification
+# configuration (S3 keeps a single replace-all document per bucket), so they are
+# skipped when iam_activity_manage_bucket_notification = false to preserve
+# notifications owned outside this module (e.g. on a shared org-trail bucket).
 resource "aws_s3_bucket_notification" "iam_activity_s3_lambda_trigger" {
-  count  = var.iam_activity_s3_eventbridge_trigger ? 0 : 1
+  count  = var.iam_activity_manage_bucket_notification && !var.iam_activity_s3_eventbridge_trigger ? 1 : 0
   bucket = data.aws_s3_bucket.iam_activity_bucket.id
   lambda_function {
     lambda_function_arn = aws_lambda_function.streamsec_iam_activity_lambda.arn
@@ -244,7 +262,7 @@ moved {
 }
 
 resource "aws_s3_bucket_notification" "bucket_notification" {
-  count       = var.iam_activity_s3_eventbridge_trigger ? 1 : 0
+  count       = var.iam_activity_manage_bucket_notification && var.iam_activity_s3_eventbridge_trigger ? 1 : 0
   bucket      = data.aws_s3_bucket.iam_activity_bucket.id
   eventbridge = true
 }
