@@ -164,10 +164,26 @@ variable "iam_activity_bucket_name" {
   type        = string
 }
 
+variable "iam_activity_kms_key_arn" {
+  description = "(Optional) ARN of the KMS key used to encrypt objects in the IAM activity bucket (SSE-KMS), e.g. the CloudTrail CMK of an organization trail. Must be a full key ARN (arn:...:kms:...:key/...), not an alias ARN — IAM resource matching for kms:Decrypt only works against the key ARN. When set, the Lambda execution role is granted kms:Decrypt on this key. NOTE: the key's own policy must also allow the decrypt — the default CloudTrail CMK policy permits principals in the key's account, but a restricted key policy must additionally include this module's Lambda role."
+  type        = string
+  default     = null
+  validation {
+    condition     = var.iam_activity_kms_key_arn == null || can(regex("^arn:aws[^:]*:kms:[a-z0-9-]+:[0-9]{12}:key/[a-zA-Z0-9-]+$", var.iam_activity_kms_key_arn))
+    error_message = "iam_activity_kms_key_arn must be a full KMS key ARN (arn:<partition>:kms:<region>:<account-id>:key/<key-id>). Alias ARNs are not accepted: IAM policies cannot match a KMS key through its alias."
+  }
+}
+
 variable "iam_activity_s3_eventbridge_trigger" {
   description = "Whether to create an eventbridge trigger for the S3 bucket instead of an event notification. Requires enabling eventbridge on bucket properties, see: https://docs.streamsec.io/docs/configure-s3-event-notifications-with-amazon-eventbridge"
   type        = bool
   default     = false
+}
+
+variable "iam_activity_manage_bucket_notification" {
+  description = "Whether the module manages the IAM activity bucket's S3 notification configuration. Set to false when the notification configuration is owned outside this module (e.g. a shared/organization trail bucket that already carries other integrations) — it is a single replace-all document, so letting the module write it would remove any existing notifications on the bucket. When false with iam_activity_s3_eventbridge_trigger = true, the module still creates its EventBridge rule/target/permission but EventBridge notifications must already be enabled on the bucket. When false with the default trigger, the module creates no trigger at all: drive the collector Lambda from your own EventBridge rule (target lambda_function_arn and add an aws_lambda_permission for events.amazonaws.com scoped to your rule's ARN). NOTE: flipping this to false on an EXISTING deployment destroys the module-managed notification resource, which clears the bucket's whole notification configuration; run `terraform state rm` on that resource first if the live configuration must be preserved. The resource to remove depends on the mode it was created in: `module.<name>.aws_s3_bucket_notification.iam_activity_s3_lambda_trigger[0]` with the default trigger, or `module.<name>.aws_s3_bucket_notification.bucket_notification[0]` when iam_activity_s3_eventbridge_trigger = true."
+  type        = bool
+  default     = true
 }
 
 variable "iam_activity_s3_eventbridge_rule_name" {
@@ -209,9 +225,13 @@ variable "apigateway_s3_key_prefix" {
 }
 
 variable "apigateway_kms_key_arn" {
-  description = "(Optional) ARN of the KMS key used to encrypt objects in the API Gateway bucket (SSE-KMS). When set, the Lambda execution role is granted kms:Decrypt on this key."
+  description = "(Optional) ARN of the KMS key used to encrypt objects in the API Gateway bucket (SSE-KMS). Must be a full key ARN, not an alias ARN. When set, the Lambda execution role is granted kms:Decrypt on this key."
   type        = string
   default     = null
+  validation {
+    condition     = var.apigateway_kms_key_arn == null || can(regex("^arn:aws[^:]*:kms:[a-z0-9-]+:[0-9]{12}:key/[a-zA-Z0-9-]+$", var.apigateway_kms_key_arn))
+    error_message = "apigateway_kms_key_arn must be a full KMS key ARN (arn:<partition>:kms:<region>:<account-id>:key/<key-id>). Alias ARNs are not accepted: IAM policies cannot match a KMS key through its alias."
+  }
 }
 
 variable "apigateway_s3_eventbridge_rule_name" {
@@ -247,9 +267,13 @@ variable "s3_access_logs_key_prefix" {
 }
 
 variable "s3_access_logs_kms_key_arn" {
-  description = "(Optional) ARN of the KMS key used to encrypt objects in the S3 access logs bucket (SSE-KMS). When set, the Lambda execution role is granted kms:Decrypt on this key."
+  description = "(Optional) ARN of the KMS key used to encrypt objects in the S3 access logs bucket (SSE-KMS). Must be a full key ARN, not an alias ARN. When set, the Lambda execution role is granted kms:Decrypt on this key."
   type        = string
   default     = null
+  validation {
+    condition     = var.s3_access_logs_kms_key_arn == null || can(regex("^arn:aws[^:]*:kms:[a-z0-9-]+:[0-9]{12}:key/[a-zA-Z0-9-]+$", var.s3_access_logs_kms_key_arn))
+    error_message = "s3_access_logs_kms_key_arn must be a full KMS key ARN (arn:<partition>:kms:<region>:<account-id>:key/<key-id>). Alias ARNs are not accepted: IAM policies cannot match a KMS key through its alias."
+  }
 }
 
 ################################################################################
@@ -273,9 +297,13 @@ variable "alb_access_logs_key_prefix" {
 }
 
 variable "alb_access_logs_kms_key_arn" {
-  description = "(Optional) ARN of the KMS key used to encrypt objects in the ALB access logs bucket (SSE-KMS). When set, the Lambda execution role is granted kms:Decrypt on this key."
+  description = "(Optional) ARN of the KMS key used to encrypt objects in the ALB access logs bucket (SSE-KMS). Must be a full key ARN, not an alias ARN. When set, the Lambda execution role is granted kms:Decrypt on this key."
   type        = string
   default     = null
+  validation {
+    condition     = var.alb_access_logs_kms_key_arn == null || can(regex("^arn:aws[^:]*:kms:[a-z0-9-]+:[0-9]{12}:key/[a-zA-Z0-9-]+$", var.alb_access_logs_kms_key_arn))
+    error_message = "alb_access_logs_kms_key_arn must be a full KMS key ARN (arn:<partition>:kms:<region>:<account-id>:key/<key-id>). Alias ARNs are not accepted: IAM policies cannot match a KMS key through its alias."
+  }
 }
 
 ################################################################################

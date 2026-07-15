@@ -64,6 +64,21 @@ module "flow_logs" {
 module "iam_activity" {
   source                   = "../../modules/iam-activity"
   iam_activity_bucket_name = "xxxxxxxxxxxxx"
+  # Optional: if the bucket uses SSE-KMS (e.g. the CMK of a CloudTrail organization trail),
+  # grant the collector Lambda kms:Decrypt on the key.
+  # iam_activity_kms_key_arn = "arn:aws:kms:us-east-1:123456789012:key/xxxx"
+
+  # Optional: shared / org-trail bucket whose notification configuration is owned
+  # outside this module (e.g. it already carries another vendor's SNS topic).
+  # The module then never writes the bucket notification (a replace-all document).
+  # With the eventbridge trigger it still creates its own rule; EventBridge must
+  # already be enabled on the bucket. Without it, the module creates NO trigger:
+  # drive the collector yourself with an EventBridge rule whose target is the
+  # lambda_function_arn output PLUS an aws_lambda_permission for
+  # events.amazonaws.com scoped to your rule's ARN (function_name =
+  # lambda_function_name) — without the permission, invocations fail silently.
+  # iam_activity_s3_eventbridge_trigger     = true
+  # iam_activity_manage_bucket_notification = false
 
   # Optional: collect API Gateway access logs from an existing bucket (must be in the same region; e.g. fed via Firehose).
   # PREREQUISITE: EventBridge notifications must be enabled on the bucket (Properties -> Amazon EventBridge).
