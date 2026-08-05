@@ -1,0 +1,256 @@
+################################################################################
+# Dedicated scanner VPC (create_scanner_vpc = true, the default)
+#
+# The VPC is split into two equal subnets in a single availability zone:
+#   - public  — holds the NAT Gateway only. map_public_ip_on_launch stays true
+#               because the NAT Gateway needs a public interface; no Fargate
+#               task ever runs here.
+#   - private — where Fargate runs. No public IP; egress via the NAT.
+#
+# The scanner accepts no inbound traffic. A NAT Gateway costs ~$32/mo idle plus
+# ~$0.045/GB — a deliberate trade-off: the prior public-IP layout blocked
+# enterprise adoption on SOC 2 / CIS AWS Foundations / PCI-DSS audits.
+################################################################################
+
+data "aws_availability_zones" "available" {
+  count = var.create_scanner_vpc ? 1 : 0
+  state = "available"
+
+  # Exclude Local Zones and Wavelength zones. They are returned alongside real
+  # AZs once opted into, and `names` is sorted lexicographically — so
+  # "us-west-2-lax-1a" sorts BEFORE "us-west-2a" ('-' is 0x2d, 'a' is 0x61) and
+  # would win names[0]. Fargate is not offered in Local Zones, so the scanner
+  # would provision cleanly and then fail every RunTask with
+  # InvalidParameterException, producing no results at all.
+  filter {
+    name   = "opt-in-status"
+    values = ["opt-in-not-required"]
+  }
+}
+
+resource "aws_vpc" "this" {
+  count = var.create_scanner_vpc ? 1 : 0
+
+  cidr_block           = var.scanner_vpc_cidr
+  enable_dns_support   = true
+  enable_dns_hostnames = true
+
+  tags = merge(local.tags, { Name = "${local.name}-vpc" })
+}
+
+resource "aws_internet_gateway" "this" {
+  count = var.create_scanner_vpc ? 1 : 0
+
+  vpc_id = aws_vpc.this[0].id
+
+  tags = merge(local.tags, { Name = "${local.name}-igw" })
+}
+
+resource "aws_subnet" "public" {
+  count = var.create_scanner_vpc ? 1 : 0
+
+  vpc_id                  = aws_vpc.this[0].id
+  cidr_block              = cidrsubnet(var.scanner_vpc_cidr, 1, 0)
+  availability_zone       = data.aws_availability_zones.available[0].names[0]
+  map_public_ip_on_launch = true
+
+  tags = merge(local.tags, { Name = "${local.name}-public-subnet" })
+}
+
+resource "aws_subnet" "private" {
+  count = var.create_scanner_vpc ? 1 : 0
+
+  vpc_id                  = aws_vpc.this[0].id
+  cidr_block              = cidrsubnet(var.scanner_vpc_cidr, 1, 1)
+  availability_zone       = data.aws_availability_zones.available[0].names[0]
+  map_public_ip_on_launch = false
+
+  tags = merge(local.tags, { Name = "${local.name}-private-subnet" })
+}
+
+resource "aws_route_table" "public" {
+  count = var.create_scanner_vpc ? 1 : 0
+
+  vpc_id = aws_vpc.this[0].id
+
+  tags = merge(local.tags, { Name = "${local.name}-public-rtb" })
+}
+
+resource "aws_route" "public_internet" {
+  count = var.create_scanner_vpc ? 1 : 0
+
+  route_table_id         = aws_route_table.public[0].id
+  destination_cidr_block = "0.0.0.0/0"
+  gateway_id             = aws_internet_gateway.this[0].id
+}
+
+resource "aws_route_table_association" "public" {
+  count = var.create_scanner_vpc ? 1 : 0
+
+  route_table_id = aws_route_table.public[0].id
+  subnet_id      = aws_subnet.public[0].id
+}
+
+# Stable across NAT Gateway replacements, so customers can allowlist a single
+# upstream egress IP in their firewalls instead of the whole Fargate range.
+resource "aws_eip" "nat" {
+  count = var.create_scanner_vpc ? 1 : 0
+
+  domain = "vpc"
+
+  tags = merge(local.tags, { Name = "${local.name}-nat-eip" })
+}
+
+resource "aws_nat_gateway" "this" {
+  count = var.create_scanner_vpc ? 1 : 0
+
+  allocation_id = aws_eip.nat[0].id
+  subnet_id     = aws_subnet.public[0].id
+
+  # A NAT Gateway becomes Available as soon as it binds its EIP and ENI, but its
+  # outbound traffic uses the public subnet's route table. Without the internet
+  # route and the subnet association in place first, the NAT accepts packets and
+  # blackholes anything bound for the internet — an easy race for the initial
+  # scan firing right after create. Neither dependency is implicit: the NAT only
+  # references the EIP and the subnet.
+  depends_on = [
+    aws_route.public_internet,
+    aws_route_table_association.public,
+  ]
+
+  tags = merge(local.tags, { Name = "${local.name}-nat" })
+}
+
+resource "aws_route_table" "private" {
+  count = var.create_scanner_vpc ? 1 : 0
+
+  vpc_id = aws_vpc.this[0].id
+
+  tags = merge(local.tags, { Name = "${local.name}-private-rtb" })
+}
+
+resource "aws_route" "private_nat" {
+  count = var.create_scanner_vpc ? 1 : 0
+
+  route_table_id         = aws_route_table.private[0].id
+  destination_cidr_block = "0.0.0.0/0"
+  nat_gateway_id         = aws_nat_gateway.this[0].id
+}
+
+resource "aws_route_table_association" "private" {
+  count = var.create_scanner_vpc ? 1 : 0
+
+  route_table_id = aws_route_table.private[0].id
+  subnet_id      = aws_subnet.private[0].id
+}
+
+################################################################################
+# Bring-your-own subnet validation (create_scanner_vpc = false)
+#
+# The Terraform-native replacement for the CloudFormation NetworkPrecheck
+# custom resource: refuse to provision the scanner against subnets whose
+# 0.0.0.0/0 route is not a NAT Gateway, VPC Endpoint or Transit Gateway. The
+# scanner task always launches with no public IP, so a subnet with only an
+# Internet Gateway default route has no way to reach the outside world and
+# becomes a black hole. Without this check the task fails later with the opaque
+#   "ResourceInitializationError: ... connection issue between the task and
+#    Amazon CloudWatch"
+# which does not tell the operator the real cause.
+#
+# Unlike the CloudFormation version this runs at PLAN time, so a bad subnet
+# never reaches apply.
+################################################################################
+
+data "aws_subnet" "byo" {
+  for_each = local.byo_subnets
+
+  id = each.value
+}
+
+# AWS associates at most one route table per subnet through an explicit
+# association. When there is no explicit association, the VPC's main route table
+# applies — resolved separately below.
+data "aws_route_tables" "byo_explicit" {
+  for_each = local.byo_subnets
+
+  vpc_id = var.vpc_id
+
+  filter {
+    name   = "association.subnet-id"
+    values = [each.value]
+  }
+}
+
+data "aws_route_table" "byo_main" {
+  count = local.byo_validate ? 1 : 0
+
+  vpc_id = var.vpc_id
+
+  filter {
+    name   = "association.main"
+    values = ["true"]
+  }
+}
+
+data "aws_route_table" "byo_explicit" {
+  for_each = {
+    for key, tables in data.aws_route_tables.byo_explicit :
+    key => tolist(tables.ids)[0]
+    if length(tables.ids) > 0
+  }
+
+  route_table_id = each.value
+}
+
+################################################################################
+# Security Group — egress only
+#
+# Carries the bring-your-own-subnet preconditions. In the CloudFormation
+# template the security group is the anchor every network-touching resource
+# depends on, so gating it gates the whole network half of the stack; here the
+# preconditions serve the same purpose at plan time.
+################################################################################
+
+resource "aws_security_group" "this" {
+  name        = "${local.regional_name}-sg"
+  description = "Stream Security EBS Scanner - egress only"
+  vpc_id      = local.scanner_vpc_id
+
+  tags = merge(local.tags, { Name = "${local.regional_name}-sg" })
+
+  lifecycle {
+    precondition {
+      condition     = var.create_scanner_vpc || local.byo_enabled
+      error_message = "create_scanner_vpc is false, so vpc_id and subnet_ids are both required. Provide existing private subnets with NAT egress, or set create_scanner_vpc = true to have the module provision a VPC with a NAT Gateway."
+    }
+
+    # The opposite contradiction, which used to apply silently: the module would
+    # build its own VPC and a billed NAT gateway while discarding both supplied
+    # inputs. Easy to hit by copying the bring-your-own block from the README and
+    # dropping the create_scanner_vpc = false line.
+    precondition {
+      condition     = !var.create_scanner_vpc || (var.vpc_id == null && length(var.subnet_ids) == 0)
+      error_message = "vpc_id / subnet_ids were supplied while create_scanner_vpc is true, so they would be ignored and the module would provision its own VPC and NAT Gateway (~$32/mo per region). Set create_scanner_vpc = false to use the supplied network, or drop vpc_id and subnet_ids."
+    }
+
+    precondition {
+      condition     = length(local.byo_wrong_vpc_subnets) == 0
+      error_message = "Subnet(s) ${join(", ", local.byo_wrong_vpc_subnets)} are not in VPC ${coalesce(var.vpc_id, "(unset)")}. Pick subnets from the chosen VPC."
+    }
+
+    precondition {
+      condition     = length(local.byo_bad_subnets) == 0
+      error_message = <<-EOT
+        Scanner subnet check failed: ${join("; ", local.byo_bad_subnets)}.
+        Provide a private subnet whose default route targets a NAT Gateway, a VPC Endpoint, or a Transit Gateway.
+      EOT
+    }
+  }
+}
+
+resource "aws_vpc_security_group_egress_rule" "all" {
+  security_group_id = aws_security_group.this.id
+  description       = "Allow all outbound - AWS APIs, public ECR, Grype DB, Stream ingest"
+  ip_protocol       = "-1"
+  cidr_ipv4         = "0.0.0.0/0"
+}

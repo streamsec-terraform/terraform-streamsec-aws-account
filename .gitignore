@@ -38,3 +38,14 @@ override.tf.json
 # Ignore CLI configuration files
 .terraformrc
 terraform.rc
+
+# Local test harnesses and credentials — never commit.
+# Stream Security provider credentials belong in the environment
+# (STREAMSEC_HOST / STREAMSEC_WORKSPACE_ID / STREAMSEC_API_TOKEN), never in a file.
+.env
+*.env
+env.sh
+*.tfplan
+*.tfplan.*
+local-test/
+scanner-test/

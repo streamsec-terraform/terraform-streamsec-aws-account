@@ -1,0 +1,279 @@
+# NOTE: running these tests requires Terraform >= 1.7 (mock_provider blocks) —
+# stricter than the module's own required_version. Older versions fail to parse
+# this file when running `terraform test`; plan/apply of the module itself is
+# unaffected, tests/ is ignored there.
+
+mock_provider "aws" {
+  mock_resource "aws_iam_role" {
+    defaults = { arn = "arn:aws:iam::111111111111:role/mock-scanner-role" }
+  }
+  mock_data "aws_region" {
+    defaults = { region = "us-east-1" }
+  }
+  mock_data "aws_caller_identity" {
+    defaults = { account_id = "111111111111" }
+  }
+  mock_data "aws_partition" {
+    defaults = { partition = "aws" }
+  }
+  mock_data "aws_availability_zones" {
+    defaults = { names = ["us-east-1a", "us-east-1b"] }
+  }
+  mock_data "aws_subnet" {
+    defaults = {
+      id     = "subnet-mocked"
+      vpc_id = "vpc-scanner"
+    }
+  }
+  mock_data "aws_route_tables" {
+    defaults = { ids = ["rtb-explicit"] }
+  }
+  mock_data "aws_route_table" {
+    defaults = {
+      routes = [{
+        cidr_block           = "0.0.0.0/0"
+        nat_gateway_id       = "nat-abc123"
+        gateway_id           = ""
+        transit_gateway_id   = ""
+        vpc_endpoint_id      = ""
+        network_interface_id = ""
+        instance_id          = ""
+      }]
+    }
+  }
+}
+
+mock_provider "streamsec" {
+  mock_data "streamsec_host" {
+    defaults = { url = "https://acme.streamsec.io" }
+  }
+  mock_data "streamsec_aws_account" {
+    defaults = {
+      cloud_account_id           = "111111111111"
+      streamsec_collection_token = "collection-token"
+    }
+  }
+}
+
+mock_provider "archive" {}
+
+variables {
+  customer_id = "customer-abc"
+}
+
+run "default_provisions_the_scanner_vpc" {
+  command = plan
+
+  assert {
+    condition     = length(aws_vpc.this) == 1 && length(aws_nat_gateway.this) == 1 && length(aws_eip.nat) == 1
+    error_message = "With defaults the module must provision its own VPC with a NAT Gateway and an Elastic IP."
+  }
+
+  assert {
+    condition     = aws_subnet.public[0].cidr_block == "10.255.0.0/25" && aws_subnet.private[0].cidr_block == "10.255.0.128/25"
+    error_message = "The scanner VPC must split into the same public/private /25 pair the CloudFormation template uses."
+  }
+
+  assert {
+    condition     = aws_subnet.private[0].map_public_ip_on_launch == false
+    error_message = "The private subnet must not assign public IPs — the scanner task runs without one."
+  }
+
+  assert {
+    condition     = aws_subnet.public[0].availability_zone == aws_subnet.private[0].availability_zone
+    error_message = "Both subnets must sit in a single availability zone, so one NAT Gateway serves the scanner."
+  }
+
+  assert {
+    condition     = aws_cloudwatch_event_target.daily.ecs_target[0].network_configuration[0].assign_public_ip == false
+    error_message = "The scheduled task must launch with no public IP in either network mode."
+  }
+}
+
+run "byo_subnet_with_nat_egress_is_accepted" {
+  command = plan
+
+  variables {
+    create_scanner_vpc = false
+    vpc_id             = "vpc-scanner"
+    subnet_ids         = ["subnet-private-a"]
+  }
+
+  assert {
+    condition     = length(aws_vpc.this) == 0 && length(aws_nat_gateway.this) == 0
+    error_message = "With create_scanner_vpc = false the module must not provision any network infrastructure."
+  }
+
+  assert {
+    condition     = aws_security_group.this.vpc_id == "vpc-scanner"
+    error_message = "The security group must be created in the supplied VPC."
+  }
+}
+
+run "byo_subnet_behind_a_transit_gateway_is_accepted" {
+  command = plan
+
+  variables {
+    create_scanner_vpc = false
+    vpc_id             = "vpc-scanner"
+    subnet_ids         = ["subnet-private-a"]
+  }
+
+  override_data {
+    target = data.aws_route_table.byo_explicit["0"]
+    values = {
+      routes = [{
+        cidr_block           = "0.0.0.0/0"
+        nat_gateway_id       = ""
+        gateway_id           = ""
+        transit_gateway_id   = "tgw-abc123"
+        vpc_endpoint_id      = ""
+        network_interface_id = ""
+        instance_id          = ""
+      }]
+    }
+  }
+
+  assert {
+    condition     = aws_security_group.this.vpc_id == "vpc-scanner"
+    error_message = "A Transit Gateway default route must be accepted — it may egress through a central-egress VPC, which is not knowable from here."
+  }
+}
+
+run "byo_igw_only_subnet_is_rejected" {
+  command = plan
+
+  variables {
+    create_scanner_vpc = false
+    vpc_id             = "vpc-scanner"
+    subnet_ids         = ["subnet-public-a"]
+  }
+
+  override_data {
+    target = data.aws_route_table.byo_explicit["0"]
+    values = {
+      routes = [{
+        cidr_block           = "0.0.0.0/0"
+        nat_gateway_id       = ""
+        gateway_id           = "igw-abc123"
+        transit_gateway_id   = ""
+        vpc_endpoint_id      = ""
+        network_interface_id = ""
+        instance_id          = ""
+      }]
+    }
+  }
+
+  expect_failures = [aws_security_group.this]
+}
+
+run "byo_subnet_without_a_default_route_is_rejected" {
+  command = plan
+
+  variables {
+    create_scanner_vpc = false
+    vpc_id             = "vpc-scanner"
+    subnet_ids         = ["subnet-isolated-a"]
+  }
+
+  override_data {
+    target = data.aws_route_table.byo_explicit["0"]
+    values = {
+      routes = [{
+        cidr_block           = "10.0.0.0/16"
+        nat_gateway_id       = ""
+        gateway_id           = "local"
+        transit_gateway_id   = ""
+        vpc_endpoint_id      = ""
+        network_interface_id = ""
+        instance_id          = ""
+      }]
+    }
+  }
+
+  expect_failures = [aws_security_group.this]
+}
+
+run "byo_subnet_in_another_vpc_is_rejected" {
+  command = plan
+
+  variables {
+    create_scanner_vpc = false
+    vpc_id             = "vpc-scanner"
+    subnet_ids         = ["subnet-elsewhere"]
+  }
+
+  override_data {
+    target = data.aws_subnet.byo["0"]
+    values = { vpc_id = "vpc-somewhere-else" }
+  }
+
+  expect_failures = [aws_security_group.this]
+}
+
+run "byo_mode_requires_vpc_and_subnets" {
+  command = plan
+
+  variables {
+    create_scanner_vpc = false
+  }
+
+  expect_failures = [aws_security_group.this]
+}
+
+run "byo_subnet_behind_a_nat_instance_is_accepted" {
+  command = plan
+
+  variables {
+    create_scanner_vpc = false
+    vpc_id             = "vpc-scanner"
+    subnet_ids         = ["subnet-private-a"]
+  }
+
+  override_data {
+    target = data.aws_route_table.byo_explicit["0"]
+    values = {
+      routes = [{
+        cidr_block           = "0.0.0.0/0"
+        nat_gateway_id       = ""
+        gateway_id           = ""
+        transit_gateway_id   = ""
+        vpc_endpoint_id      = ""
+        network_interface_id = "eni-abc123"
+        instance_id          = "i-abc123"
+      }]
+    }
+  }
+
+  assert {
+    condition     = aws_security_group.this.vpc_id == "vpc-scanner"
+    error_message = "A NAT instance or inspection/firewall appliance ENI is valid egress and must be accepted — it appears as network_interface_id / instance_id, not nat_gateway_id."
+  }
+}
+
+run "supplying_a_vpc_while_creating_one_is_rejected" {
+  command = plan
+
+  variables {
+    vpc_id     = "vpc-someone-elses"
+    subnet_ids = ["subnet-someone-elses"]
+  }
+
+  expect_failures = [aws_security_group.this]
+}
+
+run "egress_validation_can_be_skipped" {
+  command = plan
+
+  variables {
+    create_scanner_vpc     = false
+    vpc_id                 = "vpc-scanner"
+    subnet_ids             = ["subnet-private-a"]
+    validate_subnet_egress = false
+  }
+
+  assert {
+    condition     = length(data.aws_route_table.byo_main) == 0 && length(data.aws_subnet.byo) == 0
+    error_message = "validate_subnet_egress = false must read no validation data sources, so subnet ids that are unknown until apply do not break for_each."
+  }
+}

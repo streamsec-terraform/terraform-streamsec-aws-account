@@ -126,3 +126,36 @@ module "eks_audit_us_east_2" {
   }
   depends_on = [module.account]
 }
+
+# Agentless vulnerability scanning. One instance per region you want scanned.
+# customer_id is the same value as the provider's workspace_id above.
+# By default this provisions a dedicated VPC with a NAT gateway (~$32/mo per
+# region) so the scanner Fargate task runs without a public IP.
+module "volume_scanner_us_east_1" {
+  source      = "../../modules/volume-scanner"
+  customer_id = "xxxxxxxxxxxx"
+  providers = {
+    aws = aws.aws-east-1
+  }
+  depends_on = [module.account]
+}
+
+# Bring your own private subnets instead — each must have a 0.0.0.0/0 route to a
+# NAT gateway, VPC endpoint or Transit Gateway. Validated at plan time.
+module "volume_scanner_us_east_2" {
+  source             = "../../modules/volume-scanner"
+  customer_id        = "xxxxxxxxxxxx"
+  create_scanner_vpc = false
+  vpc_id             = "vpc-xxxxxxxxxxxxx"
+  subnet_ids         = ["subnet-xxxxxxxxxxxxx"]
+
+  # Optional scanners — all off by default except language packages.
+  # scan_secrets      = true
+  # scan_ai_workloads = true
+  # scan_databases    = true
+
+  providers = {
+    aws = aws.aws-east-2
+  }
+  depends_on = [module.account]
+}
