@@ -2,21 +2,21 @@ locals {
   # All read-only. List/Describe/GetAuthorizationToken are account-level actions
   # that cannot be resource-scoped; the per-resource get/pull actions are scoped
   # to their resource ARNs.
-  workload_statements = [
+  #
+  # Split per kind rather than granted as one block, so workload_kinds = "ecs"
+  # does not hand the role account-wide Lambda read access (function code is
+  # downloadable through lambda:GetFunction) and workload_kinds = "lambda" does
+  # not hand it account-wide ECS task/task-definition read access. Only the ECR
+  # statements are shared: both kinds pull container images.
+  workload_lambda_statements = [
     {
-      Sid    = "WorkloadDiscoveryList"
-      Effect = "Allow"
-      Action = [
-        "lambda:ListFunctions",
-        "ecs:ListClusters",
-        "ecs:ListTasks",
-        "ecs:DescribeTasks",
-        "ecs:DescribeTaskDefinition",
-      ]
+      Sid      = "WorkloadLambdaList"
+      Effect   = "Allow"
+      Action   = ["lambda:ListFunctions"]
       Resource = "*"
     },
     {
-      Sid    = "WorkloadDiscoveryGet"
+      Sid    = "WorkloadLambdaGet"
       Effect = "Allow"
       Action = [
         "lambda:GetFunction",
@@ -27,6 +27,25 @@ locals {
         "arn:${local.partition}:lambda:*:*:layer:*:*",
       ]
     },
+  ]
+
+  workload_ecs_statements = [
+    {
+      Sid    = "WorkloadEcsDiscovery"
+      Effect = "Allow"
+      Action = [
+        "ecs:ListClusters",
+        "ecs:ListTasks",
+        "ecs:DescribeTasks",
+        "ecs:DescribeTaskDefinition",
+      ]
+      Resource = "*"
+    },
+  ]
+
+  # Needed by both kinds: Lambda functions can be container images, and Fargate
+  # task images live in ECR.
+  workload_image_statements = [
     {
       Sid      = "WorkloadImageAuth"
       Effect   = "Allow"
@@ -43,6 +62,15 @@ locals {
       Resource = "arn:${local.partition}:ecr:*:*:repository/*"
     },
   ]
+
+  workload_statements = concat(
+    # Filtered with a `for` rather than a conditional: the two arms of a ternary
+    # must unify to one type, and an empty tuple cannot unify with a tuple of
+    # statement objects.
+    [for statement in local.workload_lambda_statements : statement if local.scan_lambda_workloads],
+    [for statement in local.workload_ecs_statements : statement if local.scan_ecs_workloads],
+    [for statement in local.workload_image_statements : statement if local.scan_workloads],
+  )
 }
 
 ################################################################################
@@ -143,16 +171,12 @@ resource "aws_iam_role_policy" "task" {
         }
       },
       ],
-      # Workload scanning. Granted only when workload_kinds is non-empty:
-      # workload_kinds = "" is documented as disabling workload scanning
+      # Workload scanning, granted per kind (see the locals at the top of this
+      # file). workload_kinds = "" is documented as disabling workload scanning
       # entirely, and leaving these attached would keep account-wide Lambda, ECS
       # and ECR read access on the role that an IAM/CSPM review — or anything
       # with code execution in the scanner container — could still use.
-      #
-      # Filtered with a `for` rather than a conditional: the two arms of a
-      # ternary must unify to one type, and an empty tuple cannot unify with a
-      # tuple of statement objects.
-      [for statement in local.workload_statements : statement if local.scan_workloads]
+      local.workload_statements
     )
   })
 }

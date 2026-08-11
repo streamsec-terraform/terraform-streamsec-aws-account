@@ -217,17 +217,24 @@ variable "tenant_name" {
 }
 
 variable "resource_prefix" {
-  description = "Optional prefix prepended to all created resource names. Empty keeps names identical to the CloudFormation deployment. Capped at 20 characters because the generated IAM role names already consume most of the 64-character IAM limit."
+  description = "Optional prefix prepended to all created resource names. Empty keeps names identical to the CloudFormation deployment. Capped at 9 characters because the generated IAM role names already consume all but 10 of IAM's 64-character limit."
   type        = string
   default     = ""
 
-  # "streamsec-ebs-scanner-" is 22 chars, the region up to 14, and the longest
-  # role suffix ("-initial-scan-role") 18 — leaving ~10 before IAM's 64-char
-  # limit rejects the role. Cap it here so the failure lands on the input the
-  # operator set, not on four simultaneous IAM errors mid-plan.
+  # The longest generated name is the initial-scan Lambda's role:
+  #   <prefix>-streamsec-ebs-scanner-<region>-initial-scan-role
+  #     "streamsec-ebs-scanner"  21
+  #     "-" + region             15  (longest region: ap-southeast-7 / cn-northwest-1, 14)
+  #     "-initial-scan-role"     18
+  #                             ---
+  #                              54, leaving 10 for "<prefix>-" → 9 for the prefix.
+  #
+  # Validation blocks cannot read data sources, so the region cannot be measured
+  # here and the cap has to assume the longest one. Cap it at the input the
+  # operator set rather than letting four IAM errors land mid-plan.
   validation {
-    condition     = length(var.resource_prefix) <= 20
-    error_message = "resource_prefix must be 20 characters or fewer — the generated IAM role names (prefix + streamsec-ebs-scanner + region + role suffix) must fit IAM's 64-character limit."
+    condition     = length(var.resource_prefix) <= 9
+    error_message = "resource_prefix must be 9 characters or fewer — the generated IAM role names (prefix + streamsec-ebs-scanner + region + \"-initial-scan-role\") must fit IAM's 64-character limit."
   }
 }
 

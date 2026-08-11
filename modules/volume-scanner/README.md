@@ -67,16 +67,16 @@ module "volume_scanner_eu_west_1" {
 
 By default (`create_scanner_vpc = true`) the module provisions a dedicated `10.255.0.0/24` VPC in a single availability zone, split into two `/25`s:
 
-- **public** — holds the NAT gateway only. No Fargate task ever runs here.
+- **public** — holds the NAT gateway only, with auto-assign public IP off. No Fargate task ever runs here.
 - **private** — where the scanner runs, with no public IP. Egress goes out through the NAT gateway's Elastic IP.
 
 That Elastic IP is stable across NAT gateway replacements, so you can allowlist a single upstream egress IP instead of the whole Fargate range. It's exposed as the `nat_gateway_public_ip` output.
 
 **A NAT gateway costs roughly $32/month idle per region, plus ~$0.045/GB processed.** That's a deliberate trade-off: running the scanner with a public IP fails SOC 2, CIS AWS Foundations and PCI-DSS baselines that flag public IPs on compute.
 
-To avoid the second NAT gateway, set `create_scanner_vpc = false` and supply `vpc_id` + `subnet_ids`. Each subnet must have a `0.0.0.0/0` route to a **NAT gateway, NAT instance, inspection/firewall appliance ENI, or Transit Gateway** — the scanner task launches with no public IP, so a public subnet routed through an Internet Gateway is a black hole. The module validates this at plan time and tells you exactly which subnet is wrong and why, rather than letting the task fail later with an opaque `ResourceInitializationError`.
+To avoid the second NAT gateway, set `create_scanner_vpc = false` and supply `vpc_id` + `subnet_ids`. Each subnet must have a `0.0.0.0/0` route to a **NAT gateway, NAT instance, inspection/firewall appliance ENI, VPC endpoint, Transit Gateway, Cloud WAN core network, or Outposts local gateway** — the scanner task launches with no public IP, so a public subnet routed through an Internet Gateway is a black hole. The module validates this at plan time and tells you exactly which subnet is wrong and why, rather than letting the task fail later with an opaque `ResourceInitializationError`.
 
-If your `subnet_ids` are created in the same apply (`module.vpc.private_subnets`, `aws_subnet.x[*].id`), Terraform may not know the list length at plan time and the validation cannot be keyed off values that do not exist yet. Set `validate_subnet_egress = false` in that case; the subnets are used as given.
+If your `subnet_ids` are created in the same apply (`module.vpc.private_subnets`, `aws_subnet.x[*].id`), Terraform may not know the list length at plan time and the validation cannot be keyed off values that do not exist yet. Set `validate_subnet_egress = false` in that case; the subnets are used as given. Note that the flag switches off **both** supplied-subnet checks — the egress walk and the "is this subnet even in `vpc_id`" check — because a `for_each` over a list of unknown length is rejected whichever check it feeds.
 
 One gap versus the CloudFormation precheck: the `aws_route_table` data source exposes no route *state*, so a blackholed default route — one whose NAT gateway was deleted — still passes validation.
 
@@ -86,18 +86,22 @@ The VPC choice only controls the scanner's **egress**. It scans the whole accoun
 
 A single EventBridge rule fires the scanner daily at 03:00 UTC. The scanner is an orchestrator: it discovers instances and fans out one child Fargate task per shard, capped by `max_concurrent_shards`. The defaults (100 instances per shard, 10 concurrent) cover roughly 1000 instances per wave.
 
-By default the module also fires **one immediate scan at apply time**, so you don't wait for the first scheduled run. Failures there are swallowed — the daily schedule is the fallback, and the details land in the initial-scan Lambda's CloudWatch logs. Set `trigger_initial_scan = false` to skip it.
+Each concurrent task takes one private IP in the scanner subnet. If you shrink `scanner_vpc_cidr`, the module checks at plan time that the private half still holds `max_concurrent_shards + 1` ENIs, rather than letting the fan-out die part-way through. The default `/24` holds the maximum concurrency with room to spare.
+
+By default the module also fires **one immediate scan at apply time**, so you don't wait for the first scheduled run. The trigger retries the failures that clear on their own — chiefly IAM eventual consistency, since the policies the task needs were attached seconds earlier by the same apply. Anything left after that is swallowed: the daily schedule is the fallback, and the details land in the initial-scan Lambda's CloudWatch logs. Set `trigger_initial_scan = false` to skip it.
 
 Use a cron expression if you override `schedule_expression`. An EventBridge `rate(...)` rule fires once at rule creation *as well as* on the interval, which would duplicate the first scan.
 
 ## Permissions granted
 
-The collection token the scanner authenticates uploads with is stored in Secrets Manager and injected through the task definition's `secrets` block, never as a plaintext environment variable. The task role is least-privilege:
+The collection token the scanner authenticates uploads with is stored in Secrets Manager and injected through the task definition's `secrets` block, never as a plaintext environment variable. That keeps it out of the task definition, which anything holding `ecs:DescribeTaskDefinition` can read — including the scanner task role itself. It does **not** keep it out of Terraform state: `aws_secretsmanager_secret_version` stores the value in state in plaintext, so treat your state file as secret material either way.
+
+The task role is least-privilege:
 
 - read-only `ec2:Describe{Instances,Volumes,Snapshots}`
 - `ec2:CreateSnapshot`, with tagging restricted to `Purpose = ebs-package-collector`
 - `ec2:DeleteSnapshot` and EBS-direct block reads **only** on snapshots carrying that tag, so the scanner cannot touch snapshots created by you or any other tool
-- read-only Lambda, ECS and ECR access for workload scanning, granted only when `workload_kinds` is non-empty — setting it to `""` removes the permissions, it does not merely stop using them
+- read-only Lambda, ECS and ECR access for workload scanning, granted per kind: `workload_kinds = "ecs"` gets no account-wide `lambda:GetFunction` (which downloads function code) and `workload_kinds = "lambda"` gets no account-wide ECS task/task-definition read. Setting it to `""` removes all of them — it does not merely stop using them
 - `ecs:RunTask` scoped to the scanner's own cluster, so none of these roles can launch the task into another cluster in the account
 
 ## Uninstalling
@@ -131,7 +135,7 @@ The collection token the scanner authenticates uploads with is stored in Secrets
 | `schedule_expression` | EventBridge schedule for the scan; must be `cron(...)` | `string` | `cron(0 3 * * ? *)` |
 | `trigger_initial_scan` | Run one immediate scan at apply time | `bool` | `true` |
 | `log_retention_days` | CloudWatch log retention | `number` | `30` |
-| `resource_prefix` | Prefix prepended to resource names, max 20 chars (IAM's 64-char role-name limit) | `string` | `""` |
+| `resource_prefix` | Prefix prepended to resource names, max 9 chars (IAM's 64-char role-name limit) | `string` | `""` |
 | `tags` | Global tags added to all created resources | `map(string)` | `{}` |
 
 ## Outputs

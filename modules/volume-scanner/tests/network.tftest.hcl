@@ -3,6 +3,11 @@
 # this file when running `terraform test`; plan/apply of the module itself is
 # unaffected, tests/ is ignored there.
 
+# Every route object below spells out ALL target fields, including the ones set
+# to "". mock_provider generates a random value for any attribute left unset —
+# nested attributes included — so an omitted nat_gateway_id reads as a real NAT
+# gateway and an egress-less subnet is silently accepted. Adding a new accepted
+# target in main.tf means adding it here too.
 mock_provider "aws" {
   mock_resource "aws_iam_role" {
     defaults = { arn = "arn:aws:iam::111111111111:role/mock-scanner-role" }
@@ -38,6 +43,8 @@ mock_provider "aws" {
         vpc_endpoint_id      = ""
         network_interface_id = ""
         instance_id          = ""
+        core_network_arn     = ""
+        local_gateway_id     = ""
       }]
     }
   }
@@ -90,6 +97,46 @@ run "default_provisions_the_scanner_vpc" {
   }
 }
 
+# A /27 VPC halves into a /28 private subnet: 16 addresses, 5 reserved by AWS,
+# 11 usable ENIs. 20 children plus the orchestrator does not fit.
+run "concurrency_beyond_the_subnet_capacity_is_rejected" {
+  command = plan
+
+  variables {
+    scanner_vpc_cidr      = "10.255.0.0/27"
+    max_concurrent_shards = 20
+  }
+
+  expect_failures = [aws_subnet.private]
+}
+
+run "concurrency_within_the_subnet_capacity_is_accepted" {
+  command = plan
+
+  variables {
+    scanner_vpc_cidr      = "10.255.0.0/27"
+    max_concurrent_shards = 10
+  }
+
+  assert {
+    condition     = aws_subnet.private[0].cidr_block == "10.255.0.16/28"
+    error_message = "10 children plus the orchestrator is exactly the 11-ENI capacity of a /28 and must be accepted."
+  }
+}
+
+run "the_default_cidr_holds_the_maximum_concurrency" {
+  command = plan
+
+  variables {
+    max_concurrent_shards = 100
+  }
+
+  assert {
+    condition     = aws_subnet.private[0].cidr_block == "10.255.0.128/25"
+    error_message = "The default scanner_vpc_cidr must hold max_concurrent_shards at its ceiling, so the capacity check never fires on defaults."
+  }
+}
+
 run "byo_subnet_with_nat_egress_is_accepted" {
   command = plan
 
@@ -130,6 +177,8 @@ run "byo_subnet_behind_a_transit_gateway_is_accepted" {
         vpc_endpoint_id      = ""
         network_interface_id = ""
         instance_id          = ""
+        core_network_arn     = ""
+        local_gateway_id     = ""
       }]
     }
   }
@@ -160,6 +209,8 @@ run "byo_igw_only_subnet_is_rejected" {
         vpc_endpoint_id      = ""
         network_interface_id = ""
         instance_id          = ""
+        core_network_arn     = ""
+        local_gateway_id     = ""
       }]
     }
   }
@@ -187,6 +238,8 @@ run "byo_subnet_without_a_default_route_is_rejected" {
         vpc_endpoint_id      = ""
         network_interface_id = ""
         instance_id          = ""
+        core_network_arn     = ""
+        local_gateway_id     = ""
       }]
     }
   }
@@ -241,6 +294,8 @@ run "byo_subnet_behind_a_nat_instance_is_accepted" {
         vpc_endpoint_id      = ""
         network_interface_id = "eni-abc123"
         instance_id          = "i-abc123"
+        core_network_arn     = ""
+        local_gateway_id     = ""
       }]
     }
   }
@@ -248,6 +303,38 @@ run "byo_subnet_behind_a_nat_instance_is_accepted" {
   assert {
     condition     = aws_security_group.this.vpc_id == "vpc-scanner"
     error_message = "A NAT instance or inspection/firewall appliance ENI is valid egress and must be accepted — it appears as network_interface_id / instance_id, not nat_gateway_id."
+  }
+}
+
+run "byo_subnet_behind_cloud_wan_is_accepted" {
+  command = plan
+
+  variables {
+    create_scanner_vpc = false
+    vpc_id             = "vpc-scanner"
+    subnet_ids         = ["subnet-private-a"]
+  }
+
+  override_data {
+    target = data.aws_route_table.byo_explicit["0"]
+    values = {
+      routes = [{
+        cidr_block           = "0.0.0.0/0"
+        nat_gateway_id       = ""
+        gateway_id           = ""
+        transit_gateway_id   = ""
+        vpc_endpoint_id      = ""
+        network_interface_id = ""
+        instance_id          = ""
+        local_gateway_id     = ""
+        core_network_arn     = "arn:aws:networkmanager::111111111111:core-network/core-network-abc"
+      }]
+    }
+  }
+
+  assert {
+    condition     = aws_security_group.this.vpc_id == "vpc-scanner"
+    error_message = "A Cloud WAN core-network default route is central egress and must be accepted."
   }
 }
 

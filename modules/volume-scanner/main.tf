@@ -9,7 +9,8 @@ data "streamsec_aws_account" "this" {
 }
 
 locals {
-  name          = var.resource_prefix != "" ? "${var.resource_prefix}-streamsec-ebs-scanner" : "streamsec-ebs-scanner"
+  name_prefix   = var.resource_prefix != "" ? "${var.resource_prefix}-" : ""
+  name          = "${local.name_prefix}streamsec-ebs-scanner"
   region        = data.aws_region.current.region
   account_id    = data.aws_caller_identity.current.account_id
   partition     = data.aws_partition.current.partition
@@ -30,7 +31,10 @@ locals {
 
   customer_id = var.customer_id == null ? "" : var.customer_id
 
-  scan_workloads = var.workload_kinds != ""
+  workload_kind_list    = [for kind in split(",", var.workload_kinds) : trimspace(kind) if trimspace(kind) != ""]
+  scan_workloads        = length(local.workload_kind_list) > 0
+  scan_lambda_workloads = contains(local.workload_kind_list, "lambda")
+  scan_ecs_workloads    = contains(local.workload_kind_list, "ecs")
 
   tags = merge(var.tags, {
     "streamsec:component" = "ebs-scanner"
@@ -40,6 +44,16 @@ locals {
 
   scanner_vpc_id     = var.create_scanner_vpc ? aws_vpc.this[0].id : var.vpc_id
   scanner_subnet_ids = var.create_scanner_vpc ? [aws_subnet.private[0].id] : var.subnet_ids
+
+  scanner_public_subnet_cidr  = cidrsubnet(var.scanner_vpc_cidr, 1, 0)
+  scanner_private_subnet_cidr = cidrsubnet(var.scanner_vpc_cidr, 1, 1)
+
+  # Every Fargate task in awsvpc mode consumes one private IP, and AWS reserves
+  # five addresses in each subnet. The orchestrator plus max_concurrent_shards
+  # children all run at once, so the subnet has to hold them or the fan-out dies
+  # part-way through with an opaque ENI-provisioning failure.
+  scanner_private_subnet_capacity = pow(2, 32 - tonumber(split("/", local.scanner_private_subnet_cidr)[1])) - 5
+  scanner_peak_task_count         = var.max_concurrent_shards + 1
 
   # Family ARN with no revision suffix, so the orchestrator's RunTask always
   # launches children on the current ACTIVE revision. Referencing the task
@@ -70,23 +84,44 @@ locals {
   # list length is; unknown *values* are fine, and Terraform simply defers the
   # preconditions to apply. When even the length is unknown, set
   # validate_subnet_egress = false.
+  #
+  # validate_subnet_egress = false switches off BOTH supplied-subnet checks, the
+  # wrong-VPC one included, not just the route walk. That is deliberate: the
+  # escape hatch exists for subnet lists whose LENGTH is unknown at plan time,
+  # and a for_each over such a list is rejected outright whichever check it
+  # feeds. Splitting the two would leave the flag unable to do the one job it
+  # was added for.
   byo_subnets = local.byo_validate ? { for index, subnet_id in var.subnet_ids : tostring(index) => subnet_id } : {}
 
   byo_wrong_vpc_subnets = [
     for subnet in data.aws_subnet.byo : subnet.id if subnet.vpc_id != var.vpc_id
   ]
 
-  # The effective route table for each subnet: its explicit association if it has
-  # one, otherwise the VPC's main route table.
-  byo_route_tables = {
-    for key, _ in local.byo_subnets :
-    key => try(data.aws_route_table.byo_explicit[key], one(data.aws_route_table.byo_main))
-  }
+  # Each subnet's effective route table. The explicit-association / main-route-table
+  # fallback happens in the data source itself (see network.tf).
+  byo_route_tables = data.aws_route_table.byo_explicit
 
+  # Normalized to a "-" sentinel per target field. A route's unused target fields
+  # come back as "" from some provider versions and as null from others (and as a
+  # missing attribute entirely if the provider predates the field, e.g.
+  # core_network_arn). Comparing the raw value against "" therefore reports a
+  # NULL field as a populated target and waves through a subnet with no egress,
+  # and startswith(null, ...) is a hard error. coalesce collapses null, "" and
+  # absent to "-", which matches no real AWS id.
   byo_default_routes = {
     for key, route_table in local.byo_route_tables :
-    key => route_table == null ? [] : [
-      for route in route_table.routes : route if try(route.cidr_block, "") == "0.0.0.0/0"
+    key => [
+      for route in route_table.routes : {
+        gateway_id           = coalesce(try(route.gateway_id, ""), "-")
+        nat_gateway_id       = coalesce(try(route.nat_gateway_id, ""), "-")
+        transit_gateway_id   = coalesce(try(route.transit_gateway_id, ""), "-")
+        network_interface_id = coalesce(try(route.network_interface_id, ""), "-")
+        instance_id          = coalesce(try(route.instance_id, ""), "-")
+        vpc_endpoint_id      = coalesce(try(route.vpc_endpoint_id, ""), "-")
+        core_network_arn     = coalesce(try(route.core_network_arn, ""), "-")
+        local_gateway_id     = coalesce(try(route.local_gateway_id, ""), "-")
+      }
+      if coalesce(try(route.cidr_block, ""), "-") == "0.0.0.0/0"
     ]
   }
 
@@ -95,6 +130,8 @@ locals {
   # the task surface a failure if egress is broken upstream. NAT instances and
   # inspection/firewall appliances (fck-nat, Palo Alto, Fortinet) appear as
   # network_interface_id / instance_id, and are standard enterprise egress.
+  # Cloud WAN central egress appears as core_network_arn, Outposts as
+  # local_gateway_id — both are valid default routes.
   #
   # KNOWN GAP vs the CloudFormation NetworkPrecheck: that Lambda also skipped
   # routes whose State is not "active", rejecting a blackholed default route
@@ -104,19 +141,21 @@ locals {
     for key, routes in local.byo_default_routes :
     key => length([
       for route in routes : route
-      if try(route.nat_gateway_id, "") != "" ||
-      try(route.transit_gateway_id, "") != "" ||
-      try(route.network_interface_id, "") != "" ||
-      try(route.instance_id, "") != "" ||
-      try(route.vpc_endpoint_id, "") != "" ||
-      startswith(try(route.gateway_id, ""), "vpce-")
+      if route.nat_gateway_id != "-" ||
+      route.transit_gateway_id != "-" ||
+      route.network_interface_id != "-" ||
+      route.instance_id != "-" ||
+      route.vpc_endpoint_id != "-" ||
+      route.core_network_arn != "-" ||
+      route.local_gateway_id != "-" ||
+      startswith(route.gateway_id, "vpce-")
     ]) > 0
   }
 
   byo_subnet_igw_only = {
     for key, routes in local.byo_default_routes :
     key => !local.byo_subnet_has_egress[key] && length([
-      for route in routes : route if startswith(try(route.gateway_id, ""), "igw-")
+      for route in routes : route if startswith(route.gateway_id, "igw-")
     ]) > 0
   }
 
@@ -124,7 +163,7 @@ locals {
     for key, subnet_id in local.byo_subnets :
     format("%s (%s)", subnet_id, local.byo_subnet_igw_only[key]
       ? "public subnet — 0.0.0.0/0 routes through an Internet Gateway, but the scanner task runs with no public IP"
-    : "no active 0.0.0.0/0 route")
+    : "no 0.0.0.0/0 route to a NAT gateway, NAT instance, appliance ENI, VPC endpoint, Transit Gateway, Cloud WAN core network or Outposts local gateway")
     if !local.byo_subnet_has_egress[key]
   ]
 }
@@ -134,15 +173,18 @@ locals {
 #
 # The scanner authenticates its SBOM uploads with the account's collection token.
 # It goes through Secrets Manager rather than a task-definition environment
-# variable, matching every other module in this repo: the provider does not mark
-# the token sensitive, so an env var would print it in plan output and CI logs,
-# store it unredacted in state, and expose it to anything holding
-# ecs:DescribeTaskDefinition — including the scanner task role itself, which
-# needs that action account-wide for workload scanning.
+# variable, matching every other module in this repo. This keeps the token out of
+# the task definition, which anything holding ecs:DescribeTaskDefinition can read
+# — including the scanner task role itself, which needs that action account-wide
+# for workload scanning.
+#
+# It does NOT keep the token out of Terraform state: aws_secretsmanager_secret_version
+# stores secret_string in state in plaintext, exactly as an environment variable
+# would. Treat terraform.tfstate as secret material regardless.
 ################################################################################
 
 resource "aws_secretsmanager_secret" "collection_token" {
-  name                    = "${var.collection_token_secret_name}-${local.region}"
+  name                    = "${local.name_prefix}${var.collection_token_secret_name}-${local.region}"
   description             = "Stream Security volume scanner collection token"
   recovery_window_in_days = var.secret_recovery_window_days
 
@@ -325,7 +367,11 @@ resource "aws_lambda_function" "initial_scan" {
   role          = aws_iam_role.initial_scan[0].arn
   handler       = "initial_scan.handler"
   runtime       = "python3.13"
-  timeout       = 60
+
+  # Room for the function's retry ladder (50s of backoff) plus the RunTask calls
+  # themselves. The retries cover IAM eventual consistency: the policies this
+  # task needs were attached seconds earlier by the same apply.
+  timeout = 120
 
   filename         = data.archive_file.initial_scan[0].output_path
   source_code_hash = data.archive_file.initial_scan[0].output_base64sha256

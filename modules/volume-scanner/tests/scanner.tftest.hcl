@@ -184,6 +184,11 @@ run "resource_prefix_is_applied" {
     condition     = aws_ecs_cluster.this.name == "acme-streamsec-ebs-scanner-us-east-1"
     error_message = "resource_prefix must prefix the resource names, and names must carry the region so two regions in one account do not collide."
   }
+
+  assert {
+    condition     = aws_secretsmanager_secret.collection_token.name == "acme-streamsec-scanner-collection-token-us-east-1"
+    error_message = "The Secrets Manager secret must carry resource_prefix too — without it two prefixed deployments in one account/region collide on the same secret name."
+  }
 }
 
 run "customer_id_is_required" {
@@ -249,11 +254,59 @@ run "workload_iam_is_present_by_default" {
   command = plan
 
   assert {
+    condition = alltrue([
+      for sid in ["WorkloadLambdaList", "WorkloadLambdaGet", "WorkloadEcsDiscovery", "WorkloadImageAuth", "WorkloadImagePull"] :
+      contains([for s in jsondecode(aws_iam_role_policy.task.policy).Statement : s.Sid], sid)
+    ])
+    error_message = "With the default workload_kinds (lambda,ecs) every workload-scanning statement must be granted."
+  }
+}
+
+run "workload_iam_is_scoped_to_lambda_only" {
+  command = plan
+
+  variables {
+    workload_kinds = "lambda"
+  }
+
+  assert {
     condition = length([
       for s in jsondecode(aws_iam_role_policy.task.policy).Statement :
-      s if startswith(s.Sid, "Workload")
-    ]) == 4
-    error_message = "With the default workload_kinds the four workload-scanning statements must be granted."
+      s if startswith(s.Sid, "WorkloadEcs")
+    ]) == 0
+    error_message = "workload_kinds = \"lambda\" must not grant account-wide ECS task and task-definition read access."
+  }
+
+  assert {
+    condition = alltrue([
+      for sid in ["WorkloadLambdaList", "WorkloadLambdaGet", "WorkloadImageAuth", "WorkloadImagePull"] :
+      contains([for s in jsondecode(aws_iam_role_policy.task.policy).Statement : s.Sid], sid)
+    ])
+    error_message = "workload_kinds = \"lambda\" must still grant the Lambda statements and the shared ECR image-pull statements."
+  }
+}
+
+run "workload_iam_is_scoped_to_ecs_only" {
+  command = plan
+
+  variables {
+    workload_kinds = "ecs"
+  }
+
+  assert {
+    condition = length([
+      for s in jsondecode(aws_iam_role_policy.task.policy).Statement :
+      s if startswith(s.Sid, "WorkloadLambda")
+    ]) == 0
+    error_message = "workload_kinds = \"ecs\" must not grant account-wide lambda:GetFunction, which downloads function code."
+  }
+
+  assert {
+    condition = alltrue([
+      for sid in ["WorkloadEcsDiscovery", "WorkloadImageAuth", "WorkloadImagePull"] :
+      contains([for s in jsondecode(aws_iam_role_policy.task.policy).Statement : s.Sid], sid)
+    ])
+    error_message = "workload_kinds = \"ecs\" must still grant the ECS statements and the shared ECR image-pull statements."
   }
 }
 

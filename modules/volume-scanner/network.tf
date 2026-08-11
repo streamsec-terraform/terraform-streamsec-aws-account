@@ -2,9 +2,10 @@
 # Dedicated scanner VPC (create_scanner_vpc = true, the default)
 #
 # The VPC is split into two equal subnets in a single availability zone:
-#   - public  — holds the NAT Gateway only. map_public_ip_on_launch stays true
-#               because the NAT Gateway needs a public interface; no Fargate
-#               task ever runs here.
+#   - public  — holds the NAT Gateway only; no Fargate task ever runs here.
+#               map_public_ip_on_launch is off: the NAT Gateway takes its public
+#               address from the Elastic IP below, not from subnet auto-assign,
+#               and nothing else is ever launched into this subnet.
 #   - private — where Fargate runs. No public IP; egress via the NAT.
 #
 # The scanner accepts no inbound traffic. A NAT Gateway costs ~$32/mo idle plus
@@ -50,9 +51,9 @@ resource "aws_subnet" "public" {
   count = var.create_scanner_vpc ? 1 : 0
 
   vpc_id                  = aws_vpc.this[0].id
-  cidr_block              = cidrsubnet(var.scanner_vpc_cidr, 1, 0)
+  cidr_block              = local.scanner_public_subnet_cidr
   availability_zone       = data.aws_availability_zones.available[0].names[0]
-  map_public_ip_on_launch = true
+  map_public_ip_on_launch = false
 
   tags = merge(local.tags, { Name = "${local.name}-public-subnet" })
 }
@@ -61,11 +62,18 @@ resource "aws_subnet" "private" {
   count = var.create_scanner_vpc ? 1 : 0
 
   vpc_id                  = aws_vpc.this[0].id
-  cidr_block              = cidrsubnet(var.scanner_vpc_cidr, 1, 1)
+  cidr_block              = local.scanner_private_subnet_cidr
   availability_zone       = data.aws_availability_zones.available[0].names[0]
   map_public_ip_on_launch = false
 
   tags = merge(local.tags, { Name = "${local.name}-private-subnet" })
+
+  lifecycle {
+    precondition {
+      condition     = local.scanner_private_subnet_capacity >= local.scanner_peak_task_count
+      error_message = "max_concurrent_shards = ${var.max_concurrent_shards} needs ${local.scanner_peak_task_count} concurrent task ENIs (the orchestrator plus its children), but the private subnet ${local.scanner_private_subnet_cidr} carved out of scanner_vpc_cidr only holds ${local.scanner_private_subnet_capacity}. Widen scanner_vpc_cidr or lower max_concurrent_shards."
+    }
+  }
 }
 
 resource "aws_route_table" "public" {
@@ -149,7 +157,8 @@ resource "aws_route_table_association" "private" {
 #
 # The Terraform-native replacement for the CloudFormation NetworkPrecheck
 # custom resource: refuse to provision the scanner against subnets whose
-# 0.0.0.0/0 route is not a NAT Gateway, VPC Endpoint or Transit Gateway. The
+# 0.0.0.0/0 route is not a NAT Gateway, NAT instance / appliance ENI, VPC
+# Endpoint, Transit Gateway, Cloud WAN core network or Outposts local gateway. The
 # scanner task always launches with no public IP, so a subnet with only an
 # Internet Gateway default route has no way to reach the outside world and
 # becomes a black hole. Without this check the task fails later with the opaque
@@ -192,14 +201,23 @@ data "aws_route_table" "byo_main" {
   }
 }
 
+# for_each keys off local.byo_subnets — the same index-keyed map used above — so
+# the keys are known whenever the subnet list length is, even when the ids
+# themselves are not resolved until apply. Deriving the keys from
+# data.aws_route_tables.byo_explicit instead would make them depend on that data
+# source's ids, which are unknown at plan for a subnet created in the same
+# apply, and Terraform rejects unknown for_each keys outright.
+#
+# The main-route-table fallback therefore happens here, in route_table_id,
+# rather than by filtering the key set: a subnet with no explicit association
+# resolves to the VPC's main route table, which is what AWS itself applies.
 data "aws_route_table" "byo_explicit" {
-  for_each = {
-    for key, tables in data.aws_route_tables.byo_explicit :
-    key => tolist(tables.ids)[0]
-    if length(tables.ids) > 0
-  }
+  for_each = local.byo_subnets
 
-  route_table_id = each.value
+  route_table_id = try(
+    tolist(data.aws_route_tables.byo_explicit[each.key].ids)[0],
+    one(data.aws_route_table.byo_main[*].id),
+  )
 }
 
 ################################################################################
@@ -238,7 +256,7 @@ resource "aws_security_group" "this" {
       condition     = length(local.byo_bad_subnets) == 0
       error_message = <<-EOT
         Scanner subnet check failed: ${join("; ", local.byo_bad_subnets)}.
-        Provide a private subnet whose default route targets a NAT Gateway, a VPC Endpoint, or a Transit Gateway.
+        Provide a private subnet whose default route targets a NAT Gateway, a NAT instance or appliance ENI, a VPC Endpoint, a Transit Gateway, a Cloud WAN core network, or an Outposts local gateway.
       EOT
     }
   }
