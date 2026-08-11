@@ -54,8 +54,8 @@ variable "workload_kinds" {
 # Scanner Scaling
 #
 # The orchestrator task discovers instances and launches one child Fargate task
-# per shard. 100 x 10 = 1000 instances per wave covers the largest current
-# customer (~6k instances/region in 6 waves, comfortably inside the daily window).
+# per shard. The defaults (100 instances per shard, 10 concurrent) scan up to
+# 1000 instances per wave; raise max_concurrent_shards for larger fleets.
 ################################################################################
 
 variable "shard_size" {

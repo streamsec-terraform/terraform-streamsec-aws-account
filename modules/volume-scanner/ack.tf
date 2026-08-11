@@ -11,21 +11,21 @@
 # constraint in versions.tf to whichever release ships the resource — once the
 # provider PR lands.
 #
-# Until then the region still appears in the Stream console: the scanner's own
-# scanner_report call authenticates with the collection token and
-# _upsert_scanner_region appends the region entry on first report. What is
-# missing is the install-state `status` field and the `uninstalled` report on
-# destroy.
+# Until then the region still appears in the Stream console with a live install
+# state: the scanner's first progress report authenticates with the collection
+# token and creates the region entry, and Stream stamps a region it creates that
+# way as deployed. What is missing is the stack metadata (stack_id, stack_region,
+# deployed_at) and every state transition after the first: a broken deploy is
+# never badged failed, and terraform destroy never badges the region uninstalled.
+# The default is applied only when the entry is created, so a region that was
+# ever touched from the console — including merely generating its template, which
+# records `pending` — keeps whatever install state the console last set. On such
+# a region read the scan-status column, which the scanner does keep current.
 #
-# WHY A PROVIDER RESOURCE AND NOT A LAMBDA
-#
-# The CloudFormation StreamScannerAcknowledger Lambda exists only because
-# CloudFormation has no authenticated channel back to Stream — the backend has
-# to mint a one-time per-region acknowledge_token at template-render time and
-# bake it into the stack. The provider is already authenticated, so the ack goes
-# straight through it, the same way every other module in this repo registers
-# itself (streamsec_aws_account_ack, streamsec_aws_cost_ack,
-# streamsec_aws_response_ack, streamsec_aws_real_time_events_ack).
+# The ack goes through the provider, which is already authenticated, the same way
+# every other module in this repo registers itself (streamsec_aws_account_ack,
+# streamsec_aws_cost_ack, streamsec_aws_response_ack,
+# streamsec_aws_real_time_events_ack).
 #
 # task_definition_arn is a tracked attribute rather than decoration: the
 # CloudFormation custom resource passes it purely to force re-invocation on

@@ -222,6 +222,11 @@ run "collection_token_is_injected_from_secrets_manager" {
     )
     error_message = "ECS resolves the secrets block with the execution role, so that role must be able to read the secret."
   }
+
+  assert {
+    condition     = jsondecode(aws_iam_role_policy.execution_secrets.policy).Statement[0].Resource == aws_secretsmanager_secret.collection_token.arn
+    error_message = "The GetSecretValue grant must be scoped to this module's own collection-token secret, never \"*\" — the execution role would otherwise read every secret in the account."
+  }
 }
 
 run "workload_iam_is_dropped_when_workload_scanning_is_off" {

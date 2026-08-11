@@ -8,8 +8,8 @@
 #   - private — where Fargate runs. No public IP; egress via the NAT.
 #
 # The scanner accepts no inbound traffic. A NAT Gateway costs ~$32/mo idle plus
-# ~$0.045/GB — a deliberate trade-off: the prior public-IP layout blocked
-# enterprise adoption on SOC 2 / CIS AWS Foundations / PCI-DSS audits.
+# ~$0.045/GB processed — the cost of running the task with no public IP, which
+# SOC 2, CIS AWS Foundations and PCI-DSS baselines require of compute workloads.
 ################################################################################
 
 data "aws_availability_zones" "available" {
@@ -224,10 +224,6 @@ resource "aws_security_group" "this" {
       error_message = "create_scanner_vpc is false, so vpc_id and subnet_ids are both required. Provide existing private subnets with NAT egress, or set create_scanner_vpc = true to have the module provision a VPC with a NAT Gateway."
     }
 
-    # The opposite contradiction, which used to apply silently: the module would
-    # build its own VPC and a billed NAT gateway while discarding both supplied
-    # inputs. Easy to hit by copying the bring-your-own block from the README and
-    # dropping the create_scanner_vpc = false line.
     precondition {
       condition     = !var.create_scanner_vpc || (var.vpc_id == null && length(var.subnet_ids) == 0)
       error_message = "vpc_id / subnet_ids were supplied while create_scanner_vpc is true, so they would be ignored and the module would provision its own VPC and NAT Gateway (~$32/mo per region). Set create_scanner_vpc = false to use the supplied network, or drop vpc_id and subnet_ids."

@@ -6,7 +6,7 @@ A Fargate task runs on a schedule, snapshots EBS volumes, extracts SBOMs, and sh
 
 This is the Terraform equivalent of the CloudFormation stack the Stream console deploys from **Integrations → Vulnerability Scanners → Stream Agentless Scanner**. Deploy a region with one or the other, not both.
 
-> **Registration is not wired up yet.** The `streamsec_aws_scanner_ack` resource that reports install state back to Stream does not exist in any published provider release, so it is commented out in `ack.tf`. The region still appears in the console — the scanner's own progress reports create the entry on first scan — but the install-state badge stays empty and destroying the module does not report `uninstalled`. Uncomment the block once the provider ships it.
+> **Registration is not wired up yet.** The `streamsec_aws_scanner_ack` resource that reports install state back to Stream does not exist in any published provider release, so it is commented out in `ack.tf`. The region still appears in the console: the scanner's own progress reports create the entry on first scan, and a region Stream creates that way is stamped `deployed`, so the badge reads **Connected**. Two gaps remain until the provider ships the resource. First, `terraform destroy` does not report `uninstalled`, and the stack metadata (`stack_id`, `stack_region`, `deployed_at`) stays blank. Second, if the region was ever touched from the console — including merely generating the template, which records `pending` — the entry already exists, so the scanner's reports only merge scan fields onto it and the install-state badge keeps whatever the console last set (`pending`, `failed`, or `uninstalled`) indefinitely. On such a region, ignore the install-state badge and read the scan-status column, which the scanner does keep current. Uncomment the block once the provider ships it.
 
 > **First-time setup: run `terraform apply` twice.**
 > This module needs your Stream Security account to be set up before it can run. If you're deploying both for the first time in the same configuration, apply the account module first, then apply everything:
@@ -102,7 +102,7 @@ The collection token the scanner authenticates uploads with is stored in Secrets
 
 ## Uninstalling
 
-`terraform destroy` removes everything. It does not yet report the region as uninstalled to Stream — that happens once the `streamsec_aws_scanner_ack` block in `ack.tf` is enabled.
+`terraform destroy` removes everything in your account. It does not yet report the region as uninstalled to Stream — that happens once the `streamsec_aws_scanner_ack` block in `ack.tf` is enabled. Until then the region keeps the green **Connected** install-state badge its first scan report set, even though nothing is deployed; the *scan* status is the honest signal — it goes stale once the heartbeats stop.
 
 ## Inputs
 
