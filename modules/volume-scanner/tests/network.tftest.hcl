@@ -26,8 +26,9 @@ mock_provider "aws" {
   }
   mock_data "aws_subnet" {
     defaults = {
-      id     = "subnet-mocked"
-      vpc_id = "vpc-scanner"
+      id                         = "subnet-mocked"
+      vpc_id                     = "vpc-scanner"
+      available_ip_address_count = 251
     }
   }
   mock_data "aws_route_tables" {
@@ -36,15 +37,16 @@ mock_provider "aws" {
   mock_data "aws_route_table" {
     defaults = {
       routes = [{
-        cidr_block           = "0.0.0.0/0"
-        nat_gateway_id       = "nat-abc123"
-        gateway_id           = ""
-        transit_gateway_id   = ""
-        vpc_endpoint_id      = ""
-        network_interface_id = ""
-        instance_id          = ""
-        core_network_arn     = ""
-        local_gateway_id     = ""
+        cidr_block                 = "0.0.0.0/0"
+        destination_prefix_list_id = ""
+        nat_gateway_id             = "nat-abc123"
+        gateway_id                 = ""
+        transit_gateway_id         = ""
+        vpc_endpoint_id            = ""
+        network_interface_id       = ""
+        instance_id                = ""
+        core_network_arn           = ""
+        local_gateway_id           = ""
       }]
     }
   }
@@ -170,15 +172,16 @@ run "byo_subnet_behind_a_transit_gateway_is_accepted" {
     target = data.aws_route_table.byo_explicit["0"]
     values = {
       routes = [{
-        cidr_block           = "0.0.0.0/0"
-        nat_gateway_id       = ""
-        gateway_id           = ""
-        transit_gateway_id   = "tgw-abc123"
-        vpc_endpoint_id      = ""
-        network_interface_id = ""
-        instance_id          = ""
-        core_network_arn     = ""
-        local_gateway_id     = ""
+        cidr_block                 = "0.0.0.0/0"
+        destination_prefix_list_id = ""
+        nat_gateway_id             = ""
+        gateway_id                 = ""
+        transit_gateway_id         = "tgw-abc123"
+        vpc_endpoint_id            = ""
+        network_interface_id       = ""
+        instance_id                = ""
+        core_network_arn           = ""
+        local_gateway_id           = ""
       }]
     }
   }
@@ -202,15 +205,16 @@ run "byo_igw_only_subnet_is_rejected" {
     target = data.aws_route_table.byo_explicit["0"]
     values = {
       routes = [{
-        cidr_block           = "0.0.0.0/0"
-        nat_gateway_id       = ""
-        gateway_id           = "igw-abc123"
-        transit_gateway_id   = ""
-        vpc_endpoint_id      = ""
-        network_interface_id = ""
-        instance_id          = ""
-        core_network_arn     = ""
-        local_gateway_id     = ""
+        cidr_block                 = "0.0.0.0/0"
+        destination_prefix_list_id = ""
+        nat_gateway_id             = ""
+        gateway_id                 = "igw-abc123"
+        transit_gateway_id         = ""
+        vpc_endpoint_id            = ""
+        network_interface_id       = ""
+        instance_id                = ""
+        core_network_arn           = ""
+        local_gateway_id           = ""
       }]
     }
   }
@@ -231,15 +235,16 @@ run "byo_subnet_without_a_default_route_is_rejected" {
     target = data.aws_route_table.byo_explicit["0"]
     values = {
       routes = [{
-        cidr_block           = "10.0.0.0/16"
-        nat_gateway_id       = ""
-        gateway_id           = "local"
-        transit_gateway_id   = ""
-        vpc_endpoint_id      = ""
-        network_interface_id = ""
-        instance_id          = ""
-        core_network_arn     = ""
-        local_gateway_id     = ""
+        cidr_block                 = "10.0.0.0/16"
+        destination_prefix_list_id = ""
+        nat_gateway_id             = ""
+        gateway_id                 = "local"
+        transit_gateway_id         = ""
+        vpc_endpoint_id            = ""
+        network_interface_id       = ""
+        instance_id                = ""
+        core_network_arn           = ""
+        local_gateway_id           = ""
       }]
     }
   }
@@ -287,15 +292,16 @@ run "byo_subnet_behind_a_nat_instance_is_accepted" {
     target = data.aws_route_table.byo_explicit["0"]
     values = {
       routes = [{
-        cidr_block           = "0.0.0.0/0"
-        nat_gateway_id       = ""
-        gateway_id           = ""
-        transit_gateway_id   = ""
-        vpc_endpoint_id      = ""
-        network_interface_id = "eni-abc123"
-        instance_id          = "i-abc123"
-        core_network_arn     = ""
-        local_gateway_id     = ""
+        cidr_block                 = "0.0.0.0/0"
+        destination_prefix_list_id = ""
+        nat_gateway_id             = ""
+        gateway_id                 = ""
+        transit_gateway_id         = ""
+        vpc_endpoint_id            = ""
+        network_interface_id       = "eni-abc123"
+        instance_id                = "i-abc123"
+        core_network_arn           = ""
+        local_gateway_id           = ""
       }]
     }
   }
@@ -319,15 +325,16 @@ run "byo_subnet_behind_cloud_wan_is_accepted" {
     target = data.aws_route_table.byo_explicit["0"]
     values = {
       routes = [{
-        cidr_block           = "0.0.0.0/0"
-        nat_gateway_id       = ""
-        gateway_id           = ""
-        transit_gateway_id   = ""
-        vpc_endpoint_id      = ""
-        network_interface_id = ""
-        instance_id          = ""
-        local_gateway_id     = ""
-        core_network_arn     = "arn:aws:networkmanager::111111111111:core-network/core-network-abc"
+        cidr_block                 = "0.0.0.0/0"
+        destination_prefix_list_id = ""
+        nat_gateway_id             = ""
+        gateway_id                 = ""
+        transit_gateway_id         = ""
+        vpc_endpoint_id            = ""
+        network_interface_id       = ""
+        instance_id                = ""
+        local_gateway_id           = ""
+        core_network_arn           = "arn:aws:networkmanager::111111111111:core-network/core-network-abc"
       }]
     }
   }
@@ -336,6 +343,78 @@ run "byo_subnet_behind_cloud_wan_is_accepted" {
     condition     = aws_security_group.this.vpc_id == "vpc-scanner"
     error_message = "A Cloud WAN core-network default route is central egress and must be accepted."
   }
+}
+
+# Regression for the reproduced plan failure: `vpc_id = module.vpc.vpc_id` is the
+# standard bring-your-own wiring, and folding `var.vpc_id != null` into the gate
+# that feeds for_each made the whole key set unknown and killed the plan.
+run "byo_vpc_id_unknown_at_plan_still_plans" {
+  command = plan
+
+  variables {
+    create_scanner_vpc = false
+    vpc_id             = "vpc-scanner"
+    subnet_ids         = ["subnet-a", "subnet-b"]
+  }
+
+  assert {
+    condition     = length(data.aws_subnet.byo) == 2
+    error_message = "Both supplied subnets must be validated; the gate feeding for_each must depend only on the two bool variables, never on vpc_id."
+  }
+}
+
+run "byo_subnet_behind_a_virtual_private_gateway_is_accepted" {
+  command = plan
+
+  variables {
+    create_scanner_vpc = false
+    vpc_id             = "vpc-scanner"
+    subnet_ids         = ["subnet-private-a"]
+  }
+
+  override_data {
+    target = data.aws_route_table.byo_explicit["0"]
+    values = {
+      routes = [{
+        cidr_block                 = "0.0.0.0/0"
+        destination_prefix_list_id = ""
+        nat_gateway_id             = ""
+        gateway_id                 = "vgw-abc123"
+        transit_gateway_id         = ""
+        vpc_endpoint_id            = ""
+        network_interface_id       = ""
+        instance_id                = ""
+        core_network_arn           = ""
+        local_gateway_id           = ""
+      }]
+    }
+  }
+
+  assert {
+    condition     = aws_security_group.this.vpc_id == "vpc-scanner"
+    error_message = "A virtual private gateway default route is on-prem egress over VPN or Direct Connect — a standard enterprise topology — and must be accepted."
+  }
+}
+
+run "byo_subnet_without_enough_free_ips_is_rejected" {
+  command = plan
+
+  variables {
+    create_scanner_vpc    = false
+    vpc_id                = "vpc-scanner"
+    subnet_ids            = ["subnet-private-a"]
+    max_concurrent_shards = 50
+  }
+
+  override_data {
+    target = data.aws_subnet.byo["0"]
+    values = {
+      vpc_id                     = "vpc-scanner"
+      available_ip_address_count = 8
+    }
+  }
+
+  expect_failures = [aws_security_group.this]
 }
 
 run "supplying_a_vpc_while_creating_one_is_rejected" {

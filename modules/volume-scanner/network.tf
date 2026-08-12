@@ -190,10 +190,19 @@ data "aws_route_tables" "byo_explicit" {
   }
 }
 
+# Gated on there being subnets to check as well as on byo_validate, so a caller
+# who sets create_scanner_vpc = false and forgets both inputs does not read this
+# at all — otherwise a null vpc_id leaves only the association.main filter, which
+# matches every VPC in the region and errors with "multiple Route Tables matched"
+# instead of the precondition that names the missing input.
+#
+# vpc_id is an ARGUMENT, not count/for_each, so an unknown value is fine here:
+# Terraform simply defers the read. The fallback covers a caller who supplied
+# subnets but omitted vpc_id — the subnets themselves name the VPC.
 data "aws_route_table" "byo_main" {
-  count = local.byo_validate ? 1 : 0
+  count = local.byo_validate && length(local.byo_subnets) > 0 ? 1 : 0
 
-  vpc_id = var.vpc_id
+  vpc_id = var.vpc_id != null ? var.vpc_id : try(values(data.aws_subnet.byo)[0].vpc_id, null)
 
   filter {
     name   = "association.main"
@@ -253,6 +262,11 @@ resource "aws_security_group" "this" {
     }
 
     precondition {
+      condition     = !local.byo_validate || length(local.byo_subnets) == 0 || local.byo_total_free_ips >= local.scanner_peak_task_count
+      error_message = "max_concurrent_shards = ${var.max_concurrent_shards} needs ${local.scanner_peak_task_count} concurrent task ENIs (the orchestrator plus its children), but the supplied subnets have only ${local.byo_total_free_ips} free IP addresses between them. Supply more or larger subnets, or lower max_concurrent_shards."
+    }
+
+    precondition {
       condition     = length(local.byo_bad_subnets) == 0
       error_message = <<-EOT
         Scanner subnet check failed: ${join("; ", local.byo_bad_subnets)}.
@@ -260,6 +274,20 @@ resource "aws_security_group" "this" {
       EOT
     }
   }
+}
+
+locals {
+  # Same peak-ENI arithmetic as the module-managed subnet, but measured rather
+  # than derived: available_ip_address_count is live free capacity, so a subnet
+  # shared with other workloads is judged on what is actually left. Fargate in
+  # awsvpc mode takes one address per task, and the orchestrator plus every child
+  # runs at once.
+  #
+  # Reported across the whole supplied set, since the scanner spreads tasks over
+  # all of them.
+  byo_total_free_ips = local.byo_validate ? sum(concat([0], [
+    for subnet in data.aws_subnet.byo : subnet.available_ip_address_count
+  ])) : 0
 }
 
 resource "aws_vpc_security_group_egress_rule" "all" {

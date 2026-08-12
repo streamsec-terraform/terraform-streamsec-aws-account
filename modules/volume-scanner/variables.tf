@@ -85,15 +85,28 @@ variable "max_concurrent_shards" {
 ################################################################################
 
 variable "task_cpu" {
-  description = "Fargate task CPU units. The default is a t3.xlarge profile (4 vCPU / 16 GB) sized for max_concurrent_shards = 10."
+  description = "Fargate task CPU units. The default is a t3.xlarge profile (4 vCPU / 16 GB) sized for max_concurrent_shards = 10. Must be one of Fargate's discrete sizes: 256, 512, 1024, 2048, 4096, 8192, 16384."
   type        = string
   default     = "4096"
+
+  # Fargate accepts only these seven values. Anything else is rejected by
+  # RegisterTaskDefinition mid-apply, after the VPC, NAT gateway, cluster, secret
+  # and four IAM roles already exist — so catch it at the input instead.
+  validation {
+    condition     = contains(["256", "512", "1024", "2048", "4096", "8192", "16384"], var.task_cpu)
+    error_message = "task_cpu must be one of Fargate's supported values: 256, 512, 1024, 2048, 4096, 8192, 16384."
+  }
 }
 
 variable "task_memory" {
-  description = "Fargate task memory in MiB. Raise this before raising max_concurrent_shards — Syft uses 250-400 MB per concurrent host scan."
+  description = "Fargate task memory in MiB. Raise this before raising max_concurrent_shards — Syft uses 250-400 MB per concurrent host scan. Must be a value Fargate allows for the chosen task_cpu."
   type        = string
   default     = "16384"
+
+  validation {
+    condition     = can(tonumber(var.task_memory)) && tonumber(var.task_memory) >= 512
+    error_message = "task_memory must be a number of MiB, at least 512."
+  }
 }
 
 variable "ephemeral_storage_size_gib" {
@@ -130,16 +143,22 @@ variable "scanner_vpc_cidr" {
   type        = string
   default     = "10.255.0.0/24"
 
-  # cidrsubnet() alone succeeds all the way down to /31, so it has to be paired
-  # with an explicit prefix check: AWS rejects any subnet smaller than /28, and
-  # this CIDR is halved before it becomes a subnet. Without the second condition
-  # a /28 plans clean and then fails mid-apply with InvalidSubnet.Range, after
-  # the VPC, IGW and EIP already exist.
+  # BOTH bounds matter, and both fail mid-apply if unchecked.
+  #
+  # Lower: cidrsubnet() alone succeeds all the way down to /31, but AWS rejects
+  # any subnet smaller than /28 and this CIDR is halved before it becomes one, so
+  # a /28 VPC plans clean and then fails with InvalidSubnet.Range.
+  #
+  # Upper: AWS rejects a VPC CIDR larger than /16, so carving the scanner out of
+  # a supernet ("10.0.0.0/8") plans clean and fails with InvalidVpc.Range — after
+  # the availability-zone lookup has run and the rest of the graph is in flight.
   validation {
     condition = can(cidrsubnet(var.scanner_vpc_cidr, 1, 1)) && can(
-      tonumber(split("/", var.scanner_vpc_cidr)[1]) <= 27
-    ) && tonumber(split("/", var.scanner_vpc_cidr)[1]) <= 27
-    error_message = "scanner_vpc_cidr must be a valid IPv4 CIDR block of /27 or larger — it is split into two subnets, and AWS rejects subnets smaller than /28."
+      tonumber(split("/", var.scanner_vpc_cidr)[1])
+      ) && tonumber(split("/", var.scanner_vpc_cidr)[1]) <= 27 && tonumber(
+      split("/", var.scanner_vpc_cidr)[1]
+    ) >= 16
+    error_message = "scanner_vpc_cidr must be a valid IPv4 CIDR block between /16 and /27. AWS rejects VPCs larger than /16, and the block is split into two subnets, which AWS rejects below /28."
   }
 }
 
@@ -189,9 +208,34 @@ variable "collection_token_secret_name" {
 }
 
 variable "secret_recovery_window_days" {
-  description = "Days Secrets Manager waits before deleting the collection-token secret. 0 deletes immediately, which allows re-applying the module in the same region without a name collision."
+  description = "Days Secrets Manager waits before deleting the collection-token secret. 0 deletes immediately. Any other value must be 7-30, the range Secrets Manager accepts."
   type        = number
   default     = 0
+
+  # Secrets Manager accepts 0 (force delete) or 7-30. Everything in between is
+  # rejected by the DeleteSecret call at destroy time — the worst moment to find
+  # out, because the rest of the stack is already gone.
+  validation {
+    condition     = var.secret_recovery_window_days == 0 || (var.secret_recovery_window_days >= 7 && var.secret_recovery_window_days <= 30)
+    error_message = "secret_recovery_window_days must be 0 (delete immediately) or between 7 and 30."
+  }
+}
+
+variable "scan_encrypted_volumes" {
+  description = "Grant the scanner task the KMS permissions it needs to read snapshots of ENCRYPTED EBS volumes. Leaving this off means encrypted instances are silently skipped — the scanner snapshots them, fails every block read, and reports no findings for them with no error surfaced anywhere. Turn it off only if every volume in the region is unencrypted, or if you deliberately want encrypted volumes excluded."
+  type        = bool
+  default     = true
+}
+
+variable "kms_key_arns" {
+  description = "KMS keys the scanner may use to read encrypted volumes. Defaults to [\"*\"] because customer CMK ARNs are not knowable at plan time; narrow it to the specific EBS keys in the region if you can enumerate them. Ignored when scan_encrypted_volumes is false."
+  type        = list(string)
+  default     = ["*"]
+
+  validation {
+    condition     = length(var.kms_key_arns) > 0
+    error_message = "kms_key_arns must not be empty — use scan_encrypted_volumes = false to drop the KMS grants entirely."
+  }
 }
 
 variable "log_retention_days" {

@@ -42,3 +42,13 @@ output "nat_gateway_public_ip" {
   description = "Stable egress IP of the scanner's NAT Gateway, for allowlisting in upstream firewalls. Null when create_scanner_vpc is false, since egress is then through infrastructure this module does not own."
   value       = var.create_scanner_vpc ? aws_eip.nat[0].public_ip : null
 }
+
+output "collection_token_secret_arn" {
+  description = "ARN of the Secrets Manager secret holding the scanner's collection token"
+  value       = aws_secretsmanager_secret.collection_token.arn
+}
+
+output "collection_token_secret_name" {
+  description = "Name of the Secrets Manager secret holding the scanner's collection token. Carries a random suffix, so read it from here rather than reconstructing it."
+  value       = aws_secretsmanager_secret.collection_token.name
+}

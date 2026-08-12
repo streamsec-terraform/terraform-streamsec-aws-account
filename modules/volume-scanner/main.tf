@@ -25,11 +25,16 @@ locals {
   # Getting this wrong is silent: the scanner tags SBOMs with a tenant that does
   # not exist, ingest drops them, and the console still shows the region healthy.
   derived_tenant_name = split(".", replace(replace(local.api_url, "https://", ""), "http://", ""))[0]
-  tenant_name         = var.tenant_name != null ? var.tenant_name : local.derived_tenant_name
+  tenant_name         = var.tenant_name != null ? trimspace(var.tenant_name) : local.derived_tenant_name
 
   stream_scan_url = "${local.api_url}/openapi/vulnerabilities/stream_scan/raw"
 
-  customer_id = var.customer_id == null ? "" : var.customer_id
+  # Trimmed, not just null-checked. A workspace id pasted from the console with a
+  # trailing space or newline is non-empty, so it passes the precondition below
+  # and then ships verbatim as COLLECTOR_CUSTOMER_ID / COLLECTOR_STREAM_SCAN_WORKSPACE.
+  # Ingest drops SBOMs tagged with a workspace that does not exist, and the
+  # console still shows the region healthy — zero findings, no error anywhere.
+  customer_id = var.customer_id == null ? "" : trimspace(var.customer_id)
 
   workload_kind_list    = [for kind in split(",", var.workload_kinds) : trimspace(kind) if trimspace(kind) != ""]
   scan_workloads        = length(local.workload_kind_list) > 0
@@ -71,30 +76,49 @@ locals {
     "${local.task_definition_family_arn}:*",
   ]
 
-  # Bring-your-own-subnet mode is only active once both inputs are present;
-  # the guard keeps the validation data sources from being read with a null
-  # vpc_id, so a missing input surfaces as the precondition message in
-  # network.tf rather than a provider error.
-  byo_enabled  = !var.create_scanner_vpc && var.vpc_id != null && length(var.subnet_ids) > 0
-  byo_validate = local.byo_enabled && var.validate_subnet_egress
-
-  # Keyed by list INDEX, not by subnet id. for_each keys must be known at plan
-  # time, and `subnet_ids = module.vpc.private_subnets` — the common wiring —
-  # produces ids that are not known until apply. Indexes are known whenever the
-  # list length is; unknown *values* are fine, and Terraform simply defers the
-  # preconditions to apply. When even the length is unknown, set
-  # validate_subnet_egress = false.
+  # TWO SEPARATE GATES. Terraform imposes very different rules on them, and
+  # collapsing them into one is the bug this shape exists to prevent.
   #
-  # validate_subnet_egress = false switches off BOTH supplied-subnet checks, the
-  # wrong-VPC one included, not just the route walk. That is deliberate: the
-  # escape hatch exists for subnet lists whose LENGTH is unknown at plan time,
-  # and a for_each over such a list is rejected outright whichever check it
-  # feeds. Splitting the two would leave the flag unable to do the one job it
-  # was added for.
+  # byo_enabled answers "did the caller ask for bring-your-own-subnet mode and
+  # supply both inputs". It feeds PRECONDITIONS ONLY, where an unknown value is
+  # harmless — Terraform just defers the check to apply.
+  #
+  # byo_validate decides whether the validation data sources are read at all, so
+  # it feeds count/for_each and MUST be known at plan time in every case. It is
+  # therefore built exclusively from the two bool variables. Never fold vpc_id or
+  # length(subnet_ids) in here:
+  #
+  #   - `var.vpc_id != null` is unknown whenever vpc_id is an attribute of a VPC
+  #     created in the same apply — i.e. the standard `vpc_id = module.vpc.vpc_id`
+  #     wiring — which made the whole key set unknown and failed the plan with
+  #     four "Invalid for_each argument" errors naming an internal local.
+  #   - `length(var.subnet_ids) > 0` is unknown for a list of unknown length, and
+  #     cty's && does not short-circuit on an unknown left operand, so
+  #     `unknown && false` is unknown rather than false. That made
+  #     validate_subnet_egress = false unable to switch anything off — the one
+  #     job the flag exists for.
+  byo_enabled  = !var.create_scanner_vpc && var.vpc_id != null && length(var.subnet_ids) > 0
+  byo_validate = !var.create_scanner_vpc && var.validate_subnet_egress
+
+  # Keyed by list INDEX, not by subnet id: for_each keys must be known at plan
+  # time and `subnet_ids = module.vpc.private_subnets` produces ids that are not.
+  # Indexes are known whenever the list LENGTH is, and unknown values are fine —
+  # they only defer the preconditions to apply.
+  #
+  # An empty subnet_ids yields an empty map, so the "you must supply both inputs"
+  # precondition in network.tf is what the operator sees, not a provider error.
+  #
+  # When even the length is unknown, set validate_subnet_egress = false. That
+  # switches off BOTH supplied-subnet checks, the wrong-VPC one included, because
+  # a for_each over an unknown-length list is rejected whichever check it feeds.
   byo_subnets = local.byo_validate ? { for index, subnet_id in var.subnet_ids : tostring(index) => subnet_id } : {}
 
+  # Guarded on vpc_id being set: with vpc_id null every subnet would be reported
+  # as "wrong VPC" on top of the real "vpc_id is required" precondition, burying
+  # the message that actually tells the operator what to do.
   byo_wrong_vpc_subnets = [
-    for subnet in data.aws_subnet.byo : subnet.id if subnet.vpc_id != var.vpc_id
+    for subnet in data.aws_subnet.byo : subnet.id
+    if var.vpc_id != null && subnet.vpc_id != var.vpc_id
   ]
 
   # Each subnet's effective route table. The explicit-association / main-route-table
@@ -112,6 +136,8 @@ locals {
     for key, route_table in local.byo_route_tables :
     key => [
       for route in route_table.routes : {
+        cidr_block           = coalesce(try(route.cidr_block, ""), "-")
+        prefix_list_id       = coalesce(try(route.destination_prefix_list_id, ""), "-")
         gateway_id           = coalesce(try(route.gateway_id, ""), "-")
         nat_gateway_id       = coalesce(try(route.nat_gateway_id, ""), "-")
         transit_gateway_id   = coalesce(try(route.transit_gateway_id, ""), "-")
@@ -121,7 +147,14 @@ locals {
         core_network_arn     = coalesce(try(route.core_network_arn, ""), "-")
         local_gateway_id     = coalesce(try(route.local_gateway_id, ""), "-")
       }
-      if coalesce(try(route.cidr_block, ""), "-") == "0.0.0.0/0"
+      # A literal default route, OR a route whose destination is a managed prefix
+      # list. A prefix list's CONTENTS are not exposed on the route table, so we
+      # cannot prove it carries 0.0.0.0/0 — but rejecting the subnet would be
+      # equally a guess, and blocking a valid deployment is the worse error. Same
+      # philosophy as the Transit Gateway case below: accept, and let the task
+      # surface a genuine egress failure at runtime.
+      if coalesce(try(route.cidr_block, ""), "-") == "0.0.0.0/0" ||
+      coalesce(try(route.destination_prefix_list_id, ""), "-") != "-"
     ]
   }
 
@@ -131,7 +164,11 @@ locals {
   # inspection/firewall appliances (fck-nat, Palo Alto, Fortinet) appear as
   # network_interface_id / instance_id, and are standard enterprise egress.
   # Cloud WAN central egress appears as core_network_arn, Outposts as
-  # local_gateway_id — both are valid default routes.
+  # local_gateway_id, and on-prem egress over Site-to-Site VPN or Direct Connect
+  # appears as a virtual private gateway (gateway_id "vgw-") — all valid default
+  # routes. vgw- in particular is a standard enterprise topology, and rejecting
+  # it forced operators onto validate_subnet_egress = false, which switches off
+  # the wrong-VPC check too.
   #
   # KNOWN GAP vs the CloudFormation NetworkPrecheck: that Lambda also skipped
   # routes whose State is not "active", rejecting a blackholed default route
@@ -148,14 +185,17 @@ locals {
       route.vpc_endpoint_id != "-" ||
       route.core_network_arn != "-" ||
       route.local_gateway_id != "-" ||
-      startswith(route.gateway_id, "vpce-")
+      route.prefix_list_id != "-" ||
+      startswith(route.gateway_id, "vpce-") ||
+      startswith(route.gateway_id, "vgw-")
     ]) > 0
   }
 
   byo_subnet_igw_only = {
     for key, routes in local.byo_default_routes :
     key => !local.byo_subnet_has_egress[key] && length([
-      for route in routes : route if startswith(route.gateway_id, "igw-")
+      for route in routes : route
+      if route.cidr_block == "0.0.0.0/0" && startswith(route.gateway_id, "igw-")
     ]) > 0
   }
 
@@ -163,7 +203,7 @@ locals {
     for key, subnet_id in local.byo_subnets :
     format("%s (%s)", subnet_id, local.byo_subnet_igw_only[key]
       ? "public subnet — 0.0.0.0/0 routes through an Internet Gateway, but the scanner task runs with no public IP"
-    : "no 0.0.0.0/0 route to a NAT gateway, NAT instance, appliance ENI, VPC endpoint, Transit Gateway, Cloud WAN core network or Outposts local gateway")
+    : "no 0.0.0.0/0 route to a NAT gateway, NAT instance, appliance ENI, VPC endpoint, Transit Gateway, virtual private gateway, Cloud WAN core network or Outposts local gateway")
     if !local.byo_subnet_has_egress[key]
   ]
 }
@@ -183,8 +223,21 @@ locals {
 # would. Treat terraform.tfstate as secret material regardless.
 ################################################################################
 
+# Random suffix, matching modules/eks-audit. The CloudFormation template gives
+# the secret no Name at all so CloudFormation auto-generates a unique one; a
+# deterministic name re-introduces exactly what that avoids. With any non-zero
+# secret_recovery_window_days, destroy-then-apply — the ordinary way to move a
+# scanner or change scanner_vpc_cidr — otherwise fails for up to 30 days with
+# "a secret with this name is already scheduled for deletion", after the VPC,
+# NAT gateway and EIP already exist and with no force-delete escape.
+resource "random_string" "secret_suffix" {
+  length  = 6
+  upper   = false
+  special = false
+}
+
 resource "aws_secretsmanager_secret" "collection_token" {
-  name                    = "${local.name_prefix}${var.collection_token_secret_name}-${local.region}"
+  name                    = "${local.name_prefix}${var.collection_token_secret_name}-${local.region}-${random_string.secret_suffix.result}"
   description             = "Stream Security volume scanner collection token"
   recovery_window_in_days = var.secret_recovery_window_days
 
@@ -281,7 +334,7 @@ resource "aws_ecs_task_definition" "this" {
   lifecycle {
     precondition {
       condition     = local.customer_id != ""
-      error_message = "customer_id is required — set it to the same workspace_id configured on the streamsec provider. The scanner sends it as COLLECTOR_CUSTOMER_ID / COLLECTOR_STREAM_SCAN_WORKSPACE."
+      error_message = "customer_id is required and must not be blank — set it to the same workspace_id configured on the streamsec provider. The scanner sends it as COLLECTOR_CUSTOMER_ID / COLLECTOR_STREAM_SCAN_WORKSPACE."
     }
   }
 }
@@ -366,7 +419,9 @@ resource "aws_lambda_function" "initial_scan" {
   function_name = "${local.regional_name}-initial-scan"
   role          = aws_iam_role.initial_scan[0].arn
   handler       = "initial_scan.handler"
-  runtime       = "python3.13"
+  # Matches the CloudFormation template's runtime, so the two deployments share a
+  # deprecation clock and a bundled botocore rather than drifting apart.
+  runtime = "python3.12"
 
   # Room for the function's retry ladder (50s of backoff) plus the RunTask calls
   # themselves. The retries cover IAM eventual consistency: the policies this
@@ -409,6 +464,10 @@ resource "aws_lambda_invocation" "initial_scan" {
     aws_route_table_association.private,
     aws_vpc_security_group_egress_rule.all,
     aws_iam_role_policy.initial_scan,
+    # Without this the invocation can run before the role can write logs. The
+    # function deliberately swallows every failure, so CloudWatch is the ONLY
+    # place a failed first scan is visible — losing it makes the failure total.
+    aws_iam_role_policy_attachment.initial_scan_basic,
     aws_iam_role_policy.task,
     aws_iam_role_policy.orchestrator,
     aws_iam_role_policy.execution_secrets,
@@ -416,11 +475,19 @@ resource "aws_lambda_invocation" "initial_scan" {
     aws_cloudwatch_event_target.daily,
   ]
 
-  # Fire once, at create. Re-running on every apply would spam scans, and the
-  # CloudFormation trigger this replaces is a Create-only custom resource that
-  # no-ops on update. To force another immediate scan, taint this resource or run
-  # the task from the ECS console.
+  # Fire once per Lambda, not once per apply. Re-running on every apply would
+  # spam scans, and the CloudFormation trigger this replaces is a Create-only
+  # custom resource that no-ops on update.
+  #
+  # ignore_changes lists the inputs explicitly rather than using `all`, because
+  # `all` also suppressed function_name: renaming the deployment (changing
+  # resource_prefix) replaces the Lambda, and the invocation then showed no diff,
+  # kept a stale function_name in state, and the renamed deployment produced
+  # nothing until the next 03:00 UTC fire. replace_triggered_by re-runs the
+  # invocation exactly when the function is genuinely replaced.
   lifecycle {
-    ignore_changes = all
+    ignore_changes = [input]
+
+    replace_triggered_by = [aws_lambda_function.initial_scan[0]]
   }
 }

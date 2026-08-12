@@ -63,6 +63,50 @@ locals {
     },
   ]
 
+  # EBS encryption. Without these the scanner creates a snapshot of an encrypted
+  # volume successfully and then every ebs:GetSnapshotBlock against it fails —
+  # the EBS direct API requires the CALLER's identity policy to allow use of the
+  # volume's KMS key, and that is true even for the AWS-managed aws/ebs key,
+  # whose key policy defers to IAM. The failure is silent end to end: the task
+  # exits, apply reports success, the console shows the region healthy, and the
+  # customer sees zero findings for every encrypted instance. With EBS
+  # encryption-by-default being a CIS AWS Foundations control, that is the
+  # majority of the fleets this module targets.
+  #
+  # Actions per
+  # https://docs.aws.amazon.com/ebs/latest/userguide/ebs-encryption-requirements.html:
+  #   Decrypt / DescribeKey              - read blocks out of an encrypted snapshot
+  #   GenerateDataKeyWithoutPlaintext,
+  #   ReEncryptFrom / ReEncryptTo,
+  #   CreateGrant                        - ec2:CreateSnapshot of an encrypted volume
+  #
+  # Resource defaults to "*" because customer CMK ARNs are not knowable at plan
+  # time; kms_key_arns narrows it for operators who can enumerate their keys.
+  # CreateGrant is split out and conditioned on kms:GrantIsForAWSResource, the
+  # least-privilege pattern AWS documents, so the role cannot mint grants of its
+  # own — only ones EC2 creates on its behalf.
+  kms_statements = [
+    {
+      Sid    = "ReadEncryptedVolumes"
+      Effect = "Allow"
+      Action = [
+        "kms:Decrypt",
+        "kms:DescribeKey",
+        "kms:GenerateDataKeyWithoutPlaintext",
+        "kms:ReEncryptFrom",
+        "kms:ReEncryptTo",
+      ]
+      Resource = var.kms_key_arns
+    },
+    {
+      Sid       = "GrantEC2SnapshotAccessToKeys"
+      Effect    = "Allow"
+      Action    = "kms:CreateGrant"
+      Resource  = var.kms_key_arns
+      Condition = { Bool = { "kms:GrantIsForAWSResource" = "true" } }
+    },
+  ]
+
   workload_statements = concat(
     # Filtered with a `for` rather than a conditional: the two arms of a ternary
     # must unify to one type, and an empty tuple cannot unify with a tuple of
@@ -176,7 +220,8 @@ resource "aws_iam_role_policy" "task" {
       # entirely, and leaving these attached would keep account-wide Lambda, ECS
       # and ECR read access on the role that an IAM/CSPM review — or anything
       # with code execution in the scanner container — could still use.
-      local.workload_statements
+      local.workload_statements,
+      [for statement in local.kms_statements : statement if var.scan_encrypted_volumes],
     )
   })
 }

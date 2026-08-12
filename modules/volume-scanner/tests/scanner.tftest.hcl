@@ -185,9 +185,16 @@ run "resource_prefix_is_applied" {
     error_message = "resource_prefix must prefix the resource names, and names must carry the region so two regions in one account do not collide."
   }
 
+  # startswith, not equality: the name carries a random suffix so that
+  # destroy-then-apply works with a non-zero secret_recovery_window_days.
   assert {
-    condition     = aws_secretsmanager_secret.collection_token.name == "acme-streamsec-scanner-collection-token-us-east-1"
+    condition     = startswith(aws_secretsmanager_secret.collection_token.name, "acme-streamsec-scanner-collection-token-us-east-1-")
     error_message = "The Secrets Manager secret must carry resource_prefix too — without it two prefixed deployments in one account/region collide on the same secret name."
+  }
+
+  assert {
+    condition     = length(aws_secretsmanager_secret.collection_token.name) > length("acme-streamsec-scanner-collection-token-us-east-1-")
+    error_message = "The secret name must end in a random suffix, or a non-zero secret_recovery_window_days blocks destroy-then-apply for the whole window."
   }
 }
 
@@ -313,20 +320,147 @@ run "workload_iam_is_scoped_to_ecs_only" {
 run "run_task_is_scoped_to_the_scanner_cluster" {
   command = apply
 
+  # flatten() normalises `Action = "ecs:RunTask"` and `Action = ["ecs:RunTask"]`
+  # to the same shape. Matching the bare string only — as this test first did —
+  # made a pure-style change to a list silently empty the filter, and alltrue([])
+  # is true, so the one test guarding "no role can launch the scanner task into
+  # another cluster" would have gone permanently green while checking nothing.
   assert {
-    condition = alltrue([
+    condition = length([
       for policy in [
         aws_iam_role_policy.orchestrator.policy,
         aws_iam_role_policy.events.policy,
         aws_iam_role_policy.initial_scan[0].policy,
-        ] : alltrue([
-          for s in jsondecode(policy).Statement :
-          try(s.Condition.ArnEquals["ecs:cluster"], null) == aws_ecs_cluster.this.arn
-          if s.Action == "ecs:RunTask"
-      ])
-    ])
+        ] : [
+        for s in jsondecode(policy).Statement :
+        s if contains(flatten([s.Action]), "ecs:RunTask")
+      ]
+    ]) == 3
+    error_message = "Expected exactly one ecs:RunTask statement in each of the three policies (orchestrator, events, initial scan). A missing one means a role lost its grant, or the filter stopped matching."
+  }
+
+  assert {
+    condition = alltrue(flatten([
+      for policy in [
+        aws_iam_role_policy.orchestrator.policy,
+        aws_iam_role_policy.events.policy,
+        aws_iam_role_policy.initial_scan[0].policy,
+        ] : [
+        for s in jsondecode(policy).Statement :
+        try(s.Condition.ArnEquals["ecs:cluster"], null) == aws_ecs_cluster.this.arn
+        if contains(flatten([s.Action]), "ecs:RunTask")
+      ]
+    ]))
     error_message = "Every ecs:RunTask grant must be conditioned on the scanner's own cluster, or these roles could launch the task into any cluster in the account."
   }
+}
+
+run "kms_grants_are_present_by_default" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for sid in ["ReadEncryptedVolumes", "GrantEC2SnapshotAccessToKeys"] :
+      contains([for s in jsondecode(aws_iam_role_policy.task.policy).Statement : s.Sid], sid)
+    ])
+    error_message = "Without KMS grants the scanner snapshots an encrypted volume successfully and then fails every block read, reporting zero findings with no error — so they must be on by default."
+  }
+
+  assert {
+    condition = try(jsondecode(aws_iam_role_policy.task.policy).Statement[
+      index([for s in jsondecode(aws_iam_role_policy.task.policy).Statement : s.Sid], "GrantEC2SnapshotAccessToKeys")
+    ].Condition.Bool["kms:GrantIsForAWSResource"], null) == "true"
+    error_message = "kms:CreateGrant must be conditioned on kms:GrantIsForAWSResource, so the role cannot mint grants of its own."
+  }
+}
+
+run "kms_grants_can_be_dropped" {
+  command = plan
+
+  variables {
+    scan_encrypted_volumes = false
+  }
+
+  assert {
+    condition = length([
+      for s in jsondecode(aws_iam_role_policy.task.policy).Statement :
+      s if startswith(s.Sid, "ReadEncryptedVolumes") || startswith(s.Sid, "GrantEC2")
+    ]) == 0
+    error_message = "scan_encrypted_volumes = false must remove the KMS statements entirely, not merely stop using them."
+  }
+}
+
+run "kms_grants_can_be_scoped_to_named_keys" {
+  command = plan
+
+  variables {
+    kms_key_arns = ["arn:aws:kms:us-east-1:111111111111:key/abcd"]
+  }
+
+  assert {
+    condition = alltrue([
+      for s in jsondecode(aws_iam_role_policy.task.policy).Statement :
+      s.Resource == ["arn:aws:kms:us-east-1:111111111111:key/abcd"]
+      if startswith(s.Sid, "ReadEncryptedVolumes") || startswith(s.Sid, "GrantEC2")
+    ])
+    error_message = "kms_key_arns must narrow the KMS grants to the supplied keys."
+  }
+}
+
+run "whitespace_only_customer_id_is_rejected" {
+  command = plan
+
+  variables {
+    customer_id = "   "
+  }
+
+  expect_failures = [aws_ecs_task_definition.this]
+}
+
+run "customer_id_is_trimmed" {
+  command = apply
+
+  variables {
+    customer_id = "  customer-abc\n"
+  }
+
+  assert {
+    condition = alltrue([
+      for pair in ["COLLECTOR_CUSTOMER_ID=customer-abc", "COLLECTOR_STREAM_SCAN_WORKSPACE=customer-abc"] :
+      contains([for e in jsondecode(aws_ecs_task_definition.this.container_definitions)[0].environment : "${e.name}=${e.value}"], pair)
+    ])
+    error_message = "A pasted workspace id with surrounding whitespace must be trimmed — shipping it verbatim tags every SBOM with a workspace that does not exist and ingest drops them silently."
+  }
+}
+
+run "oversized_vpc_cidr_is_rejected" {
+  command = plan
+
+  variables {
+    scanner_vpc_cidr = "10.0.0.0/8"
+  }
+
+  expect_failures = [var.scanner_vpc_cidr]
+}
+
+run "invalid_fargate_cpu_is_rejected" {
+  command = plan
+
+  variables {
+    task_cpu = "3000"
+  }
+
+  expect_failures = [var.task_cpu]
+}
+
+run "invalid_secret_recovery_window_is_rejected" {
+  command = plan
+
+  variables {
+    secret_recovery_window_days = 3
+  }
+
+  expect_failures = [var.secret_recovery_window_days]
 }
 
 run "tenant_name_can_be_overridden" {
