@@ -483,11 +483,21 @@ resource "aws_lambda_invocation" "initial_scan" {
   # `all` also suppressed function_name: renaming the deployment (changing
   # resource_prefix) replaces the Lambda, and the invocation then showed no diff,
   # kept a stale function_name in state, and the renamed deployment produced
-  # nothing until the next 03:00 UTC fire. replace_triggered_by re-runs the
-  # invocation exactly when the function is genuinely replaced.
+  # nothing until the next 03:00 UTC fire.
+  #
+  # replace_triggered_by keys on function_name, NOT on the whole resource.
+  # Referencing the resource re-fires on any in-place UPDATE to it as well as on
+  # replacement, and the Lambda's environment carries the task-definition ARN —
+  # so every toggle, image, sizing or shard-count change produced a new revision
+  # and kicked off a full account scan on apply. Verified against real AWS:
+  # flipping scan_databases planned "aws_lambda_invocation ... will be replaced
+  # due to changes in replace_triggered_by". That contradicts the CloudFormation
+  # trigger this replaces, which is Create-only and no-ops on stack update.
+  # function_name changes only when the deployment is renamed, which is exactly
+  # when the function is genuinely replaced.
   lifecycle {
     ignore_changes = [input]
 
-    replace_triggered_by = [aws_lambda_function.initial_scan[0]]
+    replace_triggered_by = [aws_lambda_function.initial_scan[0].function_name]
   }
 }
