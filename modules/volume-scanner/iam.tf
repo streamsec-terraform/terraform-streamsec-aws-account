@@ -63,15 +63,22 @@ locals {
     },
   ]
 
-  # EBS encryption. Without these the scanner creates a snapshot of an encrypted
-  # volume successfully and then every ebs:GetSnapshotBlock against it fails —
-  # the EBS direct API requires the CALLER's identity policy to allow use of the
-  # volume's KMS key, and that is true even for the AWS-managed aws/ebs key,
-  # whose key policy defers to IAM. The failure is silent end to end: the task
-  # exits, apply reports success, the console shows the region healthy, and the
-  # customer sees zero findings for every encrypted instance. With EBS
-  # encryption-by-default being a CIS AWS Foundations control, that is the
-  # majority of the fleets this module targets.
+  # EBS encryption. Needed for volumes encrypted with a CUSTOMER-MANAGED CMK,
+  # whose default key policy contains only "Enable IAM User Permissions" and so
+  # delegates authorisation to IAM: the EBS direct API then requires the caller's
+  # identity policy to allow the key as well.
+  #
+  # NOT needed for the AWS-managed aws/ebs key, which grants account principals
+  # directly in its own key policy. Verified by experiment in 014466394144: with
+  # these statements removed, an aws/ebs-encrypted instance scanned fine while a
+  # CMK-encrypted one failed with
+  #   ListSnapshotBlocks ... ResourceNotFoundException: KMS key not found
+  # (KMS reports authorisation failures as not-found). Restoring them made the
+  # same instance scan 701 packages.
+  #
+  # The failure is silent end to end: the task exits, apply reports success, the
+  # console shows the region healthy, and the customer sees zero findings for
+  # every CMK-encrypted instance.
   #
   # Actions per
   # https://docs.aws.amazon.com/ebs/latest/userguide/ebs-encryption-requirements.html:

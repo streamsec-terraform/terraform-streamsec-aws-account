@@ -115,7 +115,9 @@ The task role is least-privilege:
 
 ### Encrypted volumes
 
-The EBS direct API requires the **caller's** identity policy to allow use of the volume's KMS key — true even for the AWS-managed `aws/ebs` key, whose key policy defers to IAM. Without it the scanner snapshots an encrypted volume successfully and then fails every block read: the task exits, `terraform apply` reports success, the console shows the region healthy, and you see zero findings for every encrypted instance.
+Volumes encrypted with a **customer-managed CMK** need the scanner's identity policy to allow that key. A CMK's default key policy delegates authorisation to IAM, so the EBS direct API rejects the block reads without it — and it reports the rejection as `ResourceNotFoundException: KMS key not found`, not as an access-denied. Without the grants the scanner snapshots the volume successfully and then fails every block read: the task exits, `terraform apply` reports success, the console shows the region healthy, and you see zero findings for those instances.
+
+Volumes encrypted with the **AWS-managed `aws/ebs` key** scan fine without these grants — that key policy grants account principals directly. So the gap only bites accounts using their own CMKs, which is most regulated ones.
 
 `scan_encrypted_volumes` is therefore **on by default**. It defaults to `kms_key_arns = ["*"]` because customer CMK ARNs are not knowable at plan time; narrow it to your region's EBS keys if you can enumerate them, or set `scan_encrypted_volumes = false` to drop the grants entirely and accept that encrypted instances go unscanned.
 
