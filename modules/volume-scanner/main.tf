@@ -14,6 +14,10 @@ data "streamsec_aws_account" "this" {
 }
 
 locals {
+  region     = data.aws_region.current.region
+  account_id = data.aws_caller_identity.current.account_id
+  partition  = data.aws_partition.current.partition
+
   name_prefix = var.resource_prefix != "" ? "${var.resource_prefix}-" : ""
 
   # The "-tf" marker is load-bearing, not cosmetic. The CloudFormation stack the
@@ -31,7 +35,8 @@ locals {
   # Nothing external depends on these names. The console keys scanner regions by
   # region, and the family name is only ever resolved by the orchestrator through
   # its own COLLECTOR_ECS_TASK_DEF_ARN.
-  name = "${local.name_prefix}streamsec-ebs-scanner-tf"
+  name          = "${local.name_prefix}streamsec-ebs-scanner-tf"
+  regional_name = "${local.name}-${local.region}"
 
   # What the console's CloudFormation stack calls its cluster in this region.
   # Used only to detect that a CloudFormation-deployed scanner is already running
@@ -44,7 +49,7 @@ locals {
   existing_cluster_arns = data.aws_ecs_clusters.existing.cluster_arns == null ? [] : data.aws_ecs_clusters.existing.cluster_arns
 
   cloudformation_coexistence_error = <<-EOT
-    A CloudFormation-deployed Stream scanner is already running in ${local.region} (ECS cluster "streamsec-ebs-scanner-${local.region}").
+    A CloudFormation-deployed Stream scanner is already running in ${local.region} (ECS cluster "${local.cloudformation_cluster_name}").
     Running both scans every volume twice, doubles EBS-snapshot and ingest cost, and the two compete over snapshot retention — each deletes snapshots tagged Purpose=ebs-package-collector account-wide, including the other's.
     Delete that CloudFormation stack and let it finish, then apply. To run both deliberately, set allow_cloudformation_coexistence = true.
   EOT
@@ -55,17 +60,13 @@ locals {
     for arn in local.existing_cluster_arns :
     arn if endswith(arn, "/${local.cloudformation_cluster_name}")
   ]) > 0
-  region        = data.aws_region.current.region
-  account_id    = data.aws_caller_identity.current.account_id
-  partition     = data.aws_partition.current.partition
-  regional_name = "${local.name}-${local.region}"
 
   api_url = trimsuffix(data.streamsec_host.this.url, "/")
 
   # A per-tenant Stream hostname is https://<tenant>.<domain>, so the first DNS
-  # label is the tenant name. That does
-  # not hold behind a shared/regional endpoint (app.streamsec.io), a custom
-  # CNAME, or PrivateLink endpoint DNS — hence the var.tenant_name override.
+  # label is the tenant name. That does not hold behind a shared or regional
+  # endpoint (app.streamsec.io), a custom CNAME, or PrivateLink endpoint DNS —
+  # hence the var.tenant_name override.
   # Getting this wrong is silent: the scanner tags SBOMs with a tenant that does
   # not exist, ingest drops them, and the console still shows the region healthy.
   derived_tenant_name = split(".", replace(replace(local.api_url, "https://", ""), "http://", ""))[0]
@@ -83,25 +84,31 @@ locals {
   workload_kind_list = [for kind in split(",", var.workload_kinds) : trimspace(kind) if trimspace(kind) != ""]
   scan_workloads     = length(local.workload_kind_list) > 0
 
-  # Fargate only accepts specific memory ranges per CPU size, in fixed
-  # increments. A bad pair is rejected by RegisterTaskDefinition mid-apply,
-  # after the VPC, NAT gateway, Elastic IP, cluster, secret and four IAM roles
-  # already exist — and the NAT keeps billing until someone destroys it. This is
-  # a cross-variable rule, which a variable validation block cannot express on
-  # the Terraform versions this module supports.
-  fargate_memory_ranges = {
-    "256"   = { min = 512, max = 2048, step = 512 }
-    "512"   = { min = 1024, max = 4096, step = 1024 }
-    "1024"  = { min = 2048, max = 8192, step = 1024 }
-    "2048"  = { min = 4096, max = 16384, step = 1024 }
-    "4096"  = { min = 8192, max = 30720, step = 1024 }
-    "8192"  = { min = 16384, max = 61440, step = 4096 }
-    "16384" = { min = 32768, max = 122880, step = 8192 }
+  # Fargate accepts only specific memory values per CPU size. A bad pair is
+  # rejected by RegisterTaskDefinition mid-apply, after the VPC, NAT gateway,
+  # Elastic IP, cluster, secret and four IAM roles already exist — and the NAT
+  # keeps billing until someone destroys it. This is a cross-variable rule, which
+  # a variable validation block cannot express on the Terraform versions this
+  # module supports.
+  #
+  # Expressed as explicit value lists rather than min/max/step, because the
+  # 256-CPU row is irregular: Fargate allows 512, 1024 and 2048 there but NOT
+  # 1536. A step model accepted 1536 and failed at apply — exactly the failure
+  # this check exists to prevent. Every other row is a genuine fixed increment,
+  # so range() generates those.
+  fargate_memory_values = {
+    "256"   = [512, 1024, 2048]
+    "512"   = range(1024, 4097, 1024)
+    "1024"  = range(2048, 8193, 1024)
+    "2048"  = range(4096, 16385, 1024)
+    "4096"  = range(8192, 30721, 1024)
+    "8192"  = range(16384, 61441, 4096)
+    "16384" = range(32768, 122881, 8192)
   }
 
-  fargate_range         = local.fargate_memory_ranges[var.task_cpu]
+  task_memory_allowed   = local.fargate_memory_values[var.task_cpu]
   task_memory_number    = tonumber(var.task_memory)
-  task_sizing_is_valid  = local.task_memory_number >= local.fargate_range.min && local.task_memory_number <= local.fargate_range.max && local.task_memory_number % local.fargate_range.step == 0
+  task_sizing_is_valid  = contains(local.task_memory_allowed, local.task_memory_number)
   scan_lambda_workloads = contains(local.workload_kind_list, "lambda")
   scan_ecs_workloads    = contains(local.workload_kind_list, "ecs")
 
@@ -185,10 +192,6 @@ locals {
     if var.vpc_id != null && subnet.vpc_id != var.vpc_id
   ]
 
-  # Each subnet's effective route table. The explicit-association / main-route-table
-  # fallback happens in the data source itself (see network.tf).
-  byo_route_tables = data.aws_route_table.byo_explicit
-
   # Normalized to a "-" sentinel per target field. A route's unused target fields
   # come back as "" from some provider versions and as null from others (and as a
   # missing attribute entirely if the provider predates the field, e.g.
@@ -197,7 +200,9 @@ locals {
   # and startswith(null, ...) is a hard error. coalesce collapses null, "" and
   # absent to "-", which matches no real AWS id.
   byo_default_routes = {
-    for key, route_table in local.byo_route_tables :
+    # The explicit-association / main-route-table fallback happens in the data
+    # source itself (see network.tf).
+    for key, route_table in data.aws_route_table.byo_explicit :
     key => [
       for route in route_table.routes : {
         cidr_block           = coalesce(try(route.cidr_block, ""), "-")
@@ -211,14 +216,17 @@ locals {
         core_network_arn     = coalesce(try(route.core_network_arn, ""), "-")
         local_gateway_id     = coalesce(try(route.local_gateway_id, ""), "-")
       }
-      # A literal default route, OR a route whose destination is a managed prefix
-      # list. A prefix list's CONTENTS are not exposed on the route table, so we
-      # cannot prove it carries 0.0.0.0/0 — but rejecting the subnet would be
-      # equally a guess, and blocking a valid deployment is the worse error. Same
-      # philosophy as the Transit Gateway case below: accept, and let the task
-      # surface a genuine egress failure at runtime.
-      if coalesce(try(route.cidr_block, ""), "-") == "0.0.0.0/0" ||
-      coalesce(try(route.destination_prefix_list_id, ""), "-") != "-"
+      # ONLY a literal default route counts as a candidate.
+      #
+      # Managed-prefix-list routes were briefly accepted here on the reasoning
+      # that a prefix list might contain 0.0.0.0/0 and we cannot read it. That
+      # was badly wrong: the commonest prefix-list route in any private subnet is
+      # the S3 gateway endpoint, which says nothing about internet access. It let
+      # a completely isolated subnet pass, and — because the IGW-only rejection is
+      # gated on this — let a genuinely public subnet pass too. A prefix list that
+      # really does carry a default route is rare; validate_subnet_egress = false
+      # is the escape hatch for it.
+      if coalesce(try(route.cidr_block, ""), "-") == "0.0.0.0/0"
     ]
   }
 
@@ -233,6 +241,11 @@ locals {
   # routes. vgw- in particular is a standard enterprise topology, and rejecting
   # it forced operators onto validate_subnet_egress = false, which switches off
   # the wrong-VPC check too.
+  #
+  # vpc_endpoint_id here means a Gateway Load Balancer endpoint — an inspection
+  # appliance that CAN carry a default route. That is not the same thing as a
+  # gateway endpoint for S3 or DynamoDB, which appears as gateway_id "vpce-" and
+  # can never be internet egress; accepting the latter was the regression above.
   #
   # KNOWN GAP vs the CloudFormation NetworkPrecheck: that Lambda also skipped
   # routes whose State is not "active", rejecting a blackholed default route
@@ -249,8 +262,6 @@ locals {
       route.vpc_endpoint_id != "-" ||
       route.core_network_arn != "-" ||
       route.local_gateway_id != "-" ||
-      route.prefix_list_id != "-" ||
-      startswith(route.gateway_id, "vpce-") ||
       startswith(route.gateway_id, "vgw-")
     ]) > 0
   }
@@ -405,7 +416,7 @@ resource "aws_ecs_task_definition" "this" {
   lifecycle {
     precondition {
       condition     = local.task_sizing_is_valid
-      error_message = "Fargate rejects task_cpu = ${var.task_cpu} with task_memory = ${var.task_memory}. At that CPU size memory must be between ${local.fargate_range.min} and ${local.fargate_range.max} MiB in ${local.fargate_range.step} MiB steps. Left unchecked this fails at RegisterTaskDefinition mid-apply, after the NAT gateway and Elastic IP are already billing."
+      error_message = "Fargate rejects task_cpu = ${var.task_cpu} with task_memory = ${var.task_memory}. At that CPU size the allowed memory values are ${join(", ", [for m in local.task_memory_allowed : tostring(m)])} MiB. Left unchecked this fails at RegisterTaskDefinition mid-apply, after the NAT gateway and Elastic IP are already billing."
     }
 
     precondition {
@@ -482,7 +493,10 @@ data "archive_file" "initial_scan" {
 
   type        = "zip"
   source_file = "${path.module}/lambda/initial_scan.py"
-  output_path = "${path.module}/lambda/initial_scan.zip"
+  # Per instance: with a local module source path.module is the same directory
+  # for every instantiation, so a fixed name has two instances writing and
+  # hashing one file concurrently. examples/complete declares two.
+  output_path = "${path.module}/lambda/initial_scan-${local.regional_name}.zip"
 }
 
 resource "aws_cloudwatch_log_group" "initial_scan" {
@@ -560,9 +574,12 @@ resource "aws_lambda_invocation" "initial_scan" {
   # spam scans, and the CloudFormation trigger this replaces is a Create-only
   # custom resource that no-ops on update.
   #
-  # replace_triggered_by is the ONLY thing controlling re-invocation. There is no
-  # ignore_changes here: `input` is the constant jsonencode({}) and can never
-  # change, so suppressing it protected nothing while reading like the guard.
+  # function_name is ForceNew on aws_lambda_invocation, so renaming the
+  # deployment already re-creates and re-invokes this. replace_triggered_by is
+  # defence in depth, pinning that behaviour so it survives a refactor of how
+  # function_name is derived. There is no ignore_changes: `input` is the constant
+  # jsonencode({}) and can never change, so suppressing it protected nothing
+  # while reading like the guard.
   #
   # It keys on function_name, NOT on the whole resource.
   # Referencing the resource re-fires on any in-place UPDATE to it as well as on

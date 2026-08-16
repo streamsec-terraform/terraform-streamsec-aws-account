@@ -426,6 +426,87 @@ run "byo_subnet_without_enough_free_ips_is_rejected" {
   expect_failures = [aws_security_group.this]
 }
 
+# An isolated private subnet whose ONLY non-local route is the standard S3
+# gateway endpoint. This is the commonest route in an enterprise private subnet
+# and says nothing about internet access — accepting it as egress waves through
+# a subnet with no internet path at all.
+run "s3_gateway_endpoint_route_is_not_egress" {
+  command = plan
+
+  variables {
+    create_scanner_vpc = false
+    vpc_id             = "vpc-scanner"
+    subnet_ids         = ["subnet-isolated-a"]
+  }
+
+  override_data {
+    target = data.aws_route_table.byo_explicit["0"]
+    values = {
+      routes = [{
+        cidr_block                 = ""
+        destination_prefix_list_id = "pl-63a5400a"
+        gateway_id                 = "vpce-0123456789abcdef0"
+        nat_gateway_id             = ""
+        transit_gateway_id         = ""
+        vpc_endpoint_id            = ""
+        network_interface_id       = ""
+        instance_id                = ""
+        core_network_arn           = ""
+        local_gateway_id           = ""
+      }]
+    }
+  }
+
+  expect_failures = [aws_security_group.this]
+}
+
+# A genuinely public subnet that also carries the S3 gateway endpoint route. The
+# prefix-list rule set has_egress = true, which short-circuited the IGW-only
+# rejection and let a public subnet through.
+run "public_subnet_with_an_s3_endpoint_is_still_rejected" {
+  command = plan
+
+  variables {
+    create_scanner_vpc = false
+    vpc_id             = "vpc-scanner"
+    subnet_ids         = ["subnet-public-a"]
+  }
+
+  override_data {
+    target = data.aws_route_table.byo_explicit["0"]
+    values = {
+      routes = [
+        {
+          cidr_block                 = "0.0.0.0/0"
+          destination_prefix_list_id = ""
+          gateway_id                 = "igw-abc123"
+          nat_gateway_id             = ""
+          transit_gateway_id         = ""
+          vpc_endpoint_id            = ""
+          network_interface_id       = ""
+          instance_id                = ""
+          core_network_arn           = ""
+          local_gateway_id           = ""
+        },
+        {
+          cidr_block                 = ""
+          destination_prefix_list_id = "pl-63a5400a"
+          gateway_id                 = "vpce-0123456789abcdef0"
+          nat_gateway_id             = ""
+          transit_gateway_id         = ""
+          vpc_endpoint_id            = ""
+          network_interface_id       = ""
+          instance_id                = ""
+          core_network_arn           = ""
+          local_gateway_id           = ""
+        },
+      ]
+    }
+  }
+
+  expect_failures = [aws_security_group.this]
+}
+
 run "supplying_a_vpc_while_creating_one_is_rejected" {
   command = plan
 

@@ -24,6 +24,12 @@ RETRY_DELAYS_SECONDS = (5, 10, 15, 20)
 
 RETRYABLE_ERROR_CODES = frozenset(
     {
+        # ECS returns ClientException — not AccessDenied — when it cannot yet
+        # assume a task or execution role created seconds earlier by the same
+        # apply ("ECS was unable to assume the role ... provided for this task").
+        # That is the precise IAM-propagation case this ladder exists for, and
+        # omitting it meant the ladder never once ran.
+        "ClientException",
         "AccessDeniedException",
         "AccessDenied",
         "InvalidParameterException",
@@ -40,6 +46,23 @@ def _error_code(exc):
 
 def handler(event, context):
     ecs = boto3.client("ecs")
+
+    # The daily rule and this one-shot both launch an orchestrator, and each
+    # orchestrator snapshots every volume in the region and fans out its own
+    # children. An apply that lands on the schedule — or one that renames the
+    # deployment while a scheduled run is in flight — would double snapshot and
+    # Fargate spend. That is the same collision the cron-only validation on
+    # schedule_expression exists to prevent, so refuse rather than pile on.
+    try:
+        running = ecs.list_tasks(
+            cluster=os.environ["CLUSTER_ARN"], desiredStatus="RUNNING"
+        ).get("taskArns") or []
+        if running:
+            print(f"scan already in progress ({len(running)} task(s)); not starting another")
+            return {"task_arn": "", "skipped": "scan already running"}
+    except Exception as exc:  # noqa: BLE001
+        # Never block the first scan on a failed pre-check.
+        print(f"could not check for running tasks, continuing: {exc}")
 
     attempts = len(RETRY_DELAYS_SECONDS) + 1
     last_error = ""

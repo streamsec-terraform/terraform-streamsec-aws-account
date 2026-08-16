@@ -25,6 +25,13 @@ locals {
       # Scoped to this account and this region: the scanner is a single-region
       # deployment (COLLECTOR_REGION is pinned) and only ever reads workloads in
       # the account it runs in.
+      #
+      # NOTE for snapshot ARNs elsewhere in this file: EC2 authorizes snapshot
+      # actions against arn:<partition>:ec2:<region>::snapshot/* with an EMPTY
+      # account field. Pinning the account there produces
+      # "UnauthorizedOperation ... no identity-based policy allows
+      # ec2:CreateSnapshot", verified against real AWS. Region-pinning alone is
+      # what closes the cross-region hazard.
       Resource = [
         "arn:${local.partition}:lambda:${local.region}:${local.account_id}:function:*",
         "arn:${local.partition}:lambda:${local.region}:${local.account_id}:layer:*:*",
@@ -101,6 +108,11 @@ locals {
   # S3 objects, RDS storage or Secrets Manager values protected by the same CMK.
   # Both service names are required: ec2.<region> covers CreateSnapshot of an
   # encrypted volume, ebs.<region> covers the EBS-direct block reads.
+  kms_via_services = [
+    "ec2.${local.region}.amazonaws.com",
+    "ebs.${local.region}.amazonaws.com",
+  ]
+
   kms_statements = [
     {
       Sid    = "ReadEncryptedVolumes"
@@ -114,20 +126,18 @@ locals {
       ]
       Resource = var.kms_key_arns
       Condition = {
-        StringEquals = {
-          "kms:ViaService" = [
-            "ec2.${local.region}.amazonaws.com",
-            "ebs.${local.region}.amazonaws.com",
-          ]
-        }
+        StringEquals = { "kms:ViaService" = local.kms_via_services }
       }
     },
     {
-      Sid       = "GrantEC2SnapshotAccessToKeys"
-      Effect    = "Allow"
-      Action    = "kms:CreateGrant"
-      Resource  = var.kms_key_arns
-      Condition = { Bool = { "kms:GrantIsForAWSResource" = "true" } }
+      Sid      = "GrantEC2SnapshotAccessToKeys"
+      Effect   = "Allow"
+      Action   = "kms:CreateGrant"
+      Resource = var.kms_key_arns
+      Condition = {
+        Bool         = { "kms:GrantIsForAWSResource" = "true" }
+        StringEquals = { "kms:ViaService" = local.kms_via_services }
+      }
     },
   ]
 
@@ -151,6 +161,12 @@ locals {
         aws_iam_role.task.arn,
         aws_iam_role.execution.arn,
       ]
+      # The scanner task role holds this grant itself, so without the condition
+      # anything with code execution in the container could pass these roles to
+      # any service that accepts them, not just ECS.
+      Condition = {
+        StringEquals = { "iam:PassedToService" = "ecs-tasks.amazonaws.com" }
+      }
     },
   ]
 
@@ -182,6 +198,13 @@ resource "aws_iam_role" "task" {
         Effect    = "Allow"
         Principal = { Service = "ecs-tasks.amazonaws.com" }
         Action    = "sts:AssumeRole"
+        # Same reasoning as the EventBridge role below: without this, any task
+        # definition in the account could name this role and inherit its
+        # account-wide EC2 snapshot, EBS block-read and KMS grants.
+        Condition = {
+          StringEquals = { "aws:SourceAccount" = local.account_id }
+          ArnLike      = { "aws:SourceArn" = "arn:${local.partition}:ecs:${local.region}:${local.account_id}:*" }
+        }
       }
     ]
   })
@@ -220,13 +243,13 @@ resource "aws_iam_role_policy" "task" {
         Sid      = "CreateSnapshotOnVolume"
         Effect   = "Allow"
         Action   = "ec2:CreateSnapshot"
-        Resource = "arn:${local.partition}:ec2:*:*:volume/*"
+        Resource = "arn:${local.partition}:ec2:${local.region}:${local.account_id}:volume/*"
       },
       {
         Sid      = "CreateTaggedSnapshot"
         Effect   = "Allow"
         Action   = "ec2:CreateSnapshot"
-        Resource = "arn:${local.partition}:ec2:*:*:snapshot/*"
+        Resource = "arn:${local.partition}:ec2:${local.region}::snapshot/*"
         Condition = {
           StringEquals = {
             # The scanner sets this tag on every snapshot it creates, via
@@ -241,7 +264,7 @@ resource "aws_iam_role_policy" "task" {
         Sid      = "TagSnapshotsAtCreate"
         Effect   = "Allow"
         Action   = ["ec2:CreateTags"]
-        Resource = "arn:${local.partition}:ec2:*:*:snapshot/*"
+        Resource = "arn:${local.partition}:ec2:${local.region}::snapshot/*"
         Condition = {
           StringEquals = { "ec2:CreateAction" = "CreateSnapshot" }
         }
@@ -256,7 +279,7 @@ resource "aws_iam_role_policy" "task" {
           "ebs:ListSnapshotBlocks",
           "ebs:GetSnapshotBlock",
         ]
-        Resource = "arn:${local.partition}:ec2:*:*:snapshot/*"
+        Resource = "arn:${local.partition}:ec2:${local.region}::snapshot/*"
         Condition = {
           StringEquals = { "aws:ResourceTag/Purpose" = "ebs-package-collector" }
         }
@@ -314,6 +337,13 @@ resource "aws_iam_role" "execution" {
         Effect    = "Allow"
         Principal = { Service = "ecs-tasks.amazonaws.com" }
         Action    = "sts:AssumeRole"
+        # Same reasoning as the EventBridge role below: without this, any task
+        # definition in the account could name this role and inherit its
+        # account-wide EC2 snapshot, EBS block-read and KMS grants.
+        Condition = {
+          StringEquals = { "aws:SourceAccount" = local.account_id }
+          ArnLike      = { "aws:SourceArn" = "arn:${local.partition}:ecs:${local.region}:${local.account_id}:*" }
+        }
       }
     ]
   })

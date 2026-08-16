@@ -507,6 +507,9 @@ run "kms_grants_can_be_scoped_to_named_keys" {
   }
 }
 
+# Now caught by the variable's own validation, which names the offending input
+# instead of reporting a precondition failure against aws_ecs_task_definition
+# after the whole graph has been evaluated.
 run "whitespace_only_customer_id_is_rejected" {
   command = plan
 
@@ -514,7 +517,17 @@ run "whitespace_only_customer_id_is_rejected" {
     customer_id = "   "
   }
 
-  expect_failures = [aws_ecs_task_definition.this]
+  expect_failures = [var.customer_id]
+}
+
+run "whitespace_only_tenant_name_is_rejected" {
+  command = plan
+
+  variables {
+    tenant_name = "  "
+  }
+
+  expect_failures = [var.tenant_name]
 }
 
 run "customer_id_is_trimmed" {
@@ -551,6 +564,34 @@ run "invalid_fargate_cpu_is_rejected" {
   }
 
   expect_failures = [var.task_cpu]
+}
+
+# Fargate accepts only 512, 1024 and 2048 MiB at 256 CPU — the 256 row is the one
+# irregular entry in the matrix, and modelling it as a 512 MiB step let 1536
+# through to fail at RegisterTaskDefinition mid-apply.
+run "irregular_fargate_256_row_rejects_1536" {
+  command = plan
+
+  variables {
+    task_cpu    = "256"
+    task_memory = "1536"
+  }
+
+  expect_failures = [aws_ecs_task_definition.this]
+}
+
+run "valid_fargate_256_pair_is_accepted" {
+  command = plan
+
+  variables {
+    task_cpu    = "256"
+    task_memory = "2048"
+  }
+
+  assert {
+    condition     = aws_ecs_task_definition.this.memory == "2048"
+    error_message = "256/2048 is a valid Fargate pair and must be accepted."
+  }
 }
 
 run "invalid_secret_recovery_window_is_rejected" {

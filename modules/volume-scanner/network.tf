@@ -8,6 +8,13 @@
 #               and nothing else is ever launched into this subnet.
 #   - private — where Fargate runs. No public IP; egress via the NAT.
 #
+# Single AZ, deliberately. A second private subnet in another AZ would give
+# ECS more placement options, but it would NOT buy AZ fault tolerance: the one
+# NAT gateway lives in a single AZ, so losing that AZ takes egress out either
+# way. Real resilience needs a NAT per AZ, which doubles the standing cost for
+# a workload that runs once a day and retries. Documented rather than
+# half-solved; supply your own multi-AZ subnets if you need it.
+#
 # The scanner accepts no inbound traffic. A NAT Gateway costs ~$32/mo idle plus
 # ~$0.045/GB processed — the cost of running the task with no public IP, which
 # SOC 2, CIS AWS Foundations and PCI-DSS baselines require of compute workloads.

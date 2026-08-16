@@ -264,12 +264,23 @@ variable "customer_id" {
   description = "Stream Security customer/workspace id — the same value configured as workspace_id on the streamsec provider. Sent to the scanner as COLLECTOR_CUSTOMER_ID and COLLECTOR_STREAM_SCAN_WORKSPACE, and used for the streamsec:customer tag. This becomes optional once terraform-provider-streamsec exposes customer_id as a data source attribute."
   type        = string
   default     = null
+  # Checked here rather than only in a precondition deep in the graph, so a
+  # blank value names the offending input instead of reporting a failure against
+  # aws_ecs_task_definition after both streamsec data sources have been read.
+  validation {
+    condition     = var.customer_id == null ? true : trimspace(var.customer_id) != ""
+    error_message = "customer_id must not be blank. It is sent as COLLECTOR_CUSTOMER_ID / COLLECTOR_STREAM_SCAN_WORKSPACE, and a blank value tags every SBOM with a workspace that does not exist — ingest drops them and the console still shows the region healthy."
+  }
 }
 
 variable "tenant_name" {
   description = "Stream Security tenant name, sent to the scanner as COLLECTOR_TENANT_NAME. Defaults to the first DNS label of the provider's host, which is correct for a per-tenant hostname (https://<tenant>.streamsec.io) but wrong behind a shared/regional endpoint, a custom CNAME or a PrivateLink endpoint DNS name — set it explicitly in those cases."
   type        = string
   default     = null
+  validation {
+    condition     = var.tenant_name == null ? true : trimspace(var.tenant_name) != ""
+    error_message = "tenant_name must not be blank. Leave it unset to derive the tenant from the provider host — a blank value tags every SBOM with a tenant that does not exist, ingest drops them, and the console still shows the region healthy."
+  }
 }
 
 variable "resource_prefix" {
