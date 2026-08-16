@@ -70,8 +70,8 @@ variable "shard_size" {
   default     = 100
 
   validation {
-    condition     = var.shard_size >= 1 && var.shard_size <= 5000
-    error_message = "shard_size must be between 1 and 5000."
+    condition     = var.shard_size >= 1 && var.shard_size <= 5000 && floor(var.shard_size) == var.shard_size
+    error_message = "shard_size must be a whole number between 1 and 5000. It is passed to the scanner as COLLECTOR_SHARD_SIZE, which parses an integer."
   }
 }
 
@@ -81,8 +81,8 @@ variable "max_concurrent_shards" {
   default     = 10
 
   validation {
-    condition     = var.max_concurrent_shards >= 1 && var.max_concurrent_shards <= 100
-    error_message = "max_concurrent_shards must be between 1 and 100."
+    condition     = var.max_concurrent_shards >= 1 && var.max_concurrent_shards <= 100 && floor(var.max_concurrent_shards) == var.max_concurrent_shards
+    error_message = "max_concurrent_shards must be a whole number between 1 and 100. A fraction is shipped verbatim as COLLECTOR_MAX_CONCURRENT_SHARDS and also makes the subnet capacity check compare against a fractional ENI count."
   }
 }
 
@@ -145,9 +145,14 @@ variable "create_scanner_vpc" {
 }
 
 variable "create_vpc_endpoints" {
-  description = "Create interface and gateway VPC endpoints so snapshot block reads and S3-backed image layers bypass the NAT Gateway. On by default: block reads are the dominant egress cost and NAT data processing is ~4.5x the PrivateLink rate for the same bytes. Ignored when create_scanner_vpc is false, since the module does not own that VPC. Turn off only if com.amazonaws.<region>.ebs is unavailable in your region or partition."
+  description = "Create interface and gateway VPC endpoints so snapshot block reads and S3-backed image layers bypass the NAT Gateway. Defaults to on whenever the module creates the VPC: block reads are the dominant egress cost and NAT data processing is ~4.5x the PrivateLink rate for the same bytes. Leave unset in bring-your-own-subnet mode — the module does not create endpoints in a VPC it does not own, and setting this to true there is rejected rather than silently ignored. Set false to opt out, e.g. where com.amazonaws.<region>.ebs is unavailable in your region or partition."
   type        = bool
-  default     = true
+
+  # Tri-state on purpose. Unset means "on when the module owns the VPC, off
+  # otherwise", so bring-your-own-subnet callers need no ceremony; an EXPLICIT
+  # true in that mode is a real misunderstanding and gets a precondition rather
+  # than silence.
+  default = null
 }
 
 variable "scanner_vpc_cidr" {

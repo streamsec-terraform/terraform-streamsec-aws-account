@@ -408,8 +408,19 @@ resource "aws_iam_role_policy" "events" {
   role = aws_iam_role.events.id
 
   policy = jsonencode({
-    Version   = "2012-10-17"
-    Statement = local.run_scanner_task_statements
+    Version = "2012-10-17"
+    Statement = concat(local.run_scanner_task_statements, [
+      {
+        # The function refuses to start a second orchestrator while one is
+        # already running. Without this the ListTasks call is denied on every
+        # invocation, the bare except swallows it, and the guard never fires.
+        Sid       = "InitialScanCheckForRunningScan"
+        Effect    = "Allow"
+        Action    = "ecs:ListTasks"
+        Resource  = "*"
+        Condition = { ArnEquals = { "ecs:cluster" = aws_ecs_cluster.this.arn } }
+      },
+    ])
   })
 }
 

@@ -123,7 +123,7 @@ locals {
 
   # Only meaningful when the module owns the VPC — see the note in network.tf for
   # why bring-your-own-subnet mode deliberately gets no endpoints.
-  create_vpc_endpoints = var.create_scanner_vpc && var.create_vpc_endpoints
+  create_vpc_endpoints = var.create_scanner_vpc && coalesce(var.create_vpc_endpoints, true)
 
   scanner_public_subnet_cidr  = cidrsubnet(var.scanner_vpc_cidr, 1, 0)
   scanner_private_subnet_cidr = cidrsubnet(var.scanner_vpc_cidr, 1, 1)
@@ -132,7 +132,10 @@ locals {
   # five addresses in each subnet. The orchestrator plus max_concurrent_shards
   # children all run at once, so the subnet has to hold them or the fan-out dies
   # part-way through with an opaque ENI-provisioning failure.
-  scanner_private_subnet_capacity = pow(2, 32 - tonumber(split("/", local.scanner_private_subnet_cidr)[1])) - 5
+  # AWS reserves five addresses per subnet, and the EBS interface endpoint places
+  # one more ENI of its own in this subnet when enabled — miss it and the check
+  # passes at exactly the boundary while the last child task fails to get an ENI.
+  scanner_private_subnet_capacity = pow(2, 32 - tonumber(split("/", local.scanner_private_subnet_cidr)[1])) - 5 - (local.create_vpc_endpoints ? 1 : 0)
   scanner_peak_task_count         = var.max_concurrent_shards + 1
 
   # Family ARN with no revision suffix, so the orchestrator's RunTask always
@@ -475,6 +478,13 @@ resource "aws_cloudwatch_event_target" "daily" {
     aws_route.private_nat,
     aws_route_table_association.private,
     aws_vpc_security_group_egress_rule.all,
+    # Private DNS on the EBS endpoint makes the API hostname resolve to its ENI
+    # VPC-wide as soon as it exists. Starting a scan before the endpoint's own
+    # security group has its allow rule drops every block read; starting before
+    # the endpoint exists merely sends the first scan's reads over the NAT.
+    aws_vpc_endpoint.ebs,
+    aws_vpc_endpoint.s3,
+    aws_vpc_security_group_ingress_rule.endpoints_https,
     aws_iam_role_policy.events,
     aws_iam_role_policy.task,
     aws_iam_role_policy.orchestrator,
@@ -562,6 +572,13 @@ resource "aws_lambda_invocation" "initial_scan" {
     aws_route.private_nat,
     aws_route_table_association.private,
     aws_vpc_security_group_egress_rule.all,
+    # Private DNS on the EBS endpoint makes the API hostname resolve to its ENI
+    # VPC-wide as soon as it exists. Starting a scan before the endpoint's own
+    # security group has its allow rule drops every block read; starting before
+    # the endpoint exists merely sends the first scan's reads over the NAT.
+    aws_vpc_endpoint.ebs,
+    aws_vpc_endpoint.s3,
+    aws_vpc_security_group_ingress_rule.endpoints_https,
     aws_iam_role_policy.initial_scan,
     # Without this the invocation can run before the role can write logs. The
     # function deliberately swallows every failure, so CloudWatch is the ONLY
@@ -578,14 +595,14 @@ resource "aws_lambda_invocation" "initial_scan" {
   # spam scans, and the CloudFormation trigger this replaces is a Create-only
   # custom resource that no-ops on update.
   #
-  # function_name is ForceNew on aws_lambda_invocation, so renaming the
-  # deployment already re-creates and re-invokes this. replace_triggered_by is
-  # defence in depth, pinning that behaviour so it survives a refactor of how
-  # function_name is derived. There is no ignore_changes: `input` is the constant
-  # jsonencode({}) and can never change, so suppressing it protected nothing
-  # while reading like the guard.
-  #
-  # It keys on function_name, NOT on the whole resource.
+  # Re-invocation is controlled entirely by function_name, which is ForceNew on
+  # this resource: renaming the deployment replaces the Lambda, which replaces
+  # this and fires a fresh scan. That is why the earlier `ignore_changes = all`
+  # was wrong — it suppressed the function_name diff and a renamed deployment
+  # produced nothing until 03:00 UTC. A replace_triggered_by on the same
+  # attribute was tried as belt-and-braces and removed again: it can only fire
+  # where the plain reference already has, so it added a second mechanism to
+  # reason about and changed nothing.
   # Referencing the resource re-fires on any in-place UPDATE to it as well as on
   # replacement, and the Lambda's environment carries the task-definition ARN —
   # so every toggle, image, sizing or shard-count change produced a new revision
@@ -595,7 +612,4 @@ resource "aws_lambda_invocation" "initial_scan" {
   # trigger this replaces, which is Create-only and no-ops on stack update.
   # function_name changes only when the deployment is renamed, which is exactly
   # when the function is genuinely replaced.
-  lifecycle {
-    replace_triggered_by = [aws_lambda_function.initial_scan[0].function_name]
-  }
 }

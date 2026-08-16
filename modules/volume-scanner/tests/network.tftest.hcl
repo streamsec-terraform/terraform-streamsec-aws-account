@@ -121,12 +121,41 @@ run "concurrency_within_the_subnet_capacity_is_accepted" {
 
   variables {
     scanner_vpc_cidr      = "10.255.0.0/27"
-    max_concurrent_shards = 10
+    max_concurrent_shards = 9
   }
 
   assert {
     condition     = aws_subnet.private[0].cidr_block == "10.255.0.16/28"
-    error_message = "10 children plus the orchestrator is exactly the 11-ENI capacity of a /28 and must be accepted."
+    error_message = "A /28 holds 16 addresses: 5 reserved by AWS and 1 for the EBS endpoint ENI leaves 10, so 9 children plus the orchestrator must fit."
+  }
+}
+
+# The EBS interface endpoint puts an ENI of its own in the private subnet. Miss
+# it and the capacity check passes at exactly the boundary while the last child
+# task fails ENI provisioning with an opaque ResourceInitializationError.
+run "endpoint_eni_is_counted_against_subnet_capacity" {
+  command = plan
+
+  variables {
+    scanner_vpc_cidr      = "10.255.0.0/27"
+    max_concurrent_shards = 10
+  }
+
+  expect_failures = [aws_subnet.private]
+}
+
+run "same_config_fits_once_the_endpoint_is_disabled" {
+  command = plan
+
+  variables {
+    scanner_vpc_cidr      = "10.255.0.0/27"
+    max_concurrent_shards = 10
+    create_vpc_endpoints  = false
+  }
+
+  assert {
+    condition     = length(aws_vpc_endpoint.ebs) == 0
+    error_message = "With no endpoint ENI the /28's full 11 usable addresses are available, so the same concurrency fits — proving the capacity maths tracks the endpoint rather than being a blanket reduction."
   }
 }
 
@@ -164,6 +193,21 @@ run "vpc_endpoints_are_created_by_default" {
     condition     = aws_vpc_endpoint.s3[0].vpc_endpoint_type == "Gateway"
     error_message = "The S3 endpoint must be a gateway endpoint — it is free and attaches to the private route table."
   }
+}
+
+# An explicit true in bring-your-own-subnet mode is a misunderstanding worth a
+# diagnostic; leaving it unset there must stay silent.
+run "endpoints_requested_in_byo_mode_are_rejected" {
+  command = plan
+
+  variables {
+    create_scanner_vpc   = false
+    vpc_id               = "vpc-scanner"
+    subnet_ids           = ["subnet-private-a"]
+    create_vpc_endpoints = true
+  }
+
+  expect_failures = [aws_security_group.this]
 }
 
 run "vpc_endpoints_can_be_disabled" {
@@ -257,6 +301,11 @@ run "byo_subnet_behind_a_transit_gateway_is_accepted" {
   }
 }
 
+# NOTE: this proves an IGW-only subnet is REJECTED. It cannot prove the
+# public-subnet-specific wording survives: that wording is one branch of a
+# format() inside byo_bad_subnets, not its own precondition, and expect_failures
+# names a resource rather than a condition. Verified by deleting the igw- branch
+# — the subnet is still rejected by the same check and this run stays green.
 run "byo_igw_only_subnet_is_rejected" {
   command = plan
 
@@ -284,7 +333,7 @@ run "byo_igw_only_subnet_is_rejected" {
     }
   }
 
-  expect_failures = [aws_security_group.this]
+  expect_failures = [aws_vpc_security_group_egress_rule.all]
 }
 
 run "byo_subnet_without_a_default_route_is_rejected" {
@@ -314,7 +363,7 @@ run "byo_subnet_without_a_default_route_is_rejected" {
     }
   }
 
-  expect_failures = [aws_security_group.this]
+  expect_failures = [aws_vpc_security_group_egress_rule.all]
 }
 
 run "byo_subnet_in_another_vpc_is_rejected" {
@@ -484,7 +533,7 @@ run "byo_subnet_without_enough_free_ips_is_rejected" {
     }
   }
 
-  expect_failures = [aws_security_group.this]
+  expect_failures = [aws_vpc_security_group_egress_rule.all]
 }
 
 # An isolated private subnet whose ONLY non-local route is the standard S3
@@ -518,7 +567,7 @@ run "s3_gateway_endpoint_route_is_not_egress" {
     }
   }
 
-  expect_failures = [aws_security_group.this]
+  expect_failures = [aws_vpc_security_group_egress_rule.all]
 }
 
 # A genuinely public subnet that also carries the S3 gateway endpoint route. The
@@ -565,7 +614,7 @@ run "public_subnet_with_an_s3_endpoint_is_still_rejected" {
     }
   }
 
-  expect_failures = [aws_security_group.this]
+  expect_failures = [aws_vpc_security_group_egress_rule.all]
 }
 
 run "supplying_a_vpc_while_creating_one_is_rejected" {
