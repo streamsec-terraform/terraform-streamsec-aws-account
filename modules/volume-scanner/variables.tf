@@ -44,9 +44,15 @@ variable "workload_kinds" {
   type        = string
   default     = "lambda,ecs"
 
+  # Normalizes before checking, so "ecs,lambda" and "lambda, ecs" are accepted as
+  # the same set rather than rejected for ordering or spacing. An exact-string
+  # allow-list also made the trimspace in local.workload_kind_list unreachable.
   validation {
-    condition     = contains(["", "lambda", "ecs", "lambda,ecs"], var.workload_kinds)
-    error_message = "workload_kinds must be one of \"\", \"lambda\", \"ecs\", or \"lambda,ecs\"."
+    condition = length(setsubtract(
+      toset([for kind in split(",", var.workload_kinds) : trimspace(kind) if trimspace(kind) != ""]),
+      toset(["lambda", "ecs"])
+    )) == 0
+    error_message = "workload_kinds must be a comma-separated subset of \"lambda\" and \"ecs\", or \"\" to disable workload scanning."
   }
 }
 
@@ -287,7 +293,7 @@ variable "resource_prefix" {
   # operator set rather than letting four IAM errors land mid-plan.
   validation {
     condition     = length(var.resource_prefix) <= 9
-    error_message = "resource_prefix must be 9 characters or fewer — the generated IAM role names (prefix + streamsec-ebs-scanner + region + \"-initial-scan-role\") must fit IAM's 64-character limit."
+    error_message = "resource_prefix must be 9 characters or fewer — the longest generated IAM role name (<prefix>-streamsec-ebs-scanner-tf-<region>-execution-role) must fit IAM's 64-character limit."
   }
 }
 

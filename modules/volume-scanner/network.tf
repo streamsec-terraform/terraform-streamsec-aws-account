@@ -29,6 +29,12 @@ data "aws_availability_zones" "available" {
   }
 }
 
+# The coexistence precondition sits on the VPC as well as the ECS cluster. With
+# the documented `depends_on = [module.account]` wiring Terraform defers this
+# module's data sources to apply, so the guard cannot always run at plan time —
+# and the VPC has no dependency on the cluster, so without its own check it would
+# be created in parallel and left behind, along with the NAT gateway (~$32/mo)
+# and Elastic IP downstream of it, when the cluster's check trips.
 resource "aws_vpc" "this" {
   count = var.create_scanner_vpc ? 1 : 0
 
@@ -37,6 +43,13 @@ resource "aws_vpc" "this" {
   enable_dns_hostnames = true
 
   tags = merge(local.tags, { Name = "${local.name}-vpc" })
+
+  lifecycle {
+    precondition {
+      condition     = local.cloudformation_coexistence_ok
+      error_message = local.cloudformation_coexistence_error
+    }
+  }
 }
 
 resource "aws_internet_gateway" "this" {
@@ -105,6 +118,15 @@ resource "aws_eip" "nat" {
   count = var.create_scanner_vpc ? 1 : 0
 
   domain = "vpc"
+
+  # The AWS provider documents this dependency for an EIP used in a VPC. Its only
+  # other ordering was indirect, through the NAT gateway that consumes it, which
+  # left allocation free to race the gateway's creation and left the EIP with no
+  # ordering relationship to it at all on destroy.
+  #
+  # It also puts the EIP behind the VPC, so the coexistence precondition on
+  # aws_vpc.this now covers it: a refused apply cannot strand a paid-for address.
+  depends_on = [aws_internet_gateway.this]
 
   tags = merge(local.tags, { Name = "${local.name}-nat-eip" })
 }

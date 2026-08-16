@@ -349,10 +349,15 @@ run "byo_subnet_behind_cloud_wan_is_accepted" {
   }
 }
 
-# Regression for the reproduced plan failure: `vpc_id = module.vpc.vpc_id` is the
-# standard bring-your-own wiring, and folding `var.vpc_id != null` into the gate
-# that feeds for_each made the whole key set unknown and killed the plan.
-run "byo_vpc_id_unknown_at_plan_still_plans" {
+# NOTE: this asserts both supplied subnets are validated. It does NOT reproduce
+# the unknown-at-plan vpc_id regression, because `variables` blocks can only
+# supply known values — a literal vpc_id here is known, so folding
+# `var.vpc_id != null` back into local.byo_validate would leave this green.
+#
+# That regression is covered out-of-band by a root-module harness that builds an
+# aws_vpc and feeds its id into the module, which is the only way to produce a
+# genuinely unknown value. See the note in README.md under Tests.
+run "byo_subnets_are_each_validated" {
   command = plan
 
   variables {

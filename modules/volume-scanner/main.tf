@@ -43,6 +43,14 @@ locals {
   # fails the plan with "Iteration over null value" before anything is created.
   existing_cluster_arns = data.aws_ecs_clusters.existing.cluster_arns == null ? [] : data.aws_ecs_clusters.existing.cluster_arns
 
+  cloudformation_coexistence_error = <<-EOT
+    A CloudFormation-deployed Stream scanner is already running in ${local.region} (ECS cluster "streamsec-ebs-scanner-${local.region}").
+    Running both scans every volume twice, doubles EBS-snapshot and ingest cost, and the two compete over snapshot retention — each deletes snapshots tagged Purpose=ebs-package-collector account-wide, including the other's.
+    Delete that CloudFormation stack and let it finish, then apply. To run both deliberately, set allow_cloudformation_coexistence = true.
+  EOT
+
+  cloudformation_coexistence_ok = var.allow_cloudformation_coexistence || !local.cloudformation_scanner_present
+
   cloudformation_scanner_present = length([
     for arn in local.existing_cluster_arns :
     arn if endswith(arn, "/${local.cloudformation_cluster_name}")
@@ -72,8 +80,28 @@ locals {
   # console still shows the region healthy — zero findings, no error anywhere.
   customer_id = var.customer_id == null ? "" : trimspace(var.customer_id)
 
-  workload_kind_list    = [for kind in split(",", var.workload_kinds) : trimspace(kind) if trimspace(kind) != ""]
-  scan_workloads        = length(local.workload_kind_list) > 0
+  workload_kind_list = [for kind in split(",", var.workload_kinds) : trimspace(kind) if trimspace(kind) != ""]
+  scan_workloads     = length(local.workload_kind_list) > 0
+
+  # Fargate only accepts specific memory ranges per CPU size, in fixed
+  # increments. A bad pair is rejected by RegisterTaskDefinition mid-apply,
+  # after the VPC, NAT gateway, Elastic IP, cluster, secret and four IAM roles
+  # already exist — and the NAT keeps billing until someone destroys it. This is
+  # a cross-variable rule, which a variable validation block cannot express on
+  # the Terraform versions this module supports.
+  fargate_memory_ranges = {
+    "256"   = { min = 512, max = 2048, step = 512 }
+    "512"   = { min = 1024, max = 4096, step = 1024 }
+    "1024"  = { min = 2048, max = 8192, step = 1024 }
+    "2048"  = { min = 4096, max = 16384, step = 1024 }
+    "4096"  = { min = 8192, max = 30720, step = 1024 }
+    "8192"  = { min = 16384, max = 61440, step = 4096 }
+    "16384" = { min = 32768, max = 122880, step = 8192 }
+  }
+
+  fargate_range         = local.fargate_memory_ranges[var.task_cpu]
+  task_memory_number    = tonumber(var.task_memory)
+  task_sizing_is_valid  = local.task_memory_number >= local.fargate_range.min && local.task_memory_number <= local.fargate_range.max && local.task_memory_number % local.fargate_range.step == 0
   scan_lambda_workloads = contains(local.workload_kind_list, "lambda")
   scan_ecs_workloads    = contains(local.workload_kind_list, "ecs")
 
@@ -296,12 +324,8 @@ resource "aws_ecs_cluster" "this" {
 
   lifecycle {
     precondition {
-      condition     = var.allow_cloudformation_coexistence || !local.cloudformation_scanner_present
-      error_message = <<-EOT
-        A CloudFormation-deployed Stream scanner is already running in ${local.region} (ECS cluster "${local.cloudformation_cluster_name}").
-        Running both scans every volume twice, doubles EBS-snapshot and ingest cost, and the two compete over snapshot retention — each deletes snapshots tagged Purpose=ebs-package-collector account-wide, including the other's.
-        Delete that CloudFormation stack and let it finish, then apply. To run both deliberately, set allow_cloudformation_coexistence = true.
-      EOT
+      condition     = local.cloudformation_coexistence_ok
+      error_message = local.cloudformation_coexistence_error
     }
   }
 }
@@ -379,6 +403,16 @@ resource "aws_ecs_task_definition" "this" {
   depends_on = [aws_secretsmanager_secret_version.collection_token]
 
   lifecycle {
+    precondition {
+      condition     = local.task_sizing_is_valid
+      error_message = "Fargate rejects task_cpu = ${var.task_cpu} with task_memory = ${var.task_memory}. At that CPU size memory must be between ${local.fargate_range.min} and ${local.fargate_range.max} MiB in ${local.fargate_range.step} MiB steps. Left unchecked this fails at RegisterTaskDefinition mid-apply, after the NAT gateway and Elastic IP are already billing."
+    }
+
+    precondition {
+      condition     = local.tenant_name != ""
+      error_message = "tenant_name resolved to an empty string. Leave it unset to derive the tenant from the provider host, or set it to your tenant name — an empty value tags every SBOM with a tenant that does not exist, ingest drops them, and the console still shows the region healthy."
+    }
+
     precondition {
       condition     = local.customer_id != ""
       error_message = "customer_id is required and must not be blank — set it to the same workspace_id configured on the streamsec provider. The scanner sends it as COLLECTOR_CUSTOMER_ID / COLLECTOR_STREAM_SCAN_WORKSPACE."
@@ -504,8 +538,8 @@ resource "aws_lambda_invocation" "initial_scan" {
   # .orchestrator (RunTask/PassRole for the fan-out), .execution_secrets (the
   # collection token) or the execution-role attachment (ECR pull + awslogs)
   # exist. The task would then fail to pull, or start and get AccessDenied — and
-  # initial_scan.py swallows both, with ignore_changes = all meaning it never
-  # retries.
+  # initial_scan.py swallows both, and the invocation only re-runs when the
+  # function itself is replaced — so a failure here is not retried.
   depends_on = [
     aws_route.private_nat,
     aws_route_table_association.private,
@@ -526,13 +560,11 @@ resource "aws_lambda_invocation" "initial_scan" {
   # spam scans, and the CloudFormation trigger this replaces is a Create-only
   # custom resource that no-ops on update.
   #
-  # ignore_changes lists the inputs explicitly rather than using `all`, because
-  # `all` also suppressed function_name: renaming the deployment (changing
-  # resource_prefix) replaces the Lambda, and the invocation then showed no diff,
-  # kept a stale function_name in state, and the renamed deployment produced
-  # nothing until the next 03:00 UTC fire.
+  # replace_triggered_by is the ONLY thing controlling re-invocation. There is no
+  # ignore_changes here: `input` is the constant jsonencode({}) and can never
+  # change, so suppressing it protected nothing while reading like the guard.
   #
-  # replace_triggered_by keys on function_name, NOT on the whole resource.
+  # It keys on function_name, NOT on the whole resource.
   # Referencing the resource re-fires on any in-place UPDATE to it as well as on
   # replacement, and the Lambda's environment carries the task-definition ARN —
   # so every toggle, image, sizing or shard-count change produced a new revision
@@ -543,8 +575,6 @@ resource "aws_lambda_invocation" "initial_scan" {
   # function_name changes only when the deployment is renamed, which is exactly
   # when the function is genuinely replaced.
   lifecycle {
-    ignore_changes = [input]
-
     replace_triggered_by = [aws_lambda_function.initial_scan[0].function_name]
   }
 }

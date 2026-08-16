@@ -14,9 +14,9 @@ import time
 
 import boto3
 
-# The invocation is create-only (ignore_changes = all on the Terraform side), so
-# a failure here is never retried by anything: the scanner just stays silent
-# until the next scheduled fire. The most likely failure is IAM eventual
+# The invocation only re-runs when the Lambda itself is replaced (see
+# replace_triggered_by in main.tf), so a failure here is not retried: the scanner
+# just stays silent until the next scheduled fire. The most likely failure is IAM eventual
 # consistency — the role policies this task needs were attached seconds earlier
 # and may not have propagated yet — so retry the handful of errors that clear on
 # their own. Total sleep is bounded well inside the function's timeout.

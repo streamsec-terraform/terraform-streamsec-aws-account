@@ -22,9 +22,12 @@ locals {
         "lambda:GetFunction",
         "lambda:GetLayerVersion",
       ]
+      # Scoped to this account and this region: the scanner is a single-region
+      # deployment (COLLECTOR_REGION is pinned) and only ever reads workloads in
+      # the account it runs in.
       Resource = [
-        "arn:${local.partition}:lambda:*:*:function:*",
-        "arn:${local.partition}:lambda:*:*:layer:*:*",
+        "arn:${local.partition}:lambda:${local.region}:${local.account_id}:function:*",
+        "arn:${local.partition}:lambda:${local.region}:${local.account_id}:layer:*:*",
       ]
     },
   ]
@@ -59,7 +62,7 @@ locals {
         "ecr:BatchGetImage",
         "ecr:GetDownloadUrlForLayer",
       ]
-      Resource = "arn:${local.partition}:ecr:*:*:repository/*"
+      Resource = "arn:${local.partition}:ecr:${local.region}:${local.account_id}:repository/*"
     },
   ]
 
@@ -92,6 +95,12 @@ locals {
   # CreateGrant is split out and conditioned on kms:GrantIsForAWSResource, the
   # least-privilege pattern AWS documents, so the role cannot mint grants of its
   # own — only ones EC2 creates on its behalf.
+  #
+  # kms:ViaService confines the "*" default to keys used THROUGH the EBS and EC2
+  # data planes, so a role that can read encrypted volumes cannot also decrypt
+  # S3 objects, RDS storage or Secrets Manager values protected by the same CMK.
+  # Both service names are required: ec2.<region> covers CreateSnapshot of an
+  # encrypted volume, ebs.<region> covers the EBS-direct block reads.
   kms_statements = [
     {
       Sid    = "ReadEncryptedVolumes"
@@ -104,6 +113,14 @@ locals {
         "kms:ReEncryptTo",
       ]
       Resource = var.kms_key_arns
+      Condition = {
+        StringEquals = {
+          "kms:ViaService" = [
+            "ec2.${local.region}.amazonaws.com",
+            "ebs.${local.region}.amazonaws.com",
+          ]
+        }
+      }
     },
     {
       Sid       = "GrantEC2SnapshotAccessToKeys"
@@ -111,6 +128,29 @@ locals {
       Action    = "kms:CreateGrant"
       Resource  = var.kms_key_arns
       Condition = { Bool = { "kms:GrantIsForAWSResource" = "true" } }
+    },
+  ]
+
+  # Shared by all three launchers (orchestrator, EventBridge, initial scan). They
+  # were three near-identical copies, differing only in Sid presence and PassRole
+  # ordering — which is how a missing grant hid behind a vacuous test. One
+  # definition keeps them in lockstep.
+  run_scanner_task_statements = [
+    {
+      Sid       = "RunScannerTask"
+      Effect    = "Allow"
+      Action    = "ecs:RunTask"
+      Resource  = local.run_task_resources
+      Condition = { ArnEquals = { "ecs:cluster" = aws_ecs_cluster.this.arn } }
+    },
+    {
+      Sid    = "PassScannerRoles"
+      Effect = "Allow"
+      Action = "iam:PassRole"
+      Resource = [
+        aws_iam_role.task.arn,
+        aws_iam_role.execution.arn,
+      ]
     },
   ]
 
@@ -248,14 +288,7 @@ resource "aws_iam_role_policy" "orchestrator" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
-      {
-        Sid       = "OrchestratorRunChildTasks"
-        Effect    = "Allow"
-        Action    = "ecs:RunTask"
-        Resource  = local.run_task_resources
-        Condition = { ArnEquals = { "ecs:cluster" = aws_ecs_cluster.this.arn } }
-      },
+    Statement = concat(local.run_scanner_task_statements, [
       {
         Sid       = "OrchestratorDescribeTasks"
         Effect    = "Allow"
@@ -263,16 +296,7 @@ resource "aws_iam_role_policy" "orchestrator" {
         Resource  = "*"
         Condition = { ArnEquals = { "ecs:cluster" = aws_ecs_cluster.this.arn } }
       },
-      {
-        Sid    = "OrchestratorPassRoleToChildren"
-        Effect = "Allow"
-        Action = "iam:PassRole"
-        Resource = [
-          aws_iam_role.execution.arn,
-          aws_iam_role.task.arn,
-        ]
-      },
-    ]
+    ])
   })
 }
 
@@ -335,6 +359,13 @@ resource "aws_iam_role" "events" {
         Effect    = "Allow"
         Principal = { Service = "events.amazonaws.com" }
         Action    = "sts:AssumeRole"
+        # Without this any EventBridge rule in the account could assume this role
+        # and use its ecs:RunTask + iam:PassRole grants to launch the scanner
+        # task. The rule does not reference the role, so there is no cycle.
+        Condition = {
+          StringEquals = { "aws:SourceAccount" = local.account_id }
+          ArnEquals    = { "aws:SourceArn" = aws_cloudwatch_event_rule.daily.arn }
+        }
       }
     ]
   })
@@ -347,23 +378,8 @@ resource "aws_iam_role_policy" "events" {
   role = aws_iam_role.events.id
 
   policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect    = "Allow"
-        Action    = "ecs:RunTask"
-        Resource  = local.run_task_resources
-        Condition = { ArnEquals = { "ecs:cluster" = aws_ecs_cluster.this.arn } }
-      },
-      {
-        Effect = "Allow"
-        Action = "iam:PassRole"
-        Resource = [
-          aws_iam_role.task.arn,
-          aws_iam_role.execution.arn,
-        ]
-      },
-    ]
+    Version   = "2012-10-17"
+    Statement = local.run_scanner_task_statements
   })
 }
 
@@ -404,22 +420,7 @@ resource "aws_iam_role_policy" "initial_scan" {
   role = aws_iam_role.initial_scan[0].id
 
   policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect    = "Allow"
-        Action    = "ecs:RunTask"
-        Resource  = local.run_task_resources
-        Condition = { ArnEquals = { "ecs:cluster" = aws_ecs_cluster.this.arn } }
-      },
-      {
-        Effect = "Allow"
-        Action = "iam:PassRole"
-        Resource = [
-          aws_iam_role.task.arn,
-          aws_iam_role.execution.arn,
-        ]
-      },
-    ]
+    Version   = "2012-10-17"
+    Statement = local.run_scanner_task_statements
   })
 }

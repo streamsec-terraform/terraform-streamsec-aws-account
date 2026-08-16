@@ -215,7 +215,14 @@ run "refuses_to_deploy_alongside_the_cloudformation_scanner" {
     }
   }
 
-  expect_failures = [aws_ecs_cluster.this]
+  # Both, not just the cluster. The VPC carries the same guard because it has no
+  # dependency on the cluster and would otherwise be created in parallel — and
+  # left behind billing — when the cluster's check trips. The Elastic IP and NAT
+  # gateway are downstream of the VPC, so they are covered by its failure.
+  expect_failures = [
+    aws_ecs_cluster.this,
+    aws_vpc.this,
+  ]
 }
 
 run "coexistence_can_be_opted_into" {
@@ -414,8 +421,12 @@ run "run_task_is_scoped_to_the_scanner_cluster" {
   # made a pure-style change to a list silently empty the filter, and alltrue([])
   # is true, so the one test guarding "no role can launch the scanner task into
   # another cluster" would have gone permanently green while checking nothing.
+  # flatten() around the OUTER list is the point. Without it, length() counts the
+  # three inner lists — one per policy — and returns 3 no matter how many
+  # statements matched, so deleting a RunTask grant entirely left this green.
+  # Verified by deleting the events policy's statement: the suite now fails.
   assert {
-    condition = length([
+    condition = length(flatten([
       for policy in [
         aws_iam_role_policy.orchestrator.policy,
         aws_iam_role_policy.events.policy,
@@ -424,7 +435,7 @@ run "run_task_is_scoped_to_the_scanner_cluster" {
         for s in jsondecode(policy).Statement :
         s if contains(flatten([s.Action]), "ecs:RunTask")
       ]
-    ]) == 3
+    ])) == 3
     error_message = "Expected exactly one ecs:RunTask statement in each of the three policies (orchestrator, events, initial scan). A missing one means a role lost its grant, or the filter stopped matching."
   }
 
