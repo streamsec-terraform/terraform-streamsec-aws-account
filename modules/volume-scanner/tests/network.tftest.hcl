@@ -25,6 +25,11 @@ mock_provider "aws" {
   mock_data "aws_ecs_clusters" {
     defaults = { cluster_arns = [] }
   }
+  # The service name is resolved rather than built from a string, so that aws-cn's
+  # "cn." prefix is handled and a missing service fails at plan.
+  mock_data "aws_vpc_endpoint_service" {
+    defaults = { service_name = "com.amazonaws.us-east-1.resolved" }
+  }
   mock_data "aws_availability_zones" {
     defaults = { names = ["us-east-1a", "us-east-1b"] }
   }
@@ -103,8 +108,9 @@ run "default_provisions_the_scanner_vpc" {
   }
 }
 
-# A /27 VPC halves into a /28 private subnet: 16 addresses, 5 reserved by AWS,
-# 11 usable ENIs. 20 children plus the orchestrator does not fit.
+# A /27 VPC halves into a /28 private subnet: 16 addresses, 5 reserved by AWS and
+# 1 taken by the EBS endpoint ENI, leaving 10. 20 children plus the orchestrator
+# does not fit.
 run "concurrency_beyond_the_subnet_capacity_is_rejected" {
   command = plan
 
@@ -148,9 +154,9 @@ run "same_config_fits_once_the_endpoint_is_disabled" {
   command = plan
 
   variables {
-    scanner_vpc_cidr      = "10.255.0.0/27"
-    max_concurrent_shards = 10
-    create_vpc_endpoints  = false
+    scanner_vpc_cidr        = "10.255.0.0/27"
+    max_concurrent_shards   = 10
+    create_ebs_vpc_endpoint = false
   }
 
   assert {
@@ -185,8 +191,8 @@ run "vpc_endpoints_are_created_by_default" {
   }
 
   assert {
-    condition     = aws_vpc_endpoint.ebs[0].service_name == "com.amazonaws.us-east-1.ebs" && aws_vpc_endpoint.ebs[0].vpc_endpoint_type == "Interface" && aws_vpc_endpoint.ebs[0].private_dns_enabled == true
-    error_message = "The EBS endpoint must be a regional interface endpoint with private DNS, or the EBS Direct API hostname will not resolve to it and traffic silently stays on the NAT."
+    condition     = aws_vpc_endpoint.ebs[0].service_name == data.aws_vpc_endpoint_service.ebs[0].service_name && aws_vpc_endpoint.ebs[0].vpc_endpoint_type == "Interface" && aws_vpc_endpoint.ebs[0].private_dns_enabled == true
+    error_message = "The EBS endpoint must take its service name from the resolver (so aws-cn's cn. prefix works) and be an interface endpoint with private DNS — without private DNS the EBS Direct API hostname does not resolve to it and traffic silently stays on the NAT."
   }
 
   assert {
@@ -201,29 +207,32 @@ run "endpoints_requested_in_byo_mode_are_rejected" {
   command = plan
 
   variables {
-    create_scanner_vpc   = false
-    vpc_id               = "vpc-scanner"
-    subnet_ids           = ["subnet-private-a"]
-    create_vpc_endpoints = true
+    create_scanner_vpc      = false
+    vpc_id                  = "vpc-scanner"
+    subnet_ids              = ["subnet-private-a"]
+    create_ebs_vpc_endpoint = true
   }
 
   expect_failures = [aws_security_group.this]
 }
 
-run "vpc_endpoints_can_be_disabled" {
+run "ebs_endpoint_can_be_disabled_without_losing_s3" {
   command = plan
 
   variables {
-    create_vpc_endpoints = false
+    create_ebs_vpc_endpoint = false
   }
 
   assert {
     condition = alltrue([
       length(aws_vpc_endpoint.ebs) == 0,
-      length(aws_vpc_endpoint.s3) == 0,
       length(aws_security_group.endpoints) == 0,
+      # The free gateway endpoint survives. The opt-out exists for a missing EBS
+      # interface service; dropping S3 too would put ECR layer pulls back on the
+      # NAT for no reason.
+      length(aws_vpc_endpoint.s3) == 1,
     ])
-    error_message = "create_vpc_endpoints = false must drop all three endpoint resources, for regions or partitions where the service is unavailable."
+    error_message = "create_ebs_vpc_endpoint = false must drop only the interface endpoint and its security group, leaving the free S3 gateway endpoint in place."
   }
 }
 
@@ -301,7 +310,13 @@ run "byo_subnet_behind_a_transit_gateway_is_accepted" {
   }
 }
 
-# NOTE: this proves an IGW-only subnet is REJECTED. It cannot prove the
+# NOTE: every bring-your-own failure below names aws_security_group.this, which
+# carries six preconditions, so any one of them satisfies the assertion. That is
+# deliberate: the checks were moved to a leaf resource to make the assertions
+# discriminating and moved back when it turned out to weaken the gate in the
+# apply-deferred path. Gate strength beat assertion precision.
+#
+# This proves an IGW-only subnet is REJECTED. It cannot prove the
 # public-subnet-specific wording survives: that wording is one branch of a
 # format() inside byo_bad_subnets, not its own precondition, and expect_failures
 # names a resource rather than a condition. Verified by deleting the igw- branch
@@ -333,7 +348,7 @@ run "byo_igw_only_subnet_is_rejected" {
     }
   }
 
-  expect_failures = [aws_vpc_security_group_egress_rule.all]
+  expect_failures = [aws_security_group.this]
 }
 
 run "byo_subnet_without_a_default_route_is_rejected" {
@@ -363,7 +378,7 @@ run "byo_subnet_without_a_default_route_is_rejected" {
     }
   }
 
-  expect_failures = [aws_vpc_security_group_egress_rule.all]
+  expect_failures = [aws_security_group.this]
 }
 
 run "byo_subnet_in_another_vpc_is_rejected" {
@@ -533,7 +548,7 @@ run "byo_subnet_without_enough_free_ips_is_rejected" {
     }
   }
 
-  expect_failures = [aws_vpc_security_group_egress_rule.all]
+  expect_failures = [aws_security_group.this]
 }
 
 # An isolated private subnet whose ONLY non-local route is the standard S3
@@ -567,7 +582,7 @@ run "s3_gateway_endpoint_route_is_not_egress" {
     }
   }
 
-  expect_failures = [aws_vpc_security_group_egress_rule.all]
+  expect_failures = [aws_security_group.this]
 }
 
 # A genuinely public subnet that also carries the S3 gateway endpoint route. The
@@ -614,7 +629,7 @@ run "public_subnet_with_an_s3_endpoint_is_still_rejected" {
     }
   }
 
-  expect_failures = [aws_vpc_security_group_egress_rule.all]
+  expect_failures = [aws_security_group.this]
 }
 
 run "supplying_a_vpc_while_creating_one_is_rejected" {

@@ -26,6 +26,9 @@ mock_provider "aws" {
   mock_data "aws_ecs_clusters" {
     defaults = { cluster_arns = [] }
   }
+  mock_data "aws_vpc_endpoint_service" {
+    defaults = { service_name = "com.amazonaws.us-east-1.resolved" }
+  }
   mock_data "aws_availability_zones" {
     defaults = { names = ["us-east-1a", "us-east-1b"] }
   }
@@ -452,6 +455,32 @@ run "run_task_is_scoped_to_the_scanner_cluster" {
       ]
     ]))
     error_message = "Every ecs:RunTask grant must be conditioned on the scanner's own cluster, or these roles could launch the task into any cluster in the account."
+  }
+}
+
+# The duplicate-scan guard in initial_scan.py calls ecs:ListTasks. Nothing tested
+# that the grant existed, so when it was added it landed on the EventBridge role
+# instead and the guard stayed dead through a full review round.
+run "initial_scan_role_can_check_for_a_running_scan" {
+  command = apply
+
+  assert {
+    condition = length([
+      for s in jsondecode(aws_iam_role_policy.initial_scan[0].policy).Statement :
+      s if contains(flatten([s.Action]), "ecs:ListTasks")
+    ]) == 1
+    error_message = "The initial-scan role must hold ecs:ListTasks, or the duplicate-scan guard is denied on every invocation, swallowed by its own except, and a second orchestrator snapshots every volume again."
+  }
+
+  assert {
+    condition = alltrue([
+      for policy in [aws_iam_role_policy.events.policy, aws_iam_role_policy.orchestrator.policy] :
+      length([
+        for s in jsondecode(policy).Statement :
+        s if contains(flatten([s.Action]), "ecs:ListTasks")
+      ]) == 0
+    ])
+    error_message = "Only the initial-scan role calls ListTasks; granting it to the EventBridge or orchestrator roles is an unused permission."
   }
 }
 

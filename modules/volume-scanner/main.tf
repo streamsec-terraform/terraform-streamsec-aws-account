@@ -123,7 +123,12 @@ locals {
 
   # Only meaningful when the module owns the VPC — see the note in network.tf for
   # why bring-your-own-subnet mode deliberately gets no endpoints.
-  create_vpc_endpoints = var.create_scanner_vpc && coalesce(var.create_vpc_endpoints, true)
+  # Split: the documented reason to opt out — com.amazonaws.<region>.ebs missing
+  # in a region or partition — applies only to the interface endpoint. The S3
+  # gateway endpoint is free, exists everywhere, and dropping it just puts ECR
+  # layer pulls back on the NAT for no reason.
+  create_ebs_endpoint = var.create_scanner_vpc && coalesce(var.create_ebs_vpc_endpoint, true)
+  create_s3_endpoint  = var.create_scanner_vpc
 
   scanner_public_subnet_cidr  = cidrsubnet(var.scanner_vpc_cidr, 1, 0)
   scanner_private_subnet_cidr = cidrsubnet(var.scanner_vpc_cidr, 1, 1)
@@ -135,7 +140,7 @@ locals {
   # AWS reserves five addresses per subnet, and the EBS interface endpoint places
   # one more ENI of its own in this subnet when enabled — miss it and the check
   # passes at exactly the boundary while the last child task fails to get an ENI.
-  scanner_private_subnet_capacity = pow(2, 32 - tonumber(split("/", local.scanner_private_subnet_cidr)[1])) - 5 - (local.create_vpc_endpoints ? 1 : 0)
+  scanner_private_subnet_capacity = pow(2, 32 - tonumber(split("/", local.scanner_private_subnet_cidr)[1])) - 5 - (local.create_ebs_endpoint ? 1 : 0)
   scanner_peak_task_count         = var.max_concurrent_shards + 1
 
   # Family ARN with no revision suffix, so the orchestrator's RunTask always
@@ -276,8 +281,8 @@ locals {
   byo_subnet_igw_only = {
     for key, routes in local.byo_default_routes :
     key => !local.byo_subnet_has_egress[key] && length([
-      for route in routes : route
-      if route.cidr_block == "0.0.0.0/0" && startswith(route.gateway_id, "igw-")
+      # No cidr_block re-test: byo_default_routes already filtered to 0.0.0.0/0.
+      for route in routes : route if startswith(route.gateway_id, "igw-")
     ]) > 0
   }
 
@@ -451,6 +456,15 @@ resource "aws_cloudwatch_event_rule" "daily" {
   tags = local.tags
 }
 
+# KNOWN GAP: no dead_letter_config and no retry_policy. If RunTask fails
+# persistently on the scheduled path — the subnet fills up, or the pinned task
+# definition revision is deregistered out of band — EventBridge retries for 24h
+# and then discards the event, writing nothing to any log group this module owns.
+# The initial-scan path at least logs to CloudWatch; this one has no equivalent,
+# and with registration not yet wired the console keeps showing the region as
+# connected. A DLQ would need an SQS queue and its access policy, which the
+# CloudFormation stack this mirrors does not create either; raised here so the
+# absence is a recorded decision rather than an oversight.
 resource "aws_cloudwatch_event_target" "daily" {
   rule      = aws_cloudwatch_event_rule.daily.name
   target_id = "ebs-scanner-daily"
@@ -591,25 +605,10 @@ resource "aws_lambda_invocation" "initial_scan" {
     aws_cloudwatch_event_target.daily,
   ]
 
-  # Fire once per Lambda, not once per apply. Re-running on every apply would
-  # spam scans, and the CloudFormation trigger this replaces is a Create-only
-  # custom resource that no-ops on update.
-  #
-  # Re-invocation is controlled entirely by function_name, which is ForceNew on
-  # this resource: renaming the deployment replaces the Lambda, which replaces
-  # this and fires a fresh scan. That is why the earlier `ignore_changes = all`
-  # was wrong — it suppressed the function_name diff and a renamed deployment
-  # produced nothing until 03:00 UTC. A replace_triggered_by on the same
-  # attribute was tried as belt-and-braces and removed again: it can only fire
-  # where the plain reference already has, so it added a second mechanism to
-  # reason about and changed nothing.
-  # Referencing the resource re-fires on any in-place UPDATE to it as well as on
-  # replacement, and the Lambda's environment carries the task-definition ARN —
-  # so every toggle, image, sizing or shard-count change produced a new revision
-  # and kicked off a full account scan on apply. Verified against real AWS:
-  # flipping scan_databases planned "aws_lambda_invocation ... will be replaced
-  # due to changes in replace_triggered_by". That contradicts the CloudFormation
-  # trigger this replaces, which is Create-only and no-ops on stack update.
-  # function_name changes only when the deployment is renamed, which is exactly
-  # when the function is genuinely replaced.
+  # Fires once per Lambda, not once per apply. Re-invocation hangs entirely off
+  # function_name, which is ForceNew on this resource: renaming the deployment
+  # replaces the function, which replaces this and starts a fresh scan. Nothing
+  # else re-triggers it, which is why the CloudFormation trigger it replaces —
+  # a Create-only custom resource that no-ops on update — behaves the same way.
+  # To force a scan out of band, run the task from the ECS console.
 }

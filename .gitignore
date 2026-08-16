@@ -39,13 +39,12 @@ override.tf.json
 .terraformrc
 terraform.rc
 
-# Local test harnesses and credentials — never commit.
-# Stream Security provider credentials belong in the environment
-# (STREAMSEC_HOST / STREAMSEC_WORKSPACE_ID / STREAMSEC_API_TOKEN), never in a file.
-.env
+# Local test harnesses and credentials — never commit. Stream Security provider
+# credentials belong in the environment (STREAMSEC_HOST / STREAMSEC_WORKSPACE_ID
+# / STREAMSEC_API_TOKEN), never in a file. `local-tests/` is already covered
+# above; `*.env` covers `.env` too.
 *.env
 env.sh
 *.tfplan
 *.tfplan.*
-local-test/
 scanner-test/

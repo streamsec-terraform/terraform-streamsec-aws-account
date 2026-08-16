@@ -14,12 +14,16 @@ import time
 
 import boto3
 
-# The invocation only re-runs when the Lambda itself is replaced (see
-# replace_triggered_by in main.tf), so a failure here is not retried: the scanner
+# The invocation only re-runs when the Lambda itself is replaced — function_name
+# is ForceNew on aws_lambda_invocation — so a failure here is not retried: the scanner
 # just stays silent until the next scheduled fire. The most likely failure is IAM eventual
 # consistency — the role policies this task needs were attached seconds earlier
 # and may not have propagated yet — so retry the handful of errors that clear on
 # their own. Total sleep is bounded well inside the function's timeout.
+#
+# InvalidParameterException is deliberately NOT here: ECS returns it for
+# permanently invalid configuration, so retrying burns the full ladder inside a
+# blocking terraform apply and fails anyway.
 RETRY_DELAYS_SECONDS = (5, 10, 15, 20)
 
 RETRYABLE_ERROR_CODES = frozenset(
@@ -32,7 +36,6 @@ RETRYABLE_ERROR_CODES = frozenset(
         "ClientException",
         "AccessDeniedException",
         "AccessDenied",
-        "InvalidParameterException",
         "ClusterNotFoundException",
         "ServerException",
         "ThrottlingException",

@@ -204,7 +204,7 @@ resource "aws_route_table_association" "private" {
 ################################################################################
 
 resource "aws_security_group" "endpoints" {
-  count = local.create_vpc_endpoints ? 1 : 0
+  count = local.create_ebs_endpoint ? 1 : 0
 
   name        = "${local.regional_name}-vpce-sg"
   description = "Stream Security EBS Scanner - HTTPS from the scanner tasks to the VPC endpoints"
@@ -214,7 +214,7 @@ resource "aws_security_group" "endpoints" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "endpoints_https" {
-  count = local.create_vpc_endpoints ? 1 : 0
+  count = local.create_ebs_endpoint ? 1 : 0
 
   security_group_id            = aws_security_group.endpoints[0].id
   description                  = "HTTPS from the scanner tasks"
@@ -227,11 +227,30 @@ resource "aws_vpc_security_group_ingress_rule" "endpoints_https" {
 # Snapshot blocks are read over this instead of the NAT Gateway. PrivateDnsEnabled
 # needs the VPC's DNS support and hostnames, both set above, so the EBS Direct API
 # hostname resolves to this ENI without the scanner being configured for it.
+# Resolved rather than hardcoded as "com.amazonaws.<region>.<svc>": in aws-cn the
+# name carries a "cn." prefix, and this module is partition-aware everywhere else.
+# Looking it up also fails at PLAN with a clear message where the service does not
+# exist, instead of leaving a NAT gateway and Elastic IP billing after a failed
+# apply. create_ebs_vpc_endpoint = false is the escape hatch.
+data "aws_vpc_endpoint_service" "ebs" {
+  count = local.create_ebs_endpoint ? 1 : 0
+
+  service      = "ebs"
+  service_type = "Interface"
+}
+
+data "aws_vpc_endpoint_service" "s3" {
+  count = local.create_s3_endpoint ? 1 : 0
+
+  service      = "s3"
+  service_type = "Gateway"
+}
+
 resource "aws_vpc_endpoint" "ebs" {
-  count = local.create_vpc_endpoints ? 1 : 0
+  count = local.create_ebs_endpoint ? 1 : 0
 
   vpc_id              = aws_vpc.this[0].id
-  service_name        = "com.amazonaws.${local.region}.ebs"
+  service_name        = data.aws_vpc_endpoint_service.ebs[0].service_name
   vpc_endpoint_type   = "Interface"
   private_dns_enabled = true
   subnet_ids          = [aws_subnet.private[0].id]
@@ -243,10 +262,10 @@ resource "aws_vpc_endpoint" "ebs" {
 # Gateway endpoints are free and route S3-backed container image layers away from
 # the NAT Gateway.
 resource "aws_vpc_endpoint" "s3" {
-  count = local.create_vpc_endpoints ? 1 : 0
+  count = local.create_s3_endpoint ? 1 : 0
 
   vpc_id            = aws_vpc.this[0].id
-  service_name      = "com.amazonaws.${local.region}.s3"
+  service_name      = data.aws_vpc_endpoint_service.s3[0].service_name
   vpc_endpoint_type = "Gateway"
   route_table_ids   = [aws_route_table.private[0].id]
 
@@ -362,13 +381,35 @@ resource "aws_security_group" "this" {
     }
 
     precondition {
-      condition     = var.create_scanner_vpc || var.create_vpc_endpoints != true
-      error_message = "create_vpc_endpoints was explicitly set to true while create_scanner_vpc is false, so it would be silently ignored — the module does not create endpoints in a VPC it does not own, and a second S3 gateway endpoint on a route table that already has one fails with RouteAlreadyExists. Set create_vpc_endpoints = false and add an interface endpoint for com.amazonaws.<region>.ebs to your own VPC to get the same saving."
+      condition     = var.create_scanner_vpc || var.create_ebs_vpc_endpoint != true
+      error_message = "create_ebs_vpc_endpoint was explicitly set to true while create_scanner_vpc is false, so it would be silently ignored — the module does not create endpoints in a VPC it does not own, and a second S3 gateway endpoint on a route table that already has one fails with RouteAlreadyExists. Leave it unset and add an interface endpoint for the EBS Direct API to your own VPC to get the same saving."
     }
 
     precondition {
       condition     = !var.create_scanner_vpc || (var.vpc_id == null && length(var.subnet_ids) == 0)
       error_message = "vpc_id / subnet_ids were supplied while create_scanner_vpc is true, so they would be ignored and the module would provision its own VPC and NAT Gateway (~$32/mo per region). Set create_scanner_vpc = false to use the supplied network, or drop vpc_id and subnet_ids."
+    }
+
+    # These two were briefly moved onto the egress rule so that expect_failures
+    # could tell "bad subnet" from "bad inputs". That traded a real property for
+    # a test convenience: the security group is a dependency of the task
+    # definition, the event target and the initial-scan Lambda, whereas the
+    # egress rule is a graph leaf — so in the apply-deferred path (see above) the
+    # cluster, task definition, secret, log group and four IAM roles would all be
+    # created before the check fired. The gate matters more than the assertion
+    # precision, so they live here; tests/network.tftest.hcl records what that
+    # costs in discrimination.
+    precondition {
+      condition     = !local.byo_validate || length(local.byo_subnets) == 0 || local.byo_total_free_ips >= local.scanner_peak_task_count
+      error_message = "max_concurrent_shards = ${var.max_concurrent_shards} needs ${local.scanner_peak_task_count} concurrent task ENIs (the orchestrator plus its children), but the supplied subnets have only ${local.byo_total_free_ips} free IP addresses between them. Supply more or larger subnets, or lower max_concurrent_shards."
+    }
+
+    precondition {
+      condition     = length(local.byo_bad_subnets) == 0
+      error_message = <<-EOT
+        Scanner subnet check failed: ${join("; ", local.byo_bad_subnets)}.
+        Provide a private subnet whose default route targets a NAT Gateway, a NAT instance or appliance ENI, a VPC Endpoint, a Transit Gateway, a Cloud WAN core network, or an Outposts local gateway.
+      EOT
     }
 
     precondition {
@@ -393,34 +434,9 @@ locals {
   ])) : 0
 }
 
-# The two SUBNET-QUALITY checks live here rather than on the security group so
-# that a test asserting "this subnet is unusable" cannot be satisfied by one of
-# the input-shape checks above, and vice versa. Seven runs previously named the
-# same resource, so any of five preconditions satisfied any of them.
-#
-# It only splits those two CLASSES apart. expect_failures names a resource, not a
-# condition, so the two checks below are still indistinguishable from each other
-# — and the public-subnet wording inside byo_bad_subnets is not a separate
-# condition at all, just a clearer message for one case, so no test can detect
-# its removal. Both subnet kinds are still correctly rejected without it.
 resource "aws_vpc_security_group_egress_rule" "all" {
   security_group_id = aws_security_group.this.id
-
-  lifecycle {
-    precondition {
-      condition     = !local.byo_validate || length(local.byo_subnets) == 0 || local.byo_total_free_ips >= local.scanner_peak_task_count
-      error_message = "max_concurrent_shards = ${var.max_concurrent_shards} needs ${local.scanner_peak_task_count} concurrent task ENIs (the orchestrator plus its children), but the supplied subnets have only ${local.byo_total_free_ips} free IP addresses between them. Supply more or larger subnets, or lower max_concurrent_shards."
-    }
-
-    precondition {
-      condition     = length(local.byo_bad_subnets) == 0
-      error_message = <<-EOT
-        Scanner subnet check failed: ${join("; ", local.byo_bad_subnets)}.
-        Provide a private subnet whose default route targets a NAT Gateway, a NAT instance or appliance ENI, a VPC Endpoint, a Transit Gateway, a Cloud WAN core network, or an Outposts local gateway.
-      EOT
-    }
-  }
-  description = "Allow all outbound - AWS APIs, public ECR, Grype DB, Stream ingest"
-  ip_protocol = "-1"
-  cidr_ipv4   = "0.0.0.0/0"
+  description       = "Allow all outbound - AWS APIs, public ECR, Grype DB, Stream ingest"
+  ip_protocol       = "-1"
+  cidr_ipv4         = "0.0.0.0/0"
 }

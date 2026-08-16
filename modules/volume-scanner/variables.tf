@@ -144,8 +144,8 @@ variable "create_scanner_vpc" {
   default     = true
 }
 
-variable "create_vpc_endpoints" {
-  description = "Create interface and gateway VPC endpoints so snapshot block reads and S3-backed image layers bypass the NAT Gateway. Defaults to on whenever the module creates the VPC: block reads are the dominant egress cost and NAT data processing is ~4.5x the PrivateLink rate for the same bytes. Leave unset in bring-your-own-subnet mode — the module does not create endpoints in a VPC it does not own, and setting this to true there is rejected rather than silently ignored. Set false to opt out, e.g. where com.amazonaws.<region>.ebs is unavailable in your region or partition."
+variable "create_ebs_vpc_endpoint" {
+  description = "Create the interface VPC endpoint for the EBS Direct API so snapshot block reads bypass the NAT Gateway. Defaults to on whenever the module creates the VPC: block reads are the dominant egress cost and NAT data processing is ~4.5x the PrivateLink rate for the same bytes. Set false where the endpoint service is unavailable in your region or partition — the free S3 gateway endpoint is unaffected and is always created alongside a module-managed VPC. Leave unset in bring-your-own-subnet mode; the module does not create endpoints in a VPC it does not own, and setting this true there is rejected rather than silently ignored."
   type        = bool
 
   # Tri-state on purpose. Unset means "on when the module owns the VPC, off

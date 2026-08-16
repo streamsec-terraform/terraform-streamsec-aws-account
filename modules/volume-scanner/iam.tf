@@ -408,19 +408,8 @@ resource "aws_iam_role_policy" "events" {
   role = aws_iam_role.events.id
 
   policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = concat(local.run_scanner_task_statements, [
-      {
-        # The function refuses to start a second orchestrator while one is
-        # already running. Without this the ListTasks call is denied on every
-        # invocation, the bare except swallows it, and the guard never fires.
-        Sid       = "InitialScanCheckForRunningScan"
-        Effect    = "Allow"
-        Action    = "ecs:ListTasks"
-        Resource  = "*"
-        Condition = { ArnEquals = { "ecs:cluster" = aws_ecs_cluster.this.arn } }
-      },
-    ])
+    Version   = "2012-10-17"
+    Statement = local.run_scanner_task_statements
   })
 }
 
@@ -440,6 +429,13 @@ resource "aws_iam_role" "initial_scan" {
         Effect    = "Allow"
         Principal = { Service = "lambda.amazonaws.com" }
         Action    = "sts:AssumeRole"
+        # The other three roles pin the assuming service to this account and an
+        # ARN pattern; this one holds ecs:RunTask and iam:PassRole on both
+        # scanner roles, so leaving it unconditioned was an inconsistency.
+        Condition = {
+          StringEquals = { "aws:SourceAccount" = local.account_id }
+          ArnLike      = { "aws:SourceArn" = "arn:${local.partition}:lambda:${local.region}:${local.account_id}:function:*" }
+        }
       }
     ]
   })
@@ -461,7 +457,18 @@ resource "aws_iam_role_policy" "initial_scan" {
   role = aws_iam_role.initial_scan[0].id
 
   policy = jsonencode({
-    Version   = "2012-10-17"
-    Statement = local.run_scanner_task_statements
+    Version = "2012-10-17"
+    Statement = concat(local.run_scanner_task_statements, [
+      {
+        # The function refuses to start a second orchestrator while one is
+        # already running. Without this the ListTasks call is denied on every
+        # invocation, the bare except swallows it, and the guard never fires.
+        Sid       = "InitialScanCheckForRunningScan"
+        Effect    = "Allow"
+        Action    = "ecs:ListTasks"
+        Resource  = "*"
+        Condition = { ArnEquals = { "ecs:cluster" = aws_ecs_cluster.this.arn } }
+      },
+    ])
   })
 }
