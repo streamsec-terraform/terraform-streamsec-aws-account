@@ -374,7 +374,7 @@ resource "aws_iam_role_policy" "events" {
 resource "aws_iam_role" "initial_scan" {
   count = var.trigger_initial_scan ? 1 : 0
 
-  name = "${local.regional_name}-initial-scan-role"
+  name = "${local.regional_name}-init-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"

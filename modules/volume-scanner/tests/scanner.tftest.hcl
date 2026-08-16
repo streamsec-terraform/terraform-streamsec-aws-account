@@ -8,7 +8,7 @@ mock_provider "aws" {
     defaults = { arn = "arn:aws:ecs:us-east-1:111111111111:cluster/mock-scanner" }
   }
   mock_resource "aws_ecs_task_definition" {
-    defaults = { arn = "arn:aws:ecs:us-east-1:111111111111:task-definition/streamsec-ebs-scanner:1" }
+    defaults = { arn = "arn:aws:ecs:us-east-1:111111111111:task-definition/streamsec-ebs-scanner-tf:1" }
   }
   mock_resource "aws_iam_role" {
     defaults = { arn = "arn:aws:iam::111111111111:role/mock-scanner-role" }
@@ -21,6 +21,10 @@ mock_provider "aws" {
   }
   mock_data "aws_partition" {
     defaults = { partition = "aws" }
+  }
+  # No CloudFormation-deployed scanner in the region unless a run overrides this.
+  mock_data "aws_ecs_clusters" {
+    defaults = { cluster_arns = [] }
   }
   mock_data "aws_availability_zones" {
     defaults = { names = ["us-east-1a", "us-east-1b"] }
@@ -82,7 +86,7 @@ run "container_environment_matches_the_cloudformation_defaults" {
   }
 
   assert {
-    condition     = contains([for e in jsondecode(aws_ecs_task_definition.this.container_definitions)[0].environment : "${e.name}=${e.value}"], "COLLECTOR_ECS_TASK_DEF_ARN=arn:aws:ecs:us-east-1:111111111111:task-definition/streamsec-ebs-scanner")
+    condition     = contains([for e in jsondecode(aws_ecs_task_definition.this.container_definitions)[0].environment : "${e.name}=${e.value}"], "COLLECTOR_ECS_TASK_DEF_ARN=arn:aws:ecs:us-east-1:111111111111:task-definition/streamsec-ebs-scanner-tf")
     error_message = "The orchestrator must receive a revision-less family ARN, so child tasks always launch on the current ACTIVE revision."
   }
 }
@@ -129,8 +133,8 @@ run "task_sizing_matches_the_cloudformation_template" {
   }
 
   assert {
-    condition     = aws_ecs_task_definition.this.family == "streamsec-ebs-scanner"
-    error_message = "The task definition family must match the CloudFormation template, so the orchestrator's family ARN resolves."
+    condition     = aws_ecs_task_definition.this.family == "streamsec-ebs-scanner-tf"
+    error_message = "The task definition family must stay \"streamsec-ebs-scanner-tf\" — deliberately NOT the CloudFormation template's \"streamsec-ebs-scanner\", so a Terraform revision can never be registered into the family the CloudFormation orchestrator launches from."
   }
 }
 
@@ -181,7 +185,7 @@ run "resource_prefix_is_applied" {
   }
 
   assert {
-    condition     = aws_ecs_cluster.this.name == "acme-streamsec-ebs-scanner-us-east-1"
+    condition     = aws_ecs_cluster.this.name == "acme-streamsec-ebs-scanner-tf-us-east-1"
     error_message = "resource_prefix must prefix the resource names, and names must carry the region so two regions in one account do not collide."
   }
 
@@ -195,6 +199,73 @@ run "resource_prefix_is_applied" {
   assert {
     condition     = length(aws_secretsmanager_secret.collection_token.name) > length("acme-streamsec-scanner-collection-token-us-east-1-")
     error_message = "The secret name must end in a random suffix, or a non-zero secret_recovery_window_days blocks destroy-then-apply for the whole window."
+  }
+}
+
+# The module must refuse to sit alongside the console's CloudFormation scanner:
+# both would scan every volume, and each one's retention sweep deletes snapshots
+# tagged Purpose=ebs-package-collector account-wide — including the other's.
+run "refuses_to_deploy_alongside_the_cloudformation_scanner" {
+  command = plan
+
+  override_data {
+    target = data.aws_ecs_clusters.existing
+    values = {
+      cluster_arns = ["arn:aws:ecs:us-east-1:111111111111:cluster/streamsec-ebs-scanner-us-east-1"]
+    }
+  }
+
+  expect_failures = [aws_ecs_cluster.this]
+}
+
+run "coexistence_can_be_opted_into" {
+  command = plan
+
+  variables {
+    allow_cloudformation_coexistence = true
+  }
+
+  override_data {
+    target = data.aws_ecs_clusters.existing
+    values = {
+      cluster_arns = ["arn:aws:ecs:us-east-1:111111111111:cluster/streamsec-ebs-scanner-us-east-1"]
+    }
+  }
+
+  assert {
+    condition     = aws_ecs_cluster.this.name == "streamsec-ebs-scanner-tf-us-east-1"
+    error_message = "allow_cloudformation_coexistence must permit the deploy, and the module's own cluster name must stay distinct from the CloudFormation stack's."
+  }
+}
+
+# The module's own cluster must never be mistaken for the CloudFormation one, or
+# every re-apply would trip the guard.
+run "our_own_cluster_does_not_trip_the_guard" {
+  command = plan
+
+  override_data {
+    target = data.aws_ecs_clusters.existing
+    values = {
+      cluster_arns = ["arn:aws:ecs:us-east-1:111111111111:cluster/streamsec-ebs-scanner-tf-us-east-1"]
+    }
+  }
+
+  assert {
+    condition     = aws_ecs_cluster.this.name == "streamsec-ebs-scanner-tf-us-east-1"
+    error_message = "The presence check must match the CloudFormation name exactly; our own -tf cluster must not look like a collision."
+  }
+}
+
+run "names_cannot_collide_with_the_cloudformation_stack" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      aws_ecs_cluster.this.name != "streamsec-ebs-scanner-us-east-1",
+      aws_ecs_task_definition.this.family != "streamsec-ebs-scanner",
+      aws_cloudwatch_log_group.this.name != "/ecs/streamsec-ebs-scanner-us-east-1",
+    ])
+    error_message = "Cluster, task-definition family and log group must all differ from the CloudFormation stack's hardcoded names — ecs:CreateCluster is an upsert, so an identical cluster name is silently adopted rather than rejected."
   }
 }
 

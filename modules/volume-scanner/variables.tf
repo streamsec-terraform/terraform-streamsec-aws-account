@@ -221,6 +221,12 @@ variable "secret_recovery_window_days" {
   }
 }
 
+variable "allow_cloudformation_coexistence" {
+  description = "Permit applying this module into a region where the console's CloudFormation scanner stack is still deployed. Off by default: the two scan every volume twice and compete over snapshot retention, since each deletes snapshots tagged Purpose=ebs-package-collector account-wide — including the other's. Turn on only for a deliberate side-by-side migration."
+  type        = bool
+  default     = false
+}
+
 variable "scan_encrypted_volumes" {
   description = "Grant the scanner task the KMS permissions it needs to read snapshots of ENCRYPTED EBS volumes. Leaving this off means encrypted instances are silently skipped — the scanner snapshots them, fails every block read, and reports no findings for them with no error surfaced anywhere. Turn it off only if every volume in the region is unencrypted, or if you deliberately want encrypted volumes excluded."
   type        = bool
@@ -265,13 +271,16 @@ variable "resource_prefix" {
   type        = string
   default     = ""
 
-  # The longest generated name is the initial-scan Lambda's role:
-  #   <prefix>-streamsec-ebs-scanner-<region>-initial-scan-role
-  #     "streamsec-ebs-scanner"  21
-  #     "-" + region             15  (longest region: ap-southeast-7 / cn-northwest-1, 14)
-  #     "-initial-scan-role"     18
-  #                             ---
-  #                              54, leaving 10 for "<prefix>-" → 9 for the prefix.
+  # The longest generated name is the execution role:
+  #   <prefix>-streamsec-ebs-scanner-tf-<region>-execution-role
+  #     "streamsec-ebs-scanner-tf"  24
+  #     "-" + region                15  (longest region: ap-southeast-7 / cn-northwest-1, 14)
+  #     "-execution-role"           15
+  #                                ---
+  #                                 54, leaving 10 for "<prefix>-" → 9 for the prefix.
+  #
+  # The "-tf" marker added 3 characters; shortening the initial-scan role suffix
+  # to "-init-role" gave them back, so the cap is unchanged.
   #
   # Validation blocks cannot read data sources, so the region cannot be measured
   # here and the cap has to assume the longest one. Cap it at the input the

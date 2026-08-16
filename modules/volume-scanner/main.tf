@@ -2,6 +2,11 @@ data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
 
+# Plural, so it returns an empty list instead of erroring when nothing matches —
+# data.aws_ecs_cluster (singular) raises on a miss and could not be used for a
+# presence check. Requires ecs:ListClusters on the deploying principal.
+data "aws_ecs_clusters" "existing" {}
+
 data "streamsec_host" "this" {}
 
 data "streamsec_aws_account" "this" {
@@ -9,8 +14,34 @@ data "streamsec_aws_account" "this" {
 }
 
 locals {
-  name_prefix   = var.resource_prefix != "" ? "${var.resource_prefix}-" : ""
-  name          = "${local.name_prefix}streamsec-ebs-scanner"
+  name_prefix = var.resource_prefix != "" ? "${var.resource_prefix}-" : ""
+
+  # The "-tf" marker is load-bearing, not cosmetic. The CloudFormation stack the
+  # console deploys hardcodes cluster "streamsec-ebs-scanner-<region>" and task
+  # definition family "streamsec-ebs-scanner", with no prefix. Matching those
+  # exactly meant that applying this module into a region that already ran the
+  # CloudFormation scanner did NOT fail cleanly: ecs:CreateCluster is an upsert,
+  # so Terraform silently ADOPTED the live cluster into state, registered a task
+  # definition into the shared family — which the CloudFormation orchestrator
+  # launches children from, using its revision-less family ARN — and a later
+  # terraform destroy then deleted the cluster the working stack depended on.
+  # Observed for real: a live console stack in one of our own accounts produced
+  # byte-identical names.
+  #
+  # Nothing external depends on these names. The console keys scanner regions by
+  # region, and the family name is only ever resolved by the orchestrator through
+  # its own COLLECTOR_ECS_TASK_DEF_ARN.
+  name = "${local.name_prefix}streamsec-ebs-scanner-tf"
+
+  # What the console's CloudFormation stack calls its cluster in this region.
+  # Used only to detect that a CloudFormation-deployed scanner is already running
+  # here; never to name anything this module creates.
+  cloudformation_cluster_name = "streamsec-ebs-scanner-${local.region}"
+
+  cloudformation_scanner_present = length([
+    for arn in data.aws_ecs_clusters.existing.cluster_arns :
+    arn if endswith(arn, "/${local.cloudformation_cluster_name}")
+  ]) > 0
   region        = data.aws_region.current.region
   account_id    = data.aws_caller_identity.current.account_id
   partition     = data.aws_partition.current.partition
@@ -257,6 +288,17 @@ resource "aws_ecs_cluster" "this" {
   name = local.regional_name
 
   tags = local.tags
+
+  lifecycle {
+    precondition {
+      condition     = var.allow_cloudformation_coexistence || !local.cloudformation_scanner_present
+      error_message = <<-EOT
+        A CloudFormation-deployed Stream scanner is already running in ${local.region} (ECS cluster "${local.cloudformation_cluster_name}").
+        Running both scans every volume twice, doubles EBS-snapshot and ingest cost, and the two compete over snapshot retention — each deletes snapshots tagged Purpose=ebs-package-collector account-wide, including the other's.
+        Delete that CloudFormation stack and let it finish, then apply. To run both deliberately, set allow_cloudformation_coexistence = true.
+      EOT
+    }
+  }
 }
 
 resource "aws_cloudwatch_log_group" "this" {

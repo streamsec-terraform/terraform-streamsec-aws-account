@@ -21,6 +21,10 @@ mock_provider "aws" {
   mock_data "aws_partition" {
     defaults = { partition = "aws" }
   }
+  # No CloudFormation-deployed scanner in the region unless a run overrides this.
+  mock_data "aws_ecs_clusters" {
+    defaults = { cluster_arns = [] }
+  }
   mock_data "aws_availability_zones" {
     defaults = { names = ["us-east-1a", "us-east-1b"] }
   }

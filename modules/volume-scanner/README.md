@@ -6,7 +6,11 @@ A Fargate task runs on a schedule, snapshots EBS volumes, extracts SBOMs, and sh
 
 This is the Terraform equivalent of the CloudFormation stack the Stream console deploys from **Integrations → Vulnerability Scanners → Stream Agentless Scanner**. Deploy a region with one or the other, not both.
 
-> **Migrating from the CloudFormation stack: delete it first.** At the default `resource_prefix = ""` this module produces byte-identical names — cluster `streamsec-ebs-scanner-<region>`, log group `/ecs/streamsec-ebs-scanner-<region>`, task-definition family `streamsec-ebs-scanner`. `ecs:CreateCluster` is an upsert, so Terraform **silently adopts** the CloudFormation stack's cluster into state while the log group and IAM roles fail with already-exists, leaving a half-done apply; a later `terraform destroy` then deletes the cluster the live stack depends on. Delete the CloudFormation stack and wait for it to finish before applying. To run the two side by side deliberately, give this module a distinct `resource_prefix`.
+> **Migrating from the CloudFormation stack: delete it first.** The module refuses to plan while the console's CloudFormation scanner is still deployed in the region, and tells you so. Delete that stack, let it finish, then apply.
+>
+> Everything this module creates is named `streamsec-ebs-scanner-**tf**-…`, deliberately distinct from the stack's `streamsec-ebs-scanner-…`. That is a safety property, not cosmetics: `ecs:CreateCluster` is an upsert, so an identical cluster name is *silently adopted* rather than rejected, and a later `terraform destroy` would delete the cluster the live stack depends on.
+>
+> Set `allow_cloudformation_coexistence = true` to run both deliberately — but note they will each scan every volume, and each one's retention sweep deletes snapshots tagged `Purpose=ebs-package-collector` account-wide, including the other's.
 
 > **Registration is not wired up yet.** The `streamsec_aws_scanner_ack` resource that reports install state back to Stream does not exist in any published provider release, so it is commented out in `ack.tf`. The region still appears in the console: the scanner's own progress reports create the entry on first scan, and a region Stream creates that way is stamped `deployed`, so the badge reads **Connected**. Two gaps remain until the provider ships the resource. First, `terraform destroy` does not report `uninstalled`, and the stack metadata (`stack_id`, `stack_region`, `deployed_at`) stays blank. Second, if the region was ever touched from the console — including merely generating the template, which records `pending` — the entry already exists, so the scanner's reports only merge scan fields onto it and the install-state badge keeps whatever the console last set (`pending`, `failed`, or `uninstalled`) indefinitely. On such a region, ignore the install-state badge and read the scan-status column, which the scanner does keep current. Uncomment the block once the provider ships it.
 
@@ -22,6 +26,8 @@ This is the Terraform equivalent of the CloudFormation stack the Stream console 
 ## Usage
 
 The module is per account **and** region — deploy one instance per region you want scanned.
+
+Planning calls `ecs:ListClusters` to check no CloudFormation-deployed scanner is already running in the region, so the deploying principal needs that permission.
 
 ```hcl
 # Basic — dedicated VPC with a NAT gateway, scanning us-east-1
@@ -196,6 +202,7 @@ No modules.
 | [archive_file.initial_scan](https://registry.terraform.io/providers/hashicorp/archive/latest/docs/data-sources/file) | data source |
 | [aws_availability_zones.available](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/availability_zones) | data source |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
+| [aws_ecs_clusters.existing](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ecs_clusters) | data source |
 | [aws_partition.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/partition) | data source |
 | [aws_region.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/region) | data source |
 | [aws_route_table.byo_explicit](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/route_table) | data source |
@@ -209,6 +216,7 @@ No modules.
 
 | Name | Description | Type | Default | Required |
 | ---- | ----------- | ---- | ------- | :------: |
+| <a name="input_allow_cloudformation_coexistence"></a> [allow\_cloudformation\_coexistence](#input\_allow\_cloudformation\_coexistence) | Permit applying this module into a region where the console's CloudFormation scanner stack is still deployed. Off by default: the two scan every volume twice and compete over snapshot retention, since each deletes snapshots tagged Purpose=ebs-package-collector account-wide — including the other's. Turn on only for a deliberate side-by-side migration. | `bool` | `false` | no |
 | <a name="input_collection_token_secret_name"></a> [collection\_token\_secret\_name](#input\_collection\_token\_secret\_name) | Base name for the Secrets Manager secret holding the Stream collection token the scanner authenticates its SBOM uploads with. The region is appended, so one secret exists per deployed region. | `string` | `"streamsec-scanner-collection-token"` | no |
 | <a name="input_create_scanner_vpc"></a> [create\_scanner\_vpc](#input\_create\_scanner\_vpc) | Create a dedicated VPC, subnet pair, Internet Gateway and NAT Gateway for the scanner. Set to false to run the scanner in existing private subnets, which must have a default route to a NAT Gateway, VPC Endpoint or Transit Gateway. | `bool` | `true` | no |
 | <a name="input_customer_id"></a> [customer\_id](#input\_customer\_id) | Stream Security customer/workspace id — the same value configured as workspace\_id on the streamsec provider. Sent to the scanner as COLLECTOR\_CUSTOMER\_ID and COLLECTOR\_STREAM\_SCAN\_WORKSPACE, and used for the streamsec:customer tag. This becomes optional once terraform-provider-streamsec exposes customer\_id as a data source attribute. | `string` | `null` | no |
