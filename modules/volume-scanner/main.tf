@@ -38,8 +38,13 @@ locals {
   # here; never to name anything this module creates.
   cloudformation_cluster_name = "streamsec-ebs-scanner-${local.region}"
 
+  # cluster_arns comes back NULL, not [], from a region with no ECS clusters —
+  # which is the normal case for a fresh scanner install. Iterating it directly
+  # fails the plan with "Iteration over null value" before anything is created.
+  existing_cluster_arns = data.aws_ecs_clusters.existing.cluster_arns == null ? [] : data.aws_ecs_clusters.existing.cluster_arns
+
   cloudformation_scanner_present = length([
-    for arn in data.aws_ecs_clusters.existing.cluster_arns :
+    for arn in local.existing_cluster_arns :
     arn if endswith(arn, "/${local.cloudformation_cluster_name}")
   ]) > 0
   region        = data.aws_region.current.region

@@ -269,6 +269,24 @@ run "names_cannot_collide_with_the_cloudformation_stack" {
   }
 }
 
+# Regression: a region with no ECS clusters returns null, not [], and iterating
+# it aborts the plan. The mock default of [] hides this, so pin it explicitly.
+run "region_with_no_ecs_clusters_still_plans" {
+  command = plan
+
+  override_data {
+    target = data.aws_ecs_clusters.existing
+    values = {
+      cluster_arns = null
+    }
+  }
+
+  assert {
+    condition     = aws_ecs_cluster.this.name == "streamsec-ebs-scanner-tf-us-east-1"
+    error_message = "A region with no existing ECS clusters must plan cleanly — cluster_arns is null there, not an empty list."
+  }
+}
+
 run "customer_id_is_required" {
   command = plan
 
