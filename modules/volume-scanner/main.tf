@@ -121,6 +121,10 @@ locals {
   scanner_vpc_id     = var.create_scanner_vpc ? aws_vpc.this[0].id : var.vpc_id
   scanner_subnet_ids = var.create_scanner_vpc ? [aws_subnet.private[0].id] : var.subnet_ids
 
+  # Only meaningful when the module owns the VPC — see the note in network.tf for
+  # why bring-your-own-subnet mode deliberately gets no endpoints.
+  create_vpc_endpoints = var.create_scanner_vpc && var.create_vpc_endpoints
+
   scanner_public_subnet_cidr  = cidrsubnet(var.scanner_vpc_cidr, 1, 0)
   scanner_private_subnet_cidr = cidrsubnet(var.scanner_vpc_cidr, 1, 1)
 

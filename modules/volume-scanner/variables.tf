@@ -144,6 +144,12 @@ variable "create_scanner_vpc" {
   default     = true
 }
 
+variable "create_vpc_endpoints" {
+  description = "Create interface and gateway VPC endpoints so snapshot block reads and S3-backed image layers bypass the NAT Gateway. On by default: block reads are the dominant egress cost and NAT data processing is ~4.5x the PrivateLink rate for the same bytes. Ignored when create_scanner_vpc is false, since the module does not own that VPC. Turn off only if com.amazonaws.<region>.ebs is unavailable in your region or partition."
+  type        = bool
+  default     = true
+}
+
 variable "scanner_vpc_cidr" {
   description = "CIDR block for the scanner VPC when create_scanner_vpc is true. Split into two equal halves: the lower one is the public subnet (NAT Gateway only, no Fargate task ever runs there) and the upper one is the private subnet where the scanner runs."
   type        = string
@@ -181,7 +187,7 @@ variable "vpc_id" {
 }
 
 variable "subnet_ids" {
-  description = "Private subnets for the scanner Fargate tasks. Required when create_scanner_vpc is false. Each subnet MUST have a default route to a NAT Gateway, VPC Endpoint or Transit Gateway — the tasks run with no public IP, so a public subnet with only an Internet Gateway route is a black hole. Validated at plan time."
+  description = "COST NOTE: the scanner reads snapshot blocks over the EBS Direct API, which is the dominant source of egress traffic, and if these subnets reach it through a NAT Gateway you pay NAT data processing on every byte. Adding an interface VPC endpoint for com.amazonaws.<region>.ebs to your VPC (plus a gateway endpoint for S3) typically cuts the scanner's total AWS cost by roughly half. The module does not create them in this mode because it does not own the VPC; in the default networking mode it creates both for you. Private subnets for the scanner Fargate tasks. Required when create_scanner_vpc is false. Each subnet MUST have a default route to a NAT Gateway, VPC Endpoint or Transit Gateway — the tasks run with no public IP, so a public subnet with only an Internet Gateway route is a black hole. Validated at plan time."
   type        = list(string)
   default     = []
 }

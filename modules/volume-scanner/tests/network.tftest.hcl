@@ -143,6 +143,67 @@ run "the_default_cidr_holds_the_maximum_concurrency" {
   }
 }
 
+run "vpc_endpoints_are_created_by_default" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      length(aws_vpc_endpoint.ebs) == 1,
+      length(aws_vpc_endpoint.s3) == 1,
+      length(aws_security_group.endpoints) == 1,
+    ])
+    error_message = "Snapshot block reads are the dominant egress cost, so the EBS interface endpoint and the free S3 gateway endpoint must be on by default."
+  }
+
+  assert {
+    condition     = aws_vpc_endpoint.ebs[0].service_name == "com.amazonaws.us-east-1.ebs" && aws_vpc_endpoint.ebs[0].vpc_endpoint_type == "Interface" && aws_vpc_endpoint.ebs[0].private_dns_enabled == true
+    error_message = "The EBS endpoint must be a regional interface endpoint with private DNS, or the EBS Direct API hostname will not resolve to it and traffic silently stays on the NAT."
+  }
+
+  assert {
+    condition     = aws_vpc_endpoint.s3[0].vpc_endpoint_type == "Gateway"
+    error_message = "The S3 endpoint must be a gateway endpoint — it is free and attaches to the private route table."
+  }
+}
+
+run "vpc_endpoints_can_be_disabled" {
+  command = plan
+
+  variables {
+    create_vpc_endpoints = false
+  }
+
+  assert {
+    condition = alltrue([
+      length(aws_vpc_endpoint.ebs) == 0,
+      length(aws_vpc_endpoint.s3) == 0,
+      length(aws_security_group.endpoints) == 0,
+    ])
+    error_message = "create_vpc_endpoints = false must drop all three endpoint resources, for regions or partitions where the service is unavailable."
+  }
+}
+
+# We do not own the caller's VPC, and a second S3 gateway endpoint on a route
+# table that already has one fails with RouteAlreadyExists.
+run "byo_mode_creates_no_endpoints" {
+  command = plan
+
+  variables {
+    create_scanner_vpc = false
+    vpc_id             = "vpc-scanner"
+    subnet_ids         = ["subnet-private-a"]
+  }
+
+  assert {
+    condition = alltrue([
+      length(aws_vpc_endpoint.ebs) == 0,
+      length(aws_vpc_endpoint.s3) == 0,
+      length(aws_security_group.endpoints) == 0,
+    ])
+    error_message = "Bring-your-own-subnet mode must create no VPC endpoints in a VPC the module does not own."
+  }
+}
+
 run "byo_subnet_with_nat_egress_is_accepted" {
   command = plan
 

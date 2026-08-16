@@ -182,6 +182,78 @@ resource "aws_route_table_association" "private" {
 }
 
 ################################################################################
+# VPC endpoints — keep snapshot block reads off the NAT Gateway
+#
+# Every ebs:GetSnapshotBlock response is a 512 KiB payload, and in the
+# private-subnet layout all of it crosses the NAT at ~$0.045/GiB. Measured on a
+# three-instance test fleet in eu-west-1: 3.3 GiB inbound through the NAT for a
+# single scan. On a real fleet that dominates the scanner's bill.
+#
+# An interface endpoint moves that traffic onto PrivateLink at ~$0.01/GiB plus
+# ~$7.30/mo for the ENI. PrivateLink keeps the bytes off the NAT and off the
+# public internet; it does NOT mean they stay inside the VPC — the ENI is the
+# entry point to an AWS-managed service that lives outside it.
+#
+# The S3 gateway endpoint is free and takes S3-backed ECR layer pulls off the NAT
+# during the workload pass. It does not cover public.ecr.aws, which is
+# CloudFront-fronted, so the scanner's own image pull still egresses via the NAT.
+#
+# Bring-your-own-subnet mode deliberately gets none of this: we do not own that
+# VPC, and a second S3 gateway endpoint on a route table that already has one
+# fails with RouteAlreadyExists. The recommendation is on the subnet_ids input.
+################################################################################
+
+resource "aws_security_group" "endpoints" {
+  count = local.create_vpc_endpoints ? 1 : 0
+
+  name        = "${local.regional_name}-vpce-sg"
+  description = "Stream Security EBS Scanner - HTTPS from the scanner tasks to the VPC endpoints"
+  vpc_id      = aws_vpc.this[0].id
+
+  tags = merge(local.tags, { Name = "${local.regional_name}-vpce-sg" })
+}
+
+resource "aws_vpc_security_group_ingress_rule" "endpoints_https" {
+  count = local.create_vpc_endpoints ? 1 : 0
+
+  security_group_id            = aws_security_group.endpoints[0].id
+  description                  = "HTTPS from the scanner tasks"
+  ip_protocol                  = "tcp"
+  from_port                    = 443
+  to_port                      = 443
+  referenced_security_group_id = aws_security_group.this.id
+}
+
+# Snapshot blocks are read over this instead of the NAT Gateway. PrivateDnsEnabled
+# needs the VPC's DNS support and hostnames, both set above, so the EBS Direct API
+# hostname resolves to this ENI without the scanner being configured for it.
+resource "aws_vpc_endpoint" "ebs" {
+  count = local.create_vpc_endpoints ? 1 : 0
+
+  vpc_id              = aws_vpc.this[0].id
+  service_name        = "com.amazonaws.${local.region}.ebs"
+  vpc_endpoint_type   = "Interface"
+  private_dns_enabled = true
+  subnet_ids          = [aws_subnet.private[0].id]
+  security_group_ids  = [aws_security_group.endpoints[0].id]
+
+  tags = merge(local.tags, { Name = "${local.regional_name}-ebs-endpoint" })
+}
+
+# Gateway endpoints are free and route S3-backed container image layers away from
+# the NAT Gateway.
+resource "aws_vpc_endpoint" "s3" {
+  count = local.create_vpc_endpoints ? 1 : 0
+
+  vpc_id            = aws_vpc.this[0].id
+  service_name      = "com.amazonaws.${local.region}.s3"
+  vpc_endpoint_type = "Gateway"
+  route_table_ids   = [aws_route_table.private[0].id]
+
+  tags = merge(local.tags, { Name = "${local.regional_name}-s3-endpoint" })
+}
+
+################################################################################
 # Bring-your-own subnet validation (create_scanner_vpc = false)
 #
 # The Terraform-native replacement for the CloudFormation NetworkPrecheck
