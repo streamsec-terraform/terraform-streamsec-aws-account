@@ -18,8 +18,8 @@ locals {
 
   api_url = trimsuffix(data.streamsec_host.this.url, "/")
 
-  # The backend builds the tenant URL as https://{organization_name_prefix}.{domain},
-  # so for a per-tenant hostname the first label is the tenant name. That does
+  # A per-tenant Stream hostname is https://<tenant>.<domain>, so the first DNS
+  # label is the tenant name. That does
   # not hold behind a shared/regional endpoint (app.streamsec.io), a custom
   # CNAME, or PrivateLink endpoint DNS — hence the var.tenant_name override.
   # Getting this wrong is silent: the scanner tags SBOMs with a tenant that does

@@ -69,9 +69,9 @@ locals {
   # identity policy to allow the key as well.
   #
   # NOT needed for the AWS-managed aws/ebs key, which grants account principals
-  # directly in its own key policy. Verified by experiment in 014466394144: with
-  # these statements removed, an aws/ebs-encrypted instance scanned fine while a
-  # CMK-encrypted one failed with
+  # directly in its own key policy. Verified by experiment: with these statements
+  # removed, an aws/ebs-encrypted instance scanned fine while an otherwise
+  # identical CMK-encrypted one failed with
   #   ListSnapshotBlocks ... ResourceNotFoundException: KMS key not found
   # (KMS reports authorisation failures as not-found). Restoring them made the
   # same instance scan 701 packages.

@@ -40,8 +40,8 @@
 #   cluster_arn         = aws_ecs_cluster.this.arn
 #   task_definition_arn = aws_ecs_task_definition.this.arn
 #
-#   # No CloudFormation stack exists, but the backend records both fields on the
-#   # scanner_regions[] entry and the console reads them.
+#   # No CloudFormation stack exists, but both fields are recorded against the
+#   # region and surfaced in the console.
 #   stack_id     = "terraform"
 #   stack_region = local.region
 #
