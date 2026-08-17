@@ -198,6 +198,15 @@ variable "subnet_ids" {
   description = "COST NOTE: the scanner reads snapshot blocks over the EBS Direct API, which is the dominant source of egress traffic, and if these subnets reach it through a NAT Gateway you pay NAT data processing on every byte. Adding an interface VPC endpoint for com.amazonaws.<region>.ebs to your VPC (plus a gateway endpoint for S3) typically cuts the scanner's total AWS cost by roughly half. The module does not create them in this mode because it does not own the VPC; in the default networking mode it creates both for you. Private subnets for the scanner Fargate tasks. Required when create_scanner_vpc is false. Each subnet MUST have a default route to a NAT Gateway, VPC Endpoint or Transit Gateway — the tasks run with no public IP, so a public subnet with only an Internet Gateway route is a black hole. Validated at plan time."
   type        = list(string)
   default     = []
+  # A blank element cannot be filtered out in a local: a for-expression with a
+  # condition becomes wholly unknown when the values are unknown, which breaks the
+  # index-keyed validation design. Rejecting it at the input works instead, and
+  # Terraform skips variable validation for unknown values, so the standard
+  # `subnet_ids = module.vpc.private_subnets` wiring is unaffected.
+  validation {
+    condition     = alltrue([for id in var.subnet_ids : trimspace(id) != ""])
+    error_message = "subnet_ids must not contain blank entries. An empty or whitespace-only id reaches RunTask verbatim and every task fails to launch after an otherwise clean apply."
+  }
 }
 
 ################################################################################

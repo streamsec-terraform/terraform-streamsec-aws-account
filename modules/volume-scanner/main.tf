@@ -242,10 +242,19 @@ locals {
   # precondition never fired, and the plan died inside a data source instead.
   byo_vpc_id = var.vpc_id == null ? "" : trimspace(var.vpc_id)
 
-  # Trimmed and emptied-out, for the same reason vpc_id is: an id with surrounding
-  # whitespace — from a heredoc list, or split() of a delimited string — reaches
-  # RunTask verbatim and every task fails to launch after a clean apply.
-  byo_subnet_ids = [for id in var.subnet_ids : trimspace(id) if trimspace(id) != ""]
+  # Trimmed, for the same reason vpc_id is: an id with surrounding whitespace —
+  # from a heredoc list, or split() of a delimited string — reaches RunTask
+  # verbatim and every task fails to launch after a clean apply.
+  #
+  # NO `if` PREDICATE. A for-expression with a condition is marked wholly unknown
+  # as soon as the condition is unknown for any element, so filtering here made
+  # byo_subnets an unknown map whenever the subnet ids come from resources built
+  # in the same apply — and every BYO validation for_each/count then failed with
+  # "Invalid for_each argument". That is the regression this map-only form exists
+  # to prevent, and it has been introduced twice; the index-keyed design is only
+  # safe while the LENGTH is preserved. Blank elements are rejected by the
+  # variable's own validation instead, which Terraform skips for unknown values.
+  byo_subnet_ids = [for id in var.subnet_ids : trimspace(id)]
   byo_enabled    = !var.create_scanner_vpc && local.byo_vpc_id != "" && length(local.byo_subnet_ids) > 0
   byo_validate   = !var.create_scanner_vpc && var.validate_subnet_egress
 
