@@ -21,9 +21,11 @@ import boto3
 # and may not have propagated yet — so retry the handful of errors that clear on
 # their own. Total sleep is bounded well inside the function's timeout.
 #
-# InvalidParameterException is deliberately NOT here: ECS returns it for
-# permanently invalid configuration, so retrying burns the full ladder inside a
-# blocking terraform apply and fails anyway.
+# InvalidParameterException IS here, but only for the transient shape: ECS also
+# returns it for a subnet or security group created seconds earlier that it
+# cannot see yet. A permanently invalid configuration burns the ladder and fails
+# anyway, which costs 50s inside a blocking apply — acceptable next to skipping
+# the first scan entirely on a fresh deploy.
 RETRY_DELAYS_SECONDS = (5, 10, 15, 20)
 
 RETRYABLE_ERROR_CODES = frozenset(
@@ -36,6 +38,7 @@ RETRYABLE_ERROR_CODES = frozenset(
         "ClientException",
         "AccessDeniedException",
         "AccessDenied",
+        "InvalidParameterException",
         "ClusterNotFoundException",
         "ServerException",
         "ThrottlingException",

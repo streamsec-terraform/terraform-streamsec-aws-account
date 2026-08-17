@@ -89,6 +89,10 @@ resource "aws_subnet" "private" {
   tags = merge(local.tags, { Name = "${local.name}-private-subnet" })
 
   lifecycle {
+    # This sits alongside the capacity check rather than being enforced by
+    # scanner_az itself: local.scanner_az falls back to available_azs[0] so the
+    # expression stays evaluable, and that fallback would otherwise pick an AZ the
+    # endpoint service does not serve and defer the failure to CreateVpcEndpoint.
     precondition {
       condition     = !local.create_ebs_endpoint || length(local.candidate_azs) > 0
       error_message = "No availability zone in ${local.region} offers both a standard AZ and the EBS Direct API interface endpoint service. Set create_ebs_vpc_endpoint = false to deploy without it (snapshot block reads will cross the NAT Gateway), or supply your own subnets with create_scanner_vpc = false."
@@ -96,7 +100,7 @@ resource "aws_subnet" "private" {
 
     precondition {
       condition     = local.scanner_private_subnet_capacity >= local.scanner_peak_task_count
-      error_message = "max_concurrent_shards = ${var.max_concurrent_shards} needs ${local.scanner_peak_task_count} concurrent task ENIs (the orchestrator plus its children), but the private subnet ${local.scanner_private_subnet_cidr} carved out of scanner_vpc_cidr only holds ${local.scanner_private_subnet_capacity}. Widen scanner_vpc_cidr or lower max_concurrent_shards."
+      error_message = "max_concurrent_shards = ${var.max_concurrent_shards} needs ${local.scanner_peak_task_count} concurrent task ENIs (the orchestrator, its children, and the workload child when workload_kinds is set), but the private subnet ${local.scanner_private_subnet_cidr} carved out of scanner_vpc_cidr only holds ${local.scanner_private_subnet_capacity}. Widen scanner_vpc_cidr or lower max_concurrent_shards."
     }
   }
 }
@@ -240,14 +244,23 @@ resource "aws_vpc_security_group_ingress_rule" "endpoints_https" {
 data "aws_vpc_endpoint_service" "ebs" {
   count = local.create_ebs_endpoint ? 1 : 0
 
-  service      = "ebs"
+  # service_name, not the `service` shorthand. The shorthand builds
+  # "com.amazonaws.<region>.<svc>" inside the provider, which is exactly the
+  # commercial-partition assumption this lookup was introduced to avoid — aws-cn
+  # names carry a "cn." prefix. Building it from the partition here and having
+  # the data source confirm it keeps both the name AND the plan-time existence
+  # check correct in every partition.
+  service_name = "${local.vpc_endpoint_service_prefix}com.amazonaws.${local.region}.ebs"
   service_type = "Interface"
 }
 
 data "aws_vpc_endpoint_service" "s3" {
   count = local.create_s3_endpoint ? 1 : 0
 
-  service      = "s3"
+  # service_type is required alongside service_name, not optional: S3 publishes a
+  # Gateway AND an Interface service under the identical name, so filtering on the
+  # name alone fails the plan with "multiple EC2 VPC Endpoint Services matched".
+  service_name = "${local.vpc_endpoint_service_prefix}com.amazonaws.${local.region}.s3"
   service_type = "Gateway"
 }
 
@@ -406,7 +419,7 @@ resource "aws_security_group" "this" {
     # costs in discrimination.
     precondition {
       condition     = !local.byo_validate || length(local.byo_subnets) == 0 || local.byo_min_free_ips >= local.scanner_peak_task_count
-      error_message = "max_concurrent_shards = ${var.max_concurrent_shards} needs ${local.scanner_peak_task_count} concurrent task ENIs (the orchestrator plus its children), and ECS placement is best-effort so they can all land in one subnet — but the smallest supplied subnet has only ${local.byo_min_free_ips} free IP addresses. Supply larger subnets, or lower max_concurrent_shards."
+      error_message = "max_concurrent_shards = ${var.max_concurrent_shards} needs ${local.scanner_peak_task_count} concurrent task ENIs (the orchestrator, its children, and the workload child when workload_kinds is set), and ECS placement is best-effort so they can all land in one subnet — but the smallest supplied subnet holds only ${local.byo_min_free_ips} addresses after AWS reserves five. Supply larger subnets, or lower max_concurrent_shards."
     }
 
     precondition {
@@ -432,12 +445,20 @@ locals {
   # awsvpc mode takes one address per task, and the orchestrator plus every child
   # runs at once.
   #
-  # The MINIMUM across the supplied subnets, not the sum. ECS placement across an
-  # awsvpc subnet list is best-effort, so the whole fan-out can land in one
-  # subnet; summing let two 6-address subnets satisfy a peak of 11 and the tail of
-  # the fan-out then died with the opaque ENI failure this check exists to catch.
+  # Sized from the subnet's CIDR, not from available_ip_address_count.
+  #
+  # The MINIMUM across subnets, not the sum: ECS placement across an awsvpc subnet
+  # list is best-effort, so the whole fan-out can land in one subnet, and summing
+  # let two 6-address subnets satisfy a peak of 11.
+  #
+  # But available_ip_address_count is LIVE and drops while the scanner's own
+  # children are running, so using it made an apply that overlapped a scan fail a
+  # plan-time precondition for a purely transient reason, with a message about
+  # subnet sizing that did not explain the timing. Subnet size is stable; AWS
+  # reserves five addresses in every subnet.
   byo_min_free_ips = local.byo_validate && length(local.byo_subnets) > 0 ? min([
-    for subnet in data.aws_subnet.byo : subnet.available_ip_address_count
+    for subnet in data.aws_subnet.byo :
+    pow(2, 32 - tonumber(split("/", subnet.cidr_block)[1])) - 5
   ]...) : 0
 }
 

@@ -95,6 +95,22 @@ run "container_environment_matches_the_cloudformation_defaults" {
     condition     = contains([for e in jsondecode(aws_ecs_task_definition.this.container_definitions)[0].environment : "${e.name}=${e.value}"], "COLLECTOR_ECS_TASK_DEF_ARN=arn:aws:ecs:us-east-1:111111111111:task-definition/streamsec-ebs-scanner-tf")
     error_message = "The orchestrator must receive a revision-less family ARN, so child tasks always launch on the current ACTIVE revision."
   }
+
+  # The three values the orchestrator actually launches children WITH. Nothing
+  # asserted them, so any of them wired to the wrong resource would fail the
+  # fan-out at runtime with the whole suite green — the same untested-wiring shape
+  # that let a misplaced IAM grant survive a round.
+  assert {
+    condition = alltrue([
+      for pair in [
+        "COLLECTOR_ECS_CLUSTER_ARN=${aws_ecs_cluster.this.arn}",
+        "COLLECTOR_ECS_SUBNET_IDS=${join(",", aws_subnet.private[*].id)}",
+        "COLLECTOR_ECS_SECURITY_GROUP_ID=${aws_security_group.this.id}",
+      ] :
+      contains([for e in jsondecode(aws_ecs_task_definition.this.container_definitions)[0].environment : "${e.name}=${e.value}"], pair)
+    ])
+    error_message = "The orchestrator's fan-out inputs — cluster ARN, subnet ids and security group — must point at this module's own resources, or every child RunTask fails at runtime while the plan and the suite stay clean."
+  }
 }
 
 # The container used to receive var.workload_kinds verbatim while IAM was built

@@ -49,17 +49,32 @@ locals {
   existing_cluster_arns = data.aws_ecs_clusters.existing.cluster_arns == null ? [] : data.aws_ecs_clusters.existing.cluster_arns
 
   cloudformation_coexistence_error = <<-EOT
-    A CloudFormation-deployed Stream scanner is already running in ${local.region} (ECS cluster "${local.cloudformation_cluster_name}").
+    Another Stream scanner is already running in ${local.region}: ${local.cloudformation_scanner_present ? "the console's CloudFormation stack (ECS cluster \"${local.cloudformation_cluster_name}\")" : "another instance of this module (${join(", ", local.other_tf_scanner_clusters)})"}.
     Running both scans every volume twice, doubles EBS-snapshot and ingest cost, and the two compete over snapshot retention — each deletes snapshots tagged Purpose=ebs-package-collector account-wide, including the other's.
     Delete that CloudFormation stack and let it finish, then apply. To run both deliberately, set allow_cloudformation_coexistence = true.
   EOT
 
-  cloudformation_coexistence_ok = var.allow_cloudformation_coexistence || !local.cloudformation_scanner_present
+  cloudformation_coexistence_ok = var.allow_cloudformation_coexistence || (!local.cloudformation_scanner_present && !local.duplicate_scanner_present)
 
   cloudformation_scanner_present = length([
     for arn in local.existing_cluster_arns :
     arn if endswith(arn, "/${local.cloudformation_cluster_name}")
   ]) > 0
+
+  # Any OTHER instance of this module in the region, identified by the -tf marker
+  # and a different prefix. CloudFormation hardcoded its cluster name, so a second
+  # stack simply failed and one-scanner-per-region was implicit; adding
+  # resource_prefix removed that safety net. Two instances both apply cleanly and
+  # then fight: ReadAndDeleteOwnSnapshots is scoped by the Purpose tag
+  # ACCOUNT-WIDE, not by prefix, so each sweep deletes the other's snapshots and
+  # block reads fail mid-scan on a snapshot that just vanished.
+  other_tf_scanner_clusters = [
+    for arn in local.existing_cluster_arns : arn
+    if length(regexall("/[a-z0-9-]*streamsec-ebs-scanner-tf-${local.region}$", arn)) > 0
+    && !endswith(arn, "/${local.regional_name}")
+  ]
+
+  duplicate_scanner_present = length(local.other_tf_scanner_clusters) > 0
 
   api_url = trimsuffix(data.streamsec_host.this.url, "/")
 
@@ -140,6 +155,9 @@ locals {
   candidate_azs = local.create_ebs_endpoint ? sort(tolist(setintersection(toset(local.available_azs), toset(local.endpoint_azs)))) : local.available_azs
   scanner_az    = var.create_scanner_vpc ? try(local.candidate_azs[0], local.available_azs[0]) : null
 
+  # aws-cn VPC endpoint service names carry a "cn." prefix.
+  vpc_endpoint_service_prefix = local.partition == "aws-cn" ? "cn." : ""
+
   scanner_public_subnet_cidr  = cidrsubnet(var.scanner_vpc_cidr, 1, 0)
   scanner_private_subnet_cidr = cidrsubnet(var.scanner_vpc_cidr, 1, 1)
 
@@ -151,7 +169,12 @@ locals {
   # one more ENI of its own in this subnet when enabled — miss it and the check
   # passes at exactly the boundary while the last child task fails to get an ENI.
   scanner_private_subnet_capacity = pow(2, 32 - tonumber(split("/", local.scanner_private_subnet_cidr)[1])) - 5 - (local.create_ebs_endpoint ? 1 : 0)
-  scanner_peak_task_count         = var.max_concurrent_shards + 1
+  # Orchestrator + children + the dedicated workload child the orchestrator also
+  # launches when workload_kinds is non-empty. Omitting it made both capacity
+  # checks off by one exactly when workload scanning is on, so at the boundary the
+  # workload task fails ENI provisioning and container images are silently never
+  # scanned while the instance pass reports complete.
+  scanner_peak_task_count = var.max_concurrent_shards + 1 + (local.scan_workloads ? 1 : 0)
 
   # Family ARN with no revision suffix, so the orchestrator's RunTask always
   # launches children on the current ACTIVE revision. Referencing the task
@@ -190,7 +213,12 @@ locals {
   #     `unknown && false` is unknown rather than false. That made
   #     validate_subnet_egress = false unable to switch anything off — the one
   #     job the flag exists for.
-  byo_enabled  = !var.create_scanner_vpc && var.vpc_id != null && length(var.subnet_ids) > 0
+  # trimspace(coalesce(...)) rather than != null: an empty or whitespace vpc_id —
+  # easy from an unset variable default or a computed expression — satisfied
+  # != null, so byo_enabled went true, the friendly "both are required"
+  # precondition never fired, and the plan died inside a data source instead.
+  byo_vpc_id   = var.vpc_id == null ? "" : trimspace(var.vpc_id)
+  byo_enabled  = !var.create_scanner_vpc && local.byo_vpc_id != "" && length(var.subnet_ids) > 0
   byo_validate = !var.create_scanner_vpc && var.validate_subnet_egress
 
   # Keyed by list INDEX, not by subnet id: for_each keys must be known at plan
@@ -211,7 +239,7 @@ locals {
   # the message that actually tells the operator what to do.
   byo_wrong_vpc_subnets = [
     for subnet in data.aws_subnet.byo : subnet.id
-    if var.vpc_id != null && subnet.vpc_id != var.vpc_id
+    if local.byo_vpc_id != "" && subnet.vpc_id != local.byo_vpc_id
   ]
 
   # Normalized to a "-" sentinel per target field, because an unused target comes

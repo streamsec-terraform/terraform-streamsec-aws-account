@@ -22,9 +22,18 @@ locals {
         "lambda:GetFunction",
         "lambda:GetLayerVersion",
       ]
-      # Scoped to this account and this region: the scanner is a single-region
-      # deployment (COLLECTOR_REGION is pinned) and only ever reads workloads in
-      # the account it runs in.
+      # Deliberately NOT scoped to this account. An earlier pass pinned these to
+      # ${local.account_id}, which broke the two commonest real deployments:
+      # AWS-published layers (AWSSDKPandas, LambdaInsights) live in AWS-owned
+      # accounts, and enterprises run a central images account whose ECR
+      # repository policy allows the org. The layer or image resource policy is
+      # what actually authorises the read; pinning the identity policy to this
+      # account denied it, so those packages silently never reached the SBOM and
+      # the function or task was reported scanned with an incomplete list.
+      #
+      # This is what the CloudFormation stack grants, and matching it is the
+      # point: lambda:*:*:layer:*:* and ecr:*:*:repository/*. These are read-only
+      # actions on resources whose owner must independently opt in.
       #
       # NOTE for snapshot ARNs elsewhere in this file: EC2 authorizes snapshot
       # actions against arn:<partition>:ec2:<region>::snapshot/* with an EMPTY
@@ -33,8 +42,11 @@ locals {
       # ec2:CreateSnapshot", verified against real AWS. Region-pinning alone is
       # what closes the cross-region hazard.
       Resource = [
+        # Functions stay account- and region-scoped: the scanner only ever reads
+        # functions in the account and region it runs in.
         "arn:${local.partition}:lambda:${local.region}:${local.account_id}:function:*",
-        "arn:${local.partition}:lambda:${local.region}:${local.account_id}:layer:*:*",
+        # Layers do not: AWS-published and org-shared layers live elsewhere.
+        "arn:${local.partition}:lambda:*:*:layer:*:*",
       ]
     },
   ]
@@ -69,7 +81,7 @@ locals {
         "ecr:BatchGetImage",
         "ecr:GetDownloadUrlForLayer",
       ]
-      Resource = "arn:${local.partition}:ecr:${local.region}:${local.account_id}:repository/*"
+      Resource = "arn:${local.partition}:ecr:*:*:repository/*"
     },
   ]
 
@@ -108,9 +120,15 @@ locals {
   # S3 objects, RDS storage or Secrets Manager values protected by the same CMK.
   # Both service names are required: ec2.<region> covers CreateSnapshot of an
   # encrypted volume, ebs.<region> covers the EBS-direct block reads.
+  # aws-cn service principals end .amazonaws.com.cn. Hardcoding the commercial
+  # suffix meant the condition could never match there, implicitly denying
+  # kms:Decrypt and silently reporting nothing for every CMK-encrypted volume —
+  # the exact failure this condition's own comment warns about.
+  kms_endpoint_suffix = local.partition == "aws-cn" ? "amazonaws.com.cn" : "amazonaws.com"
+
   kms_via_services = [
-    "ec2.${local.region}.amazonaws.com",
-    "ebs.${local.region}.amazonaws.com",
+    "ec2.${local.region}.${local.kms_endpoint_suffix}",
+    "ebs.${local.region}.${local.kms_endpoint_suffix}",
   ]
 
   kms_statements = [
@@ -198,12 +216,15 @@ resource "aws_iam_role" "task" {
         Effect    = "Allow"
         Principal = { Service = "ecs-tasks.amazonaws.com" }
         Action    = "sts:AssumeRole"
-        # Same reasoning as the EventBridge role below: without this, any task
-        # definition in the account could name this role and inherit its
-        # account-wide EC2 snapshot, EBS block-read and KMS grants.
+        # aws:SourceAccount only. An ArnLike on
+        # "arn:<partition>:ecs:<region>:<account>:*" was tried and removed: it
+        # matches every ECS resource ARN in the account, so it excluded nothing
+        # while reading like a control. ECS does not expose the task-definition
+        # ARN as aws:SourceArn at AssumeRole time, so there is no narrower value
+        # to pin; the cross-account confused-deputy case is what SourceAccount
+        # closes, and that is stated rather than overclaimed.
         Condition = {
           StringEquals = { "aws:SourceAccount" = local.account_id }
-          ArnLike      = { "aws:SourceArn" = "arn:${local.partition}:ecs:${local.region}:${local.account_id}:*" }
         }
       }
     ]
@@ -337,12 +358,15 @@ resource "aws_iam_role" "execution" {
         Effect    = "Allow"
         Principal = { Service = "ecs-tasks.amazonaws.com" }
         Action    = "sts:AssumeRole"
-        # Same reasoning as the EventBridge role below: without this, any task
-        # definition in the account could name this role and inherit its
-        # account-wide EC2 snapshot, EBS block-read and KMS grants.
+        # aws:SourceAccount only. An ArnLike on
+        # "arn:<partition>:ecs:<region>:<account>:*" was tried and removed: it
+        # matches every ECS resource ARN in the account, so it excluded nothing
+        # while reading like a control. ECS does not expose the task-definition
+        # ARN as aws:SourceArn at AssumeRole time, so there is no narrower value
+        # to pin; the cross-account confused-deputy case is what SourceAccount
+        # closes, and that is stated rather than overclaimed.
         Condition = {
           StringEquals = { "aws:SourceAccount" = local.account_id }
-          ArnLike      = { "aws:SourceArn" = "arn:${local.partition}:ecs:${local.region}:${local.account_id}:*" }
         }
       }
     ]

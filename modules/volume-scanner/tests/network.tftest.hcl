@@ -8,6 +8,10 @@
 # nested attributes included — so an omitted nat_gateway_id reads as a real NAT
 # gateway and an egress-less subnet is silently accepted. Adding a new accepted
 # target in main.tf means adding it here too.
+#
+# The same applies to any override_data on data.aws_subnet.byo: cidr_block must
+# be supplied, or the generated garbage reaches the subnet-capacity arithmetic
+# and the run dies on "Invalid index" rather than testing what it names.
 mock_provider "aws" {
   mock_resource "aws_iam_role" {
     defaults = { arn = "arn:aws:iam::111111111111:role/mock-scanner-role" }
@@ -38,9 +42,9 @@ mock_provider "aws" {
   }
   mock_data "aws_subnet" {
     defaults = {
-      id                         = "subnet-mocked"
-      vpc_id                     = "vpc-scanner"
-      available_ip_address_count = 251
+      id         = "subnet-mocked"
+      vpc_id     = "vpc-scanner"
+      cidr_block = "10.0.0.0/24"
     }
   }
   mock_data "aws_route_tables" {
@@ -130,12 +134,12 @@ run "concurrency_within_the_subnet_capacity_is_accepted" {
 
   variables {
     scanner_vpc_cidr      = "10.255.0.0/27"
-    max_concurrent_shards = 9
+    max_concurrent_shards = 8
   }
 
   assert {
     condition     = aws_subnet.private[0].cidr_block == "10.255.0.16/28"
-    error_message = "A /28 holds 16 addresses: 5 reserved by AWS and 1 for the EBS endpoint ENI leaves 10, so 9 children plus the orchestrator must fit."
+    error_message = "A /28 holds 16 addresses: 5 reserved by AWS and 1 for the EBS endpoint ENI leaves 10, so 8 children plus the orchestrator plus the workload child must fit."
   }
 }
 
@@ -158,7 +162,7 @@ run "same_config_fits_once_the_endpoint_is_disabled" {
 
   variables {
     scanner_vpc_cidr        = "10.255.0.0/27"
-    max_concurrent_shards   = 10
+    max_concurrent_shards   = 9
     create_ebs_vpc_endpoint = false
   }
 
@@ -166,6 +170,36 @@ run "same_config_fits_once_the_endpoint_is_disabled" {
     condition     = length(aws_vpc_endpoint.ebs) == 0
     error_message = "With no endpoint ENI the /28's full 11 usable addresses are available, so the same concurrency fits — proving the capacity maths tracks the endpoint rather than being a blanket reduction."
   }
+}
+
+# The orchestrator launches a dedicated workload child in addition to its shard
+# children whenever workload_kinds is non-empty, so the same concurrency needs one
+# more ENI with workload scanning on than with it off.
+run "workload_child_task_is_counted_against_capacity" {
+  command = plan
+
+  variables {
+    scanner_vpc_cidr      = "10.255.0.0/27"
+    max_concurrent_shards = 9
+    workload_kinds        = ""
+  }
+
+  assert {
+    condition     = aws_subnet.private[0].cidr_block == "10.255.0.16/28"
+    error_message = "With workload scanning off the budget is orchestrator + 9 children = 10, which exactly fits the /28's 10 usable addresses."
+  }
+}
+
+run "same_concurrency_no_longer_fits_once_workloads_are_scanned" {
+  command = plan
+
+  variables {
+    scanner_vpc_cidr      = "10.255.0.0/27"
+    max_concurrent_shards = 9
+    workload_kinds        = "ecs"
+  }
+
+  expect_failures = [aws_subnet.private]
 }
 
 run "the_default_cidr_holds_the_maximum_concurrency" {
@@ -429,7 +463,10 @@ run "byo_subnet_in_another_vpc_is_rejected" {
 
   override_data {
     target = data.aws_subnet.byo["0"]
-    values = { vpc_id = "vpc-somewhere-else" }
+    values = {
+      vpc_id     = "vpc-somewhere-else"
+      cidr_block = "10.9.0.0/24"
+    }
   }
 
   expect_failures = [aws_security_group.this]
@@ -567,7 +604,7 @@ run "byo_subnet_behind_a_virtual_private_gateway_is_accepted" {
   }
 }
 
-run "byo_subnet_without_enough_free_ips_is_rejected" {
+run "byo_subnet_too_small_for_peak_concurrency_is_rejected" {
   command = plan
 
   variables {
@@ -577,11 +614,13 @@ run "byo_subnet_without_enough_free_ips_is_rejected" {
     max_concurrent_shards = 50
   }
 
+  # A /28 holds 16 addresses, 5 reserved, so 11 usable — short of the 52 that 50
+  # shards plus the orchestrator plus the workload child need.
   override_data {
     target = data.aws_subnet.byo["0"]
     values = {
-      vpc_id                     = "vpc-scanner"
-      available_ip_address_count = 8
+      vpc_id     = "vpc-scanner"
+      cidr_block = "10.0.0.0/28"
     }
   }
 

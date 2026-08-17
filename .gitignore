@@ -45,6 +45,11 @@ terraform.rc
 # above; `*.env` covers `.env` too.
 *.env
 env.sh
+# Plan files hold the collection token in plaintext. `tfplan` with no extension
+# is the name the usage docs tell people to type, and it matched none of the
+# patterns below.
+tfplan
+tfplan.*
 *.tfplan
 *.tfplan.*
 scanner-test/
