@@ -5,7 +5,13 @@ data "aws_partition" "current" {}
 # Plural, so it returns an empty list instead of erroring when nothing matches —
 # data.aws_ecs_cluster (singular) raises on a miss and could not be used for a
 # presence check. Requires ecs:ListClusters on the deploying principal.
-data "aws_ecs_clusters" "existing" {}
+#
+# count, so allow_cloudformation_coexistence genuinely switches it off. Without it
+# the ecs:ListClusters requirement was unwaivable and also applied to
+# terraform destroy, blocking a principal that could tear the stack down.
+data "aws_ecs_clusters" "existing" {
+  count = var.allow_cloudformation_coexistence ? 0 : 1
+}
 
 data "streamsec_host" "this" {}
 
@@ -46,7 +52,7 @@ locals {
   # cluster_arns comes back NULL, not [], from a region with no ECS clusters —
   # which is the normal case for a fresh scanner install. Iterating it directly
   # fails the plan with "Iteration over null value" before anything is created.
-  existing_cluster_arns = data.aws_ecs_clusters.existing.cluster_arns == null ? [] : data.aws_ecs_clusters.existing.cluster_arns
+  existing_cluster_arns = try(coalesce(data.aws_ecs_clusters.existing[0].cluster_arns, []), [])
 
   cloudformation_coexistence_error = <<-EOT
     Another Stream scanner is already running in ${local.region}: ${local.cloudformation_scanner_present ? "the console's CloudFormation stack (ECS cluster \"${local.cloudformation_cluster_name}\")" : "another instance of this module (${join(", ", local.other_tf_scanner_clusters)})"}.
@@ -61,19 +67,31 @@ locals {
     arn if endswith(arn, "/${local.cloudformation_cluster_name}")
   ]) > 0
 
-  # Any OTHER instance of this module in the region, identified by the -tf marker
-  # and a different prefix. CloudFormation hardcoded its cluster name, so a second
-  # stack simply failed and one-scanner-per-region was implicit; adding
-  # resource_prefix removed that safety net. Two instances both apply cleanly and
-  # then fight: ReadAndDeleteOwnSnapshots is scoped by the Purpose tag
-  # ACCOUNT-WIDE, not by prefix, so each sweep deletes the other's snapshots and
-  # block reads fail mid-scan on a snapshot that just vanished.
+  # Any OTHER instance of this module already present in the region. CloudFormation
+  # hardcoded its cluster name so a second stack simply failed and
+  # one-scanner-per-region was implicit; adding resource_prefix removed that
+  # safety net, and two instances then fight — ReadAndDeleteOwnSnapshots is scoped
+  # by the Purpose tag ACCOUNT-WIDE, not by prefix, so each sweep deletes the
+  # other's snapshots and block reads fail mid-scan on a snapshot that vanished.
+  #
+  # Case-insensitive: resource_prefix permits [a-zA-Z0-9-], and a lowercase-only
+  # pattern silently failed open for any prefix containing a capital.
+  #
+  # KNOWN LIMIT, stated rather than implied. This reads existing clusters at plan
+  # time, so it catches a scanner from an EARLIER apply — the CloudFormation stack,
+  # or a previous Terraform deployment. It cannot catch two module blocks in the
+  # SAME configuration, because neither cluster exists when the data source is
+  # read. Nor can it distinguish a second deployment reusing this deployment's own
+  # prefix, since the names are then identical; ecs:CreateCluster's upsert silently
+  # joins them. Deploy one scanner per region, and give any deliberate second one a
+  # distinct resource_prefix.
   other_tf_scanner_clusters = [
     for arn in local.existing_cluster_arns : arn
-    if length(regexall("/[a-z0-9-]*streamsec-ebs-scanner-tf-${local.region}$", arn)) > 0
-    && !endswith(arn, "/${local.regional_name}")
+    if length(regexall("(?i)/[a-z0-9-]*streamsec-ebs-scanner-tf-${local.region}$", arn)) > 0
+    && lower(arn) != lower("${local.cluster_arn_prefix}/${local.regional_name}")
   ]
 
+  cluster_arn_prefix        = "arn:${local.partition}:ecs:${local.region}:${local.account_id}:cluster"
   duplicate_scanner_present = length(local.other_tf_scanner_clusters) > 0
 
   api_url = trimsuffix(data.streamsec_host.this.url, "/")
@@ -133,8 +151,13 @@ locals {
     "streamsec:region"    = local.region
   })
 
-  scanner_vpc_id     = var.create_scanner_vpc ? aws_vpc.this[0].id : var.vpc_id
-  scanner_subnet_ids = var.create_scanner_vpc ? [aws_subnet.private[0].id] : var.subnet_ids
+  # local.byo_vpc_id, not var.vpc_id. An earlier pass added the trim but wired it
+  # only into byo_enabled and the wrong-VPC comparison, so every actual consumer
+  # still saw the raw value: an empty vpc_id cleared the friendly precondition and
+  # then died inside a data source, and a pasted value with a trailing newline
+  # reached CreateSecurityGroup and failed mid-apply.
+  scanner_vpc_id     = var.create_scanner_vpc ? aws_vpc.this[0].id : local.byo_vpc_id
+  scanner_subnet_ids = var.create_scanner_vpc ? [aws_subnet.private[0].id] : local.byo_subnet_ids
 
   # Only meaningful when the module owns the VPC — see the note in network.tf for
   # why bring-your-own-subnet mode deliberately gets no endpoints.
@@ -208,7 +231,7 @@ locals {
   #     created in the same apply — i.e. the standard `vpc_id = module.vpc.vpc_id`
   #     wiring — which made the whole key set unknown and failed the plan with
   #     four "Invalid for_each argument" errors naming an internal local.
-  #   - `length(var.subnet_ids) > 0` is unknown for a list of unknown length, and
+  #   - `length(local.byo_subnet_ids) > 0` is unknown for a list of unknown length, and
   #     cty's && does not short-circuit on an unknown left operand, so
   #     `unknown && false` is unknown rather than false. That made
   #     validate_subnet_egress = false unable to switch anything off — the one
@@ -217,9 +240,14 @@ locals {
   # easy from an unset variable default or a computed expression — satisfied
   # != null, so byo_enabled went true, the friendly "both are required"
   # precondition never fired, and the plan died inside a data source instead.
-  byo_vpc_id   = var.vpc_id == null ? "" : trimspace(var.vpc_id)
-  byo_enabled  = !var.create_scanner_vpc && local.byo_vpc_id != "" && length(var.subnet_ids) > 0
-  byo_validate = !var.create_scanner_vpc && var.validate_subnet_egress
+  byo_vpc_id = var.vpc_id == null ? "" : trimspace(var.vpc_id)
+
+  # Trimmed and emptied-out, for the same reason vpc_id is: an id with surrounding
+  # whitespace — from a heredoc list, or split() of a delimited string — reaches
+  # RunTask verbatim and every task fails to launch after a clean apply.
+  byo_subnet_ids = [for id in var.subnet_ids : trimspace(id) if trimspace(id) != ""]
+  byo_enabled    = !var.create_scanner_vpc && local.byo_vpc_id != "" && length(local.byo_subnet_ids) > 0
+  byo_validate   = !var.create_scanner_vpc && var.validate_subnet_egress
 
   # Keyed by list INDEX, not by subnet id: for_each keys must be known at plan
   # time and `subnet_ids = module.vpc.private_subnets` produces ids that are not.
@@ -232,7 +260,7 @@ locals {
   # When even the length is unknown, set validate_subnet_egress = false. That
   # switches off BOTH supplied-subnet checks, the wrong-VPC one included, because
   # a for_each over an unknown-length list is rejected whichever check it feeds.
-  byo_subnets = local.byo_validate ? { for index, subnet_id in var.subnet_ids : tostring(index) => subnet_id } : {}
+  byo_subnets = local.byo_validate ? { for index, subnet_id in local.byo_subnet_ids : tostring(index) => subnet_id } : {}
 
   # Guarded on vpc_id being set: with vpc_id null every subnet would be reported
   # as "wrong VPC" on top of the real "vpc_id is required" precondition, burying

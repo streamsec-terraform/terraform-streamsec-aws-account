@@ -541,6 +541,48 @@ run "initial_scan_role_can_check_for_a_running_scan" {
   }
 }
 
+# Neither aws-cn code path was covered: kms_endpoint_suffix and
+# vpc_endpoint_service_prefix were both written to fix a silent zero-findings
+# failure, and a regression in either would have shipped invisibly.
+run "kms_via_service_is_partition_correct_in_china" {
+  command = plan
+
+  override_data {
+    target = data.aws_partition.current
+    values = { partition = "aws-cn" }
+  }
+
+  override_data {
+    target = data.aws_region.current
+    values = { region = "cn-north-1" }
+  }
+
+  assert {
+    condition = alltrue([
+      for sid in ["ReadEncryptedVolumes", "GrantEC2SnapshotAccessToKeys"] :
+      contains(
+        [for s in jsondecode(aws_iam_role_policy.task.policy).Statement : try(s.Condition.StringEquals["kms:ViaService"], []) if s.Sid == sid][0],
+        "ebs.cn-north-1.amazonaws.com.cn"
+      )
+    ])
+    error_message = "In aws-cn the kms:ViaService values must use the .amazonaws.com.cn suffix on BOTH KMS statements, or the condition never matches, kms:Decrypt is implicitly denied and every CMK-encrypted volume silently reports nothing."
+  }
+}
+
+run "kms_via_service_is_scoped_to_ebs_and_ec2_in_aws" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for sid in ["ReadEncryptedVolumes", "GrantEC2SnapshotAccessToKeys"] :
+      [for s in jsondecode(aws_iam_role_policy.task.policy).Statement : try(s.Condition.StringEquals["kms:ViaService"], []) if s.Sid == sid][0] == [
+        "ec2.us-east-1.amazonaws.com", "ebs.us-east-1.amazonaws.com"
+      ]
+    ])
+    error_message = "Both KMS statements must be confined to the EC2 and EBS data planes — dropping the condition widens the grant to every CMK in the account, and getting the values wrong denies the block reads it exists to enable."
+  }
+}
+
 run "kms_grants_are_present_by_default" {
   command = plan
 

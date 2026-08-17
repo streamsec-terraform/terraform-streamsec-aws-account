@@ -98,7 +98,9 @@ If your `subnet_ids` are created in the same apply (`module.vpc.private_subnets`
 
 Only a literal `0.0.0.0/0` route counts. A default route expressed as a **managed prefix list** is *not* accepted: a prefix list's contents are not readable from the route table, and the commonest one in a private subnet is the S3 gateway endpoint, which says nothing about internet access — accepting it let subnets with no internet path through. Likewise a `vpce-` gateway route is never internet egress. If your default route genuinely is a prefix list, set `validate_subnet_egress = false`.
 
-The module also checks that the supplied subnets have enough free IP addresses between them for `max_concurrent_shards + 1` concurrent task ENIs, using live `available_ip_address_count` rather than subnet size — so a subnet shared with other workloads is judged on what is actually left.
+The module also checks that the **smallest** supplied subnet is large enough for the peak ENI count — `max_concurrent_shards`, plus the orchestrator, plus one workload child when `workload_kinds` is set. It uses the subnet's **CIDR size**, not its current free-address count: the live count drops while the scanner's own children are running, which would refuse any apply that overlapped a scan. The minimum rather than the sum, because ECS placement across a subnet list is best-effort and the whole fan-out can land in one subnet.
+
+The trade-off is that a large but heavily-used shared subnet passes this check and can still exhaust at scan time. Supplied subnets are also rejected if they sit in a Local Zone or Wavelength zone, where Fargate is not offered, or if they have no IPv4 CIDR.
 
 One gap versus the CloudFormation precheck: the `aws_route_table` data source exposes no route *state*, so a blackholed default route — one whose NAT gateway was deleted — still passes validation.
 

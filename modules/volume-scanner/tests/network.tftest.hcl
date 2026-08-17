@@ -9,12 +9,21 @@
 # gateway and an egress-less subnet is silently accepted. Adding a new accepted
 # target in main.tf means adding it here too.
 #
-# The same applies to any override_data on data.aws_subnet.byo: cidr_block must
-# be supplied, or the generated garbage reaches the subnet-capacity arithmetic
-# and the run dies on "Invalid index" rather than testing what it names.
+# The same applies to any override_data on data.aws_subnet.byo: cidr_block AND
+# availability_zone must both be supplied, or the generated garbage reaches the
+# capacity arithmetic and the standard-AZ check, and the run dies on "Invalid
+# index" or trips an unrelated precondition rather than testing what it names.
 mock_provider "aws" {
   mock_resource "aws_iam_role" {
     defaults = { arn = "arn:aws:iam::111111111111:role/mock-scanner-role" }
+  }
+  # Needed by the `command = apply` runs below: the provider validates these as
+  # ARNs, and a generated placeholder fails with "invalid prefix".
+  mock_resource "aws_ecs_cluster" {
+    defaults = { arn = "arn:aws:ecs:us-east-1:111111111111:cluster/mock-scanner" }
+  }
+  mock_resource "aws_ecs_task_definition" {
+    defaults = { arn = "arn:aws:ecs:us-east-1:111111111111:task-definition/streamsec-ebs-scanner-tf:1" }
   }
   mock_data "aws_region" {
     defaults = { region = "us-east-1" }
@@ -42,9 +51,10 @@ mock_provider "aws" {
   }
   mock_data "aws_subnet" {
     defaults = {
-      id         = "subnet-mocked"
-      vpc_id     = "vpc-scanner"
-      cidr_block = "10.0.0.0/24"
+      id                = "subnet-mocked"
+      vpc_id            = "vpc-scanner"
+      cidr_block        = "10.0.0.0/24"
+      availability_zone = "us-east-1a"
     }
   }
   mock_data "aws_route_tables" {
@@ -309,6 +319,82 @@ run "ebs_endpoint_can_be_disabled_without_losing_s3" {
 
 # We do not own the caller's VPC, and a second S3 gateway endpoint on a route
 # table that already has one fails with RouteAlreadyExists.
+# Fargate is not offered in Local Zones or Wavelength zones. The module-managed
+# path filters them out of AZ selection; bring-your-own never checked, so such a
+# subnet passed everything and then failed every RunTask while looking healthy.
+run "byo_subnet_in_a_local_zone_is_rejected" {
+  command = plan
+
+  variables {
+    create_scanner_vpc = false
+    vpc_id             = "vpc-scanner"
+    subnet_ids         = ["subnet-localzone"]
+  }
+
+  override_data {
+    target = data.aws_subnet.byo["0"]
+    values = {
+      vpc_id            = "vpc-scanner"
+      cidr_block        = "10.0.0.0/24"
+      availability_zone = "us-east-1-bos-1a"
+    }
+  }
+
+  expect_failures = [aws_security_group.this]
+}
+
+# cidr_block is empty for an IPv6-only subnet, which used to abort the plan on an
+# unguarded split("/")[1] instead of naming the subnet.
+run "byo_ipv6_only_subnet_is_reported_not_crashed" {
+  command = plan
+
+  variables {
+    create_scanner_vpc = false
+    vpc_id             = "vpc-scanner"
+    subnet_ids         = ["subnet-ipv6only"]
+  }
+
+  override_data {
+    target = data.aws_subnet.byo["0"]
+    values = {
+      vpc_id            = "vpc-scanner"
+      cidr_block        = ""
+      availability_zone = "us-east-1a"
+    }
+  }
+
+  expect_failures = [aws_security_group.this]
+}
+
+# Mutation-checked: replacing the BYO branch of local.scanner_subnet_ids with an
+# empty list previously passed all 65 runs, because nothing asserted the supplied
+# subnets actually reach the fan-out.
+run "byo_subnets_reach_the_fan_out_wiring" {
+  command = apply
+
+  variables {
+    create_scanner_vpc = false
+    vpc_id             = "vpc-scanner"
+    subnet_ids         = ["subnet-private-a", " subnet-private-b "]
+  }
+
+  assert {
+    condition     = contains([for e in jsondecode(aws_ecs_task_definition.this.container_definitions)[0].environment : "${e.name}=${e.value}"], "COLLECTOR_ECS_SUBNET_IDS=subnet-private-a,subnet-private-b")
+    error_message = "The supplied subnet ids must reach COLLECTOR_ECS_SUBNET_IDS, trimmed — the orchestrator launches every child with them, and an untrimmed or empty value fails every RunTask at runtime."
+  }
+
+  # subnets is a SET, so it is compared by membership and size rather than by
+  # equality against a tuple, which fails on type.
+  assert {
+    condition = alltrue([
+      length(aws_cloudwatch_event_target.daily.ecs_target[0].network_configuration[0].subnets) == 2,
+      contains(aws_cloudwatch_event_target.daily.ecs_target[0].network_configuration[0].subnets, "subnet-private-a"),
+      contains(aws_cloudwatch_event_target.daily.ecs_target[0].network_configuration[0].subnets, "subnet-private-b"),
+    ])
+    error_message = "The scheduled target must launch into the supplied subnets, trimmed."
+  }
+}
+
 run "byo_mode_creates_no_endpoints" {
   command = plan
 
@@ -464,8 +550,9 @@ run "byo_subnet_in_another_vpc_is_rejected" {
   override_data {
     target = data.aws_subnet.byo["0"]
     values = {
-      vpc_id     = "vpc-somewhere-else"
-      cidr_block = "10.9.0.0/24"
+      vpc_id            = "vpc-somewhere-else"
+      cidr_block        = "10.9.0.0/24"
+      availability_zone = "us-east-1a"
     }
   }
 
@@ -619,8 +706,9 @@ run "byo_subnet_too_small_for_peak_concurrency_is_rejected" {
   override_data {
     target = data.aws_subnet.byo["0"]
     values = {
-      vpc_id     = "vpc-scanner"
-      cidr_block = "10.0.0.0/28"
+      vpc_id            = "vpc-scanner"
+      cidr_block        = "10.0.0.0/28"
+      availability_zone = "us-east-1a"
     }
   }
 

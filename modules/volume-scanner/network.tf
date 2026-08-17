@@ -419,7 +419,17 @@ resource "aws_security_group" "this" {
     # costs in discrimination.
     precondition {
       condition     = !local.byo_validate || length(local.byo_subnets) == 0 || local.byo_min_free_ips >= local.scanner_peak_task_count
-      error_message = "max_concurrent_shards = ${var.max_concurrent_shards} needs ${local.scanner_peak_task_count} concurrent task ENIs (the orchestrator, its children, and the workload child when workload_kinds is set), and ECS placement is best-effort so they can all land in one subnet — but the smallest supplied subnet holds only ${local.byo_min_free_ips} addresses after AWS reserves five. Supply larger subnets, or lower max_concurrent_shards."
+      error_message = "max_concurrent_shards = ${var.max_concurrent_shards} needs ${local.scanner_peak_task_count} concurrent task ENIs (the orchestrator, its children, and the workload child when workload_kinds is set), and ECS placement is best-effort so they can all land in one subnet — but the smallest supplied subnet is sized for only ${local.byo_min_free_ips} addresses after AWS reserves five. Note this measures subnet SIZE, not current free addresses — a large but heavily-used shared subnet can still exhaust at scan time. Supply larger subnets, or lower max_concurrent_shards."
+    }
+
+    precondition {
+      condition     = length(local.byo_ipv6_only_subnets) == 0
+      error_message = "Subnet(s) ${join(", ", local.byo_ipv6_only_subnets)} have no IPv4 CIDR. The scanner task needs an IPv4 address per ENI and reaches the EBS Direct API over IPv4, so an IPv6-only subnet cannot run it."
+    }
+
+    precondition {
+      condition     = length(local.byo_non_standard_az_subnets) == 0
+      error_message = "Subnet(s) ${join(", ", local.byo_non_standard_az_subnets)} are not in a standard availability zone of ${local.region}. Fargate is not offered in Local Zones or Wavelength zones, so every task launch would fail with InvalidParameterException while the install looked healthy."
     }
 
     precondition {
@@ -456,10 +466,42 @@ locals {
   # plan-time precondition for a purely transient reason, with a message about
   # subnet sizing that did not explain the timing. Subnet size is stable; AWS
   # reserves five addresses in every subnet.
-  byo_min_free_ips = local.byo_validate && length(local.byo_subnets) > 0 ? min([
-    for subnet in data.aws_subnet.byo :
+  # cidr_block is EMPTY for an IPv6-only subnet, so indexing split("/")[1]
+  # unguarded aborted the plan with an unattributable "Invalid index" pointing at
+  # this locals block. Those subnets are reported by name instead, below.
+  # An explicit null check, not coalesce: coalesce("", "") raises "no non-null,
+  # non-empty-string arguments" because it skips empty strings too — and an empty
+  # cidr_block is exactly the case being detected here.
+  byo_subnet_cidrs = {
+    for key, subnet in data.aws_subnet.byo :
+    key => subnet.cidr_block == null ? "" : subnet.cidr_block
+  }
+
+  byo_ipv4_subnets = [
+    for key, subnet in data.aws_subnet.byo : subnet
+    if length(split("/", local.byo_subnet_cidrs[key])) == 2
+  ]
+
+  byo_ipv6_only_subnets = [
+    for key, subnet in data.aws_subnet.byo : subnet.id
+    if length(split("/", local.byo_subnet_cidrs[key])) != 2
+  ]
+
+  byo_min_free_ips = local.byo_validate && length(local.byo_ipv4_subnets) > 0 ? min([
+    for subnet in local.byo_ipv4_subnets :
     pow(2, 32 - tonumber(split("/", subnet.cidr_block)[1])) - 5
   ]...) : 0
+
+  # Fargate is not offered in Local Zones or Wavelength zones. The module-managed
+  # path filters them out of AZ selection for exactly this reason; bring-your-own
+  # never checked, so such a subnet passed everything and then failed every
+  # RunTask with InvalidParameterException — a healthy-looking install producing
+  # nothing at all. Standard AZ names are "<region><letter>"; Local and Wavelength
+  # zones carry an extra "-<city>-<n>" segment.
+  byo_non_standard_az_subnets = [
+    for key, subnet in data.aws_subnet.byo : subnet.id
+    if length(regexall("^${local.region}[a-z]$", subnet.availability_zone)) == 0
+  ]
 }
 
 resource "aws_vpc_security_group_egress_rule" "all" {

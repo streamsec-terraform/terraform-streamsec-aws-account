@@ -453,9 +453,10 @@ resource "aws_iam_role" "initial_scan" {
         Effect    = "Allow"
         Principal = { Service = "lambda.amazonaws.com" }
         Action    = "sts:AssumeRole"
-        # The other three roles pin the assuming service to this account and an
-        # ARN pattern; this one holds ecs:RunTask and iam:PassRole on both
-        # scanner roles, so leaving it unconditioned was an inconsistency.
+        # aws:SourceAccount, matching the other three roles. An ArnLike on
+        # aws:SourceArn is included here because a Lambda function ARN pattern is
+        # meaningfully narrow, unlike the ECS one that was tried on the task and
+        # execution roles and removed for matching every ARN in the account.
         Condition = {
           StringEquals = { "aws:SourceAccount" = local.account_id }
           ArnLike      = { "aws:SourceArn" = "arn:${local.partition}:lambda:${local.region}:${local.account_id}:function:*" }

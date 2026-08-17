@@ -230,6 +230,13 @@ variable "collection_token_secret_name" {
   description = "Base name for the Secrets Manager secret holding the Stream collection token the scanner authenticates its SBOM uploads with. The region is appended, so one secret exists per deployed region."
   type        = string
   default     = "streamsec-scanner-collection-token"
+  # The only name-forming input without a character check. Secrets Manager accepts
+  # [A-Za-z0-9/_+=.@-]; anything else fails CreateSecret mid-apply, after the VPC,
+  # NAT gateway and Elastic IP already exist.
+  validation {
+    condition     = can(regex("^[A-Za-z0-9/_+=.@-]+$", var.collection_token_secret_name))
+    error_message = "collection_token_secret_name may contain only letters, digits and the characters / _ + = . @ - which is what Secrets Manager accepts."
+  }
 }
 
 variable "secret_recovery_window_days" {
