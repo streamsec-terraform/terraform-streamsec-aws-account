@@ -44,7 +44,13 @@ RETRYABLE_ERROR_CODES = frozenset(
 
 
 def _error_code(exc):
-    return getattr(exc, "response", {}).get("Error", {}).get("Code", "")
+    # `or {}` rather than a default: botocore exceptions can carry a `response`
+    # attribute set to None, and .get on None raises AttributeError from inside
+    # the except block that exists to contain the failure — which would propagate
+    # out of handler(), fail the invocation, and abort the apply. The module
+    # promises the opposite in three places.
+    response = getattr(exc, "response", None) or {}
+    return (response.get("Error") or {}).get("Code", "")
 
 
 def handler(event, context):

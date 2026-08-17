@@ -110,8 +110,11 @@ variable "task_memory" {
   default     = "16384"
 
   validation {
-    condition     = can(tonumber(var.task_memory)) && tonumber(var.task_memory) >= 512
-    error_message = "task_memory must be a number of MiB, at least 512."
+    # Digits only. "16384.0" satisfies tonumber() and, because cty compares
+    # numbers by value, also satisfies the Fargate contains() check — then reaches
+    # RegisterTaskDefinition verbatim and is rejected mid-apply.
+    condition     = can(regex("^[0-9]+$", var.task_memory)) && tonumber(var.task_memory) >= 512
+    error_message = "task_memory must be a whole number of MiB written without a decimal point, at least 512."
   }
 }
 
@@ -207,8 +210,13 @@ variable "schedule_expression" {
   default     = "cron(0 3 * * ? *)"
 
   validation {
-    condition     = startswith(var.schedule_expression, "cron(")
-    error_message = "schedule_expression must be a cron(...) expression. A rate(...) rule fires once at creation as well as on its interval, racing a second full-account orchestrator against the initial scan and doubling snapshot and Fargate spend."
+    # EventBridge cron takes SIX fields, not the five of Unix cron, and the
+    # prefix check alone let "cron(0 3 * * ?)" and an unclosed "cron(0 3 * * ? *"
+    # through to fail at CreateRule after most of the stack exists.
+    condition = startswith(var.schedule_expression, "cron(") && endswith(var.schedule_expression, ")") && length(
+      compact(split(" ", trimspace(replace(replace(var.schedule_expression, "cron(", ""), ")", ""))))
+    ) == 6
+    error_message = "schedule_expression must be a closed six-field cron(...) expression. A rate(...) rule fires once at creation as well as on its interval, racing a second full-account orchestrator against the initial scan and doubling snapshot and Fargate spend."
   }
 }
 
@@ -262,9 +270,19 @@ variable "kms_key_arns" {
 }
 
 variable "log_retention_days" {
-  description = "Retention in days for the scanner's CloudWatch log group"
+  description = "Retention in days for the scanner's CloudWatch log groups. Must be one of CloudWatch's fixed retention values, or 0 to retain forever."
   type        = number
   default     = 30
+  # The provider schema already rejects a bad value at plan time — verified, it is
+  # not an apply-time failure — so this is for the message and for consistency
+  # with every other numeric input here, not to close a correctness gap.
+  validation {
+    condition = contains(
+      [0, 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653],
+      var.log_retention_days
+    )
+    error_message = "log_retention_days must be one of CloudWatch's retention values: 0 (forever), 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288 or 3653."
+  }
 }
 
 ################################################################################
@@ -313,6 +331,14 @@ variable "resource_prefix" {
   # Validation blocks cannot read data sources, so the region cannot be measured
   # here and the cap has to assume the longest one. Cap it at the input the
   # operator set rather than letting four IAM errors land mid-plan.
+  # The other half of the contract: ECS cluster names allow only [a-zA-Z0-9_-]
+  # and IAM role names only [\w+=,.@-], so a space or colon fails CreateCluster
+  # mid-apply after the VPC, NAT gateway and Elastic IP exist.
+  validation {
+    condition     = can(regex("^[a-zA-Z0-9-]*$", var.resource_prefix))
+    error_message = "resource_prefix may contain only letters, digits and hyphens — it becomes part of ECS cluster and IAM role names, which reject anything else."
+  }
+
   validation {
     condition     = length(var.resource_prefix) <= 9
     error_message = "resource_prefix must be 9 characters or fewer — the longest generated IAM role name (<prefix>-streamsec-ebs-scanner-tf-<region>-execution-role) must fit IAM's 64-character limit."

@@ -27,7 +27,10 @@ mock_provider "aws" {
     defaults = { cluster_arns = [] }
   }
   mock_data "aws_vpc_endpoint_service" {
-    defaults = { service_name = "com.amazonaws.us-east-1.resolved" }
+    defaults = {
+      service_name       = "com.amazonaws.us-east-1.resolved"
+      availability_zones = ["us-east-1a", "us-east-1b"]
+    }
   }
   mock_data "aws_availability_zones" {
     defaults = { names = ["us-east-1a", "us-east-1b"] }
@@ -91,6 +94,23 @@ run "container_environment_matches_the_cloudformation_defaults" {
   assert {
     condition     = contains([for e in jsondecode(aws_ecs_task_definition.this.container_definitions)[0].environment : "${e.name}=${e.value}"], "COLLECTOR_ECS_TASK_DEF_ARN=arn:aws:ecs:us-east-1:111111111111:task-definition/streamsec-ebs-scanner-tf")
     error_message = "The orchestrator must receive a revision-less family ARN, so child tasks always launch on the current ACTIVE revision."
+  }
+}
+
+# The container used to receive var.workload_kinds verbatim while IAM was built
+# from the trimmed list, so "lambda, ecs" granted the ECS statements and then sent
+# " ecs" to the scanner, which matches no kind — workload scanning silently did
+# nothing with the grants still attached.
+run "workload_kinds_reach_the_container_normalized" {
+  command = apply
+
+  variables {
+    workload_kinds = "ecs, lambda"
+  }
+
+  assert {
+    condition     = contains([for e in jsondecode(aws_ecs_task_definition.this.container_definitions)[0].environment : "${e.name}=${e.value}"], "COLLECTOR_WORKLOAD_KINDS=ecs,lambda")
+    error_message = "COLLECTOR_WORKLOAD_KINDS must be the trimmed, normalized list — the raw value reaches the scanner's comma split and a padded element matches no kind."
   }
 }
 
@@ -222,9 +242,15 @@ run "refuses_to_deploy_alongside_the_cloudformation_scanner" {
   # dependency on the cluster and would otherwise be created in parallel — and
   # left behind billing — when the cluster's check trips. The Elastic IP and NAT
   # gateway are downstream of the VPC, so they are covered by its failure.
+  # The three resources the gate is placed on: the VPC because it and the NAT
+  # gateway downstream of it cost money, the cluster because an identically named
+  # one can be silently adopted, and the secret because it persists the account's
+  # Stream collection token. The IAM roles and log groups may still be created,
+  # but they are inert and recorded in state, so a destroy removes them.
   expect_failures = [
     aws_ecs_cluster.this,
     aws_vpc.this,
+    aws_secretsmanager_secret.collection_token,
   ]
 }
 
@@ -472,15 +498,30 @@ run "initial_scan_role_can_check_for_a_running_scan" {
     error_message = "The initial-scan role must hold ecs:ListTasks, or the duplicate-scan guard is denied on every invocation, swallowed by its own except, and a second orchestrator snapshots every volume again."
   }
 
+  # Asserted per ROLE, not per policy. The previous version filtered two of the
+  # three policies attached to aws_iam_role.task and claimed no other role holds
+  # ListTasks — while aws_iam_role_policy.task, on that same role, grants it
+  # account-wide for ECS workload discovery. It stayed green by not looking.
   assert {
-    condition = alltrue([
-      for policy in [aws_iam_role_policy.events.policy, aws_iam_role_policy.orchestrator.policy] :
-      length([
-        for s in jsondecode(policy).Statement :
-        s if contains(flatten([s.Action]), "ecs:ListTasks")
-      ]) == 0
-    ])
-    error_message = "Only the initial-scan role calls ListTasks; granting it to the EventBridge or orchestrator roles is an unused permission."
+    condition = length([
+      for s in concat(
+        jsondecode(aws_iam_role_policy.events.policy).Statement,
+      ) : s if contains(flatten([s.Action]), "ecs:ListTasks")
+    ]) == 0
+    error_message = "The EventBridge role never calls ListTasks, so granting it there is an unused permission."
+  }
+
+  # The scanner task role DOES hold account-wide ecs:ListTasks — workload
+  # discovery needs it to enumerate tasks across every cluster — so it is asserted
+  # as expected rather than absent, and disappears with workload scanning.
+  assert {
+    condition = length([
+      for s in concat(
+        jsondecode(aws_iam_role_policy.task.policy).Statement,
+        jsondecode(aws_iam_role_policy.orchestrator.policy).Statement,
+      ) : s if contains(flatten([s.Action]), "ecs:ListTasks")
+    ]) == 1
+    error_message = "With workload_kinds including ecs, the task role holds exactly one account-wide ecs:ListTasks for workload discovery. A second grant, or none, means the fan-out or the discovery pass changed."
   }
 }
 

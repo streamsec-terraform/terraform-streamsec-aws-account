@@ -130,6 +130,16 @@ locals {
   create_ebs_endpoint = var.create_scanner_vpc && coalesce(var.create_ebs_vpc_endpoint, true)
   create_s3_endpoint  = var.create_scanner_vpc
 
+  # AZ names map to different physical AZs per account, and an interface endpoint
+  # service is not offered in every AZ of a region. Taking names[0] blindly could
+  # land on an AZ with no EBS endpoint presence, failing CreateVpcEndpoint
+  # mid-apply after the VPC, IGW, EIP and NAT gateway already exist and bill. The
+  # resolver already returns the supported list, so intersect with it.
+  available_azs = var.create_scanner_vpc ? data.aws_availability_zones.available[0].names : []
+  endpoint_azs  = local.create_ebs_endpoint ? data.aws_vpc_endpoint_service.ebs[0].availability_zones : []
+  candidate_azs = local.create_ebs_endpoint ? sort(tolist(setintersection(toset(local.available_azs), toset(local.endpoint_azs)))) : local.available_azs
+  scanner_az    = var.create_scanner_vpc ? try(local.candidate_azs[0], local.available_azs[0]) : null
+
   scanner_public_subnet_cidr  = cidrsubnet(var.scanner_vpc_cidr, 1, 0)
   scanner_private_subnet_cidr = cidrsubnet(var.scanner_vpc_cidr, 1, 1)
 
@@ -204,29 +214,32 @@ locals {
     if var.vpc_id != null && subnet.vpc_id != var.vpc_id
   ]
 
-  # Normalized to a "-" sentinel per target field. A route's unused target fields
-  # come back as "" from some provider versions and as null from others (and as a
-  # missing attribute entirely if the provider predates the field, e.g.
-  # core_network_arn). Comparing the raw value against "" therefore reports a
-  # NULL field as a populated target and waves through a subnet with no egress,
-  # and startswith(null, ...) is a hard error. coalesce collapses null, "" and
-  # absent to "-", which matches no real AWS id.
+  # Normalized to a "-" sentinel per target field, because an unused target comes
+  # back as "" from some provider versions and null from others: comparing against
+  # "" reports a NULL field as a populated target and waves through a subnet with
+  # no egress, and startswith(null, ...) is a hard error.
+  #
+  # coalesce alone, with no try(): under the ~> 6.0 pin `routes` is a strongly
+  # typed list(object(...)) in which every field including core_network_arn always
+  # exists, so try() could never fire — and it would silently swallow a typo like
+  # route.nat_gatway_id into "-", waving through a subnet with no egress. Failing
+  # loudly on an unknown attribute is the safer default.
   byo_default_routes = {
     # The explicit-association / main-route-table fallback happens in the data
     # source itself (see network.tf).
     for key, route_table in data.aws_route_table.byo_explicit :
     key => [
       for route in route_table.routes : {
-        cidr_block           = coalesce(try(route.cidr_block, ""), "-")
-        prefix_list_id       = coalesce(try(route.destination_prefix_list_id, ""), "-")
-        gateway_id           = coalesce(try(route.gateway_id, ""), "-")
-        nat_gateway_id       = coalesce(try(route.nat_gateway_id, ""), "-")
-        transit_gateway_id   = coalesce(try(route.transit_gateway_id, ""), "-")
-        network_interface_id = coalesce(try(route.network_interface_id, ""), "-")
-        instance_id          = coalesce(try(route.instance_id, ""), "-")
-        vpc_endpoint_id      = coalesce(try(route.vpc_endpoint_id, ""), "-")
-        core_network_arn     = coalesce(try(route.core_network_arn, ""), "-")
-        local_gateway_id     = coalesce(try(route.local_gateway_id, ""), "-")
+        cidr_block           = coalesce(route.cidr_block, "-")
+        prefix_list_id       = coalesce(route.destination_prefix_list_id, "-")
+        gateway_id           = coalesce(route.gateway_id, "-")
+        nat_gateway_id       = coalesce(route.nat_gateway_id, "-")
+        transit_gateway_id   = coalesce(route.transit_gateway_id, "-")
+        network_interface_id = coalesce(route.network_interface_id, "-")
+        instance_id          = coalesce(route.instance_id, "-")
+        vpc_endpoint_id      = coalesce(route.vpc_endpoint_id, "-")
+        core_network_arn     = coalesce(route.core_network_arn, "-")
+        local_gateway_id     = coalesce(route.local_gateway_id, "-")
       }
       # ONLY a literal default route counts as a candidate.
       #
@@ -238,7 +251,7 @@ locals {
       # gated on this — let a genuinely public subnet pass too. A prefix list that
       # really does carry a default route is rare; validate_subnet_egress = false
       # is the escape hatch for it.
-      if coalesce(try(route.cidr_block, ""), "-") == "0.0.0.0/0"
+      if coalesce(route.cidr_block, "-") == "0.0.0.0/0"
     ]
   }
 
@@ -286,12 +299,16 @@ locals {
     ]) > 0
   }
 
+  # Wrong-VPC subnets are excluded: their explicit-association lookup filters on
+  # var.vpc_id, matches nothing, and falls back to THAT vpc's main route table —
+  # so the egress verdict would describe a different VPC entirely and stack a
+  # spurious "no 0.0.0.0/0 route" next to the real wrong-VPC diagnosis.
   byo_bad_subnets = [
     for key, subnet_id in local.byo_subnets :
     format("%s (%s)", subnet_id, local.byo_subnet_igw_only[key]
       ? "public subnet — 0.0.0.0/0 routes through an Internet Gateway, but the scanner task runs with no public IP"
     : "no 0.0.0.0/0 route to a NAT gateway, NAT instance, appliance ENI, VPC endpoint, Transit Gateway, virtual private gateway, Cloud WAN core network or Outposts local gateway")
-    if !local.byo_subnet_has_egress[key]
+    if !local.byo_subnet_has_egress[key] && !contains(local.byo_wrong_vpc_subnets, subnet_id)
   ]
 }
 
@@ -323,12 +340,28 @@ resource "random_string" "secret_suffix" {
   special = false
 }
 
+# The coexistence gate is repeated here, not only on the VPC and cluster. In the
+# apply-deferred path this secret has no dependency on either, so a refused
+# install would still write the account's Stream collection token into an account
+# the module just declined to install into, and leave it behind.
+#
+# The gate stops at these three — VPC (the NAT downstream of it bills), cluster
+# (an identically named one is silently adopted) and this secret (a credential).
+# The IAM roles and log groups can still be created on a refused apply, but they
+# hold nothing and are recorded in state, so a destroy removes them.
 resource "aws_secretsmanager_secret" "collection_token" {
   name                    = "${local.name_prefix}${var.collection_token_secret_name}-${local.region}-${random_string.secret_suffix.result}"
   description             = "Stream Security volume scanner collection token"
   recovery_window_in_days = var.secret_recovery_window_days
 
   tags = local.tags
+
+  lifecycle {
+    precondition {
+      condition     = local.cloudformation_coexistence_ok
+      error_message = local.cloudformation_coexistence_error
+    }
+  }
 }
 
 resource "aws_secretsmanager_secret_version" "collection_token" {
@@ -395,7 +428,13 @@ resource "aws_ecs_task_definition" "this" {
         { name = "COLLECTOR_SCAN_DATABASES", value = tostring(var.scan_databases) },
         { name = "COLLECTOR_SCAN_AI_WORKLOADS", value = tostring(var.scan_ai_workloads) },
         { name = "COLLECTOR_SCAN_SECRETS", value = tostring(var.scan_secrets) },
-        { name = "COLLECTOR_WORKLOAD_KINDS", value = var.workload_kinds },
+        # Normalized, not raw. The validation accepts "lambda, ecs" and
+        # "ecs,lambda", and IAM is built from the trimmed list — but the container
+        # was getting the raw string, so the scanner's comma split produced
+        # " ecs", which matches no kind. Workload scanning silently did nothing
+        # while the account-wide ECS grants stayed attached. Same class as the
+        # customer_id trim.
+        { name = "COLLECTOR_WORKLOAD_KINDS", value = join(",", local.workload_kind_list) },
         { name = "COLLECTOR_ROLE", value = "orchestrator" },
         { name = "COLLECTOR_SHARD_SIZE", value = tostring(var.shard_size) },
         { name = "COLLECTOR_MAX_CONCURRENT_SHARDS", value = tostring(var.max_concurrent_shards) },

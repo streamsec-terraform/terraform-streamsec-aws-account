@@ -72,7 +72,7 @@ resource "aws_subnet" "public" {
 
   vpc_id                  = aws_vpc.this[0].id
   cidr_block              = local.scanner_public_subnet_cidr
-  availability_zone       = data.aws_availability_zones.available[0].names[0]
+  availability_zone       = local.scanner_az
   map_public_ip_on_launch = false
 
   tags = merge(local.tags, { Name = "${local.name}-public-subnet" })
@@ -83,12 +83,17 @@ resource "aws_subnet" "private" {
 
   vpc_id                  = aws_vpc.this[0].id
   cidr_block              = local.scanner_private_subnet_cidr
-  availability_zone       = data.aws_availability_zones.available[0].names[0]
+  availability_zone       = local.scanner_az
   map_public_ip_on_launch = false
 
   tags = merge(local.tags, { Name = "${local.name}-private-subnet" })
 
   lifecycle {
+    precondition {
+      condition     = !local.create_ebs_endpoint || length(local.candidate_azs) > 0
+      error_message = "No availability zone in ${local.region} offers both a standard AZ and the EBS Direct API interface endpoint service. Set create_ebs_vpc_endpoint = false to deploy without it (snapshot block reads will cross the NAT Gateway), or supply your own subnets with create_scanner_vpc = false."
+    }
+
     precondition {
       condition     = local.scanner_private_subnet_capacity >= local.scanner_peak_task_count
       error_message = "max_concurrent_shards = ${var.max_concurrent_shards} needs ${local.scanner_peak_task_count} concurrent task ENIs (the orchestrator plus its children), but the private subnet ${local.scanner_private_subnet_cidr} carved out of scanner_vpc_cidr only holds ${local.scanner_private_subnet_capacity}. Widen scanner_vpc_cidr or lower max_concurrent_shards."
@@ -400,8 +405,8 @@ resource "aws_security_group" "this" {
     # precision, so they live here; tests/network.tftest.hcl records what that
     # costs in discrimination.
     precondition {
-      condition     = !local.byo_validate || length(local.byo_subnets) == 0 || local.byo_total_free_ips >= local.scanner_peak_task_count
-      error_message = "max_concurrent_shards = ${var.max_concurrent_shards} needs ${local.scanner_peak_task_count} concurrent task ENIs (the orchestrator plus its children), but the supplied subnets have only ${local.byo_total_free_ips} free IP addresses between them. Supply more or larger subnets, or lower max_concurrent_shards."
+      condition     = !local.byo_validate || length(local.byo_subnets) == 0 || local.byo_min_free_ips >= local.scanner_peak_task_count
+      error_message = "max_concurrent_shards = ${var.max_concurrent_shards} needs ${local.scanner_peak_task_count} concurrent task ENIs (the orchestrator plus its children), and ECS placement is best-effort so they can all land in one subnet — but the smallest supplied subnet has only ${local.byo_min_free_ips} free IP addresses. Supply larger subnets, or lower max_concurrent_shards."
     }
 
     precondition {
@@ -427,11 +432,13 @@ locals {
   # awsvpc mode takes one address per task, and the orchestrator plus every child
   # runs at once.
   #
-  # Reported across the whole supplied set, since the scanner spreads tasks over
-  # all of them.
-  byo_total_free_ips = local.byo_validate ? sum(concat([0], [
+  # The MINIMUM across the supplied subnets, not the sum. ECS placement across an
+  # awsvpc subnet list is best-effort, so the whole fan-out can land in one
+  # subnet; summing let two 6-address subnets satisfy a peak of 11 and the tail of
+  # the fan-out then died with the opaque ENI failure this check exists to catch.
+  byo_min_free_ips = local.byo_validate && length(local.byo_subnets) > 0 ? min([
     for subnet in data.aws_subnet.byo : subnet.available_ip_address_count
-  ])) : 0
+  ]...) : 0
 }
 
 resource "aws_vpc_security_group_egress_rule" "all" {

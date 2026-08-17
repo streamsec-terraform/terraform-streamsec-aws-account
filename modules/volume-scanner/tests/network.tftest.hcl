@@ -28,7 +28,10 @@ mock_provider "aws" {
   # The service name is resolved rather than built from a string, so that aws-cn's
   # "cn." prefix is handled and a missing service fails at plan.
   mock_data "aws_vpc_endpoint_service" {
-    defaults = { service_name = "com.amazonaws.us-east-1.resolved" }
+    defaults = {
+      service_name       = "com.amazonaws.us-east-1.resolved"
+      availability_zones = ["us-east-1a", "us-east-1b"]
+    }
   }
   mock_data "aws_availability_zones" {
     defaults = { names = ["us-east-1a", "us-east-1b"] }
@@ -214,6 +217,40 @@ run "endpoints_requested_in_byo_mode_are_rejected" {
   }
 
   expect_failures = [aws_security_group.this]
+}
+
+# AZ names map to different physical AZs per account and an interface endpoint
+# service is not offered in every AZ, so the chosen AZ must come from the
+# intersection rather than blindly from names[0].
+run "scanner_az_comes_from_the_endpoint_service_zones" {
+  command = plan
+
+  override_data {
+    target = data.aws_vpc_endpoint_service.ebs[0]
+    values = {
+      service_name       = "com.amazonaws.us-east-1.resolved"
+      availability_zones = ["us-east-1b"]
+    }
+  }
+
+  assert {
+    condition     = aws_subnet.private[0].availability_zone == "us-east-1b"
+    error_message = "The subnet must land in an AZ the EBS endpoint service actually serves, not simply the first AZ in the region."
+  }
+}
+
+run "no_overlapping_az_is_refused_before_the_nat_is_built" {
+  command = plan
+
+  override_data {
+    target = data.aws_vpc_endpoint_service.ebs[0]
+    values = {
+      service_name       = "com.amazonaws.us-east-1.resolved"
+      availability_zones = ["us-east-1-nowhere"]
+    }
+  }
+
+  expect_failures = [aws_subnet.private]
 }
 
 run "ebs_endpoint_can_be_disabled_without_losing_s3" {
