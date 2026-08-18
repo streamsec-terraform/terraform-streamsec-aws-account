@@ -60,7 +60,15 @@ locals {
     Delete that CloudFormation stack and let it finish, then apply. To run both deliberately, set allow_cloudformation_coexistence = true.
   EOT
 
-  cloudformation_coexistence_ok = var.allow_cloudformation_coexistence || (!local.cloudformation_scanner_present && !local.duplicate_scanner_present)
+  # Already installed here, so this is a maintenance apply rather than a new
+  # install. Without this the guard is re-evaluated on every plan, and a
+  # CloudFormation scanner appearing in the region LATER would lock a healthy
+  # Terraform deployment out of its own applies — including the apply needed to
+  # destroy it. The hazard is two scanners being created; it is not a reason to
+  # freeze one that already exists.
+  already_installed = contains(local.existing_cluster_arns, "${local.cluster_arn_prefix}/${local.regional_name}")
+
+  cloudformation_coexistence_ok = var.allow_cloudformation_coexistence || local.already_installed || (!local.cloudformation_scanner_present && !local.duplicate_scanner_present)
 
   cloudformation_scanner_present = length([
     for arn in local.existing_cluster_arns :
@@ -400,7 +408,11 @@ locals {
 # "a secret with this name is already scheduled for deletion", after the VPC,
 # NAT gateway and EIP already exist and with no force-delete escape.
 resource "random_string" "secret_suffix" {
-  length  = 6
+  # EIGHT, not six. AWS documents that a secret name ending in a hyphen followed
+  # by exactly six characters collides with the suffix Secrets Manager appends
+  # itself, so a partial-ARN lookup can resolve to the wrong secret. The
+  # random-suffix fix had accidentally produced precisely that shape.
+  length  = 8
   upper   = false
   special = false
 }
@@ -530,6 +542,15 @@ resource "aws_ecs_task_definition" "this" {
   depends_on = [aws_secretsmanager_secret_version.collection_token]
 
   lifecycle {
+    # public.ecr.aws has no aws-cn presence, so the default image cannot be pulled
+    # there. The module is otherwise partition-aware and its tests cover the China
+    # paths, so fail at plan with the reason rather than at task start with an
+    # opaque CannotPullContainerError once the NAT gateway is already billing.
+    precondition {
+      condition     = local.partition != "aws-cn" || !startswith(var.scanner_image, "public.ecr.aws/")
+      error_message = "scanner_image still points at public.ecr.aws, which is not reachable from the aws-cn partition. Mirror the scanner image into an ECR registry in your China account and set scanner_image to it."
+    }
+
     precondition {
       condition     = local.task_sizing_is_valid
       error_message = "Fargate rejects task_cpu = ${var.task_cpu} with task_memory = ${var.task_memory}. At that CPU size the allowed memory values are ${join(", ", [for m in local.task_memory_allowed : tostring(m)])} MiB. Left unchecked this fails at RegisterTaskDefinition mid-apply, after the NAT gateway and Elastic IP are already billing."

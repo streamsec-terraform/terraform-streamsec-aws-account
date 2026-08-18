@@ -48,11 +48,17 @@ variable "workload_kinds" {
   # the same set rather than rejected for ordering or spacing. An exact-string
   # allow-list also made the trimspace in local.workload_kind_list unreachable.
   validation {
+    # Two clauses: every named kind must be known, AND a non-empty input must
+    # yield at least one kind. "" disables workload scanning deliberately; "  "
+    # or "," would disable it SILENTLY, dropping the IAM grants with it.
     condition = length(setsubtract(
       toset([for kind in split(",", var.workload_kinds) : trimspace(kind) if trimspace(kind) != ""]),
       toset(["lambda", "ecs"])
-    )) == 0
-    error_message = "workload_kinds must be a comma-separated subset of \"lambda\" and \"ecs\", or \"\" to disable workload scanning."
+      )) == 0 && (
+      var.workload_kinds == "" ||
+      length([for kind in split(",", var.workload_kinds) : kind if trimspace(kind) != ""]) > 0
+    )
+    error_message = "workload_kinds must be a comma-separated subset of \"lambda\" and \"ecs\", or exactly \"\" to disable workload scanning. A whitespace-only or comma-only value would disable it silently and drop the workload IAM grants with it."
   }
 }
 

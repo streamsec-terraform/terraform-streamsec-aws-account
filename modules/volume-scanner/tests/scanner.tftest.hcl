@@ -541,11 +541,18 @@ run "initial_scan_role_can_check_for_a_running_scan" {
   }
 }
 
-# Neither aws-cn code path was covered: kms_endpoint_suffix and
-# vpc_endpoint_service_prefix were both written to fix a silent zero-findings
-# failure, and a regression in either would have shipped invisibly.
+# Covers kms_endpoint_suffix only. vpc_endpoint_service_prefix is NOT exercised
+# here — these runs use create_scanner_vpc's default with mocked endpoint
+# services, so the aws-cn service-name prefix is still untested. Said plainly
+# because the previous version of this comment claimed both.
 run "kms_via_service_is_partition_correct_in_china" {
   command = plan
+
+  # public.ecr.aws is unreachable from aws-cn, so a China deployment must supply
+  # a mirrored image; the default would trip the precondition below.
+  variables {
+    scanner_image = "111122223333.dkr.ecr.cn-north-1.amazonaws.com.cn/stream/volume-scanner:latest"
+  }
 
   override_data {
     target = data.aws_partition.current
@@ -580,6 +587,47 @@ run "kms_via_service_is_scoped_to_ebs_and_ec2_in_aws" {
       ]
     ])
     error_message = "Both KMS statements must be confined to the EC2 and EBS data planes — dropping the condition widens the grant to every CMK in the account, and getting the values wrong denies the block reads it exists to enable."
+  }
+}
+
+# The module advertises China support and tests its partition paths, so the
+# unreachable default image should fail at plan with the reason rather than at
+# task start with an opaque CannotPullContainerError.
+run "china_partition_rejects_the_public_ecr_default_image" {
+  command = plan
+
+  override_data {
+    target = data.aws_partition.current
+    values = { partition = "aws-cn" }
+  }
+
+  override_data {
+    target = data.aws_region.current
+    values = { region = "cn-north-1" }
+  }
+
+  expect_failures = [aws_ecs_task_definition.this]
+}
+
+run "whitespace_only_workload_kinds_is_rejected" {
+  command = plan
+
+  variables {
+    workload_kinds = "  "
+  }
+
+  expect_failures = [var.workload_kinds]
+}
+
+run "secret_suffix_avoids_the_shape_aws_warns_about" {
+  command = plan
+
+  # AWS documents that a name ending in a hyphen plus SIX characters collides
+  # with the suffix Secrets Manager appends itself, so a partial-ARN lookup can
+  # resolve to the wrong secret.
+  assert {
+    condition     = length(regexall("-[a-z0-9]{6}$", aws_secretsmanager_secret.collection_token.name)) == 0
+    error_message = "The generated secret name must not end in a hyphen followed by exactly six characters."
   }
 }
 

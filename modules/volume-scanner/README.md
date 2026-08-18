@@ -92,6 +92,8 @@ In bring-your-own-subnet mode the module creates **no** VPC endpoints — it doe
 
 To avoid the second NAT gateway, set `create_scanner_vpc = false` and supply `vpc_id` + `subnet_ids`. Each subnet must have a `0.0.0.0/0` route to a **NAT gateway, NAT instance, inspection/firewall appliance ENI, VPC endpoint, Transit Gateway, virtual private gateway (VPN / Direct Connect), Cloud WAN core network, or Outposts local gateway** — the scanner task launches with no public IP, so a public subnet routed through an Internet Gateway is a black hole. The module validates this at plan time and tells you exactly which subnet is wrong and why, rather than letting the task fail later with an opaque `ResourceInitializationError`.
 
+> **When these checks run.** They are plan-time checks *when Terraform can read the module's data sources*. The `depends_on = [module.account]` wiring every example here uses makes Terraform defer those reads whenever `module.account` has pending changes — on a first apply, or any apply that also changes the account module — so the checks move to **apply** and a bad subnet can leave the secret, cluster, log group, IAM roles and EventBridge rule behind before failing. Applying the account module on its own first (see the two-step note above) keeps them at plan time.
+
 If your `subnet_ids` are created in the same apply (`module.vpc.private_subnets`, `aws_subnet.x[*].id`), Terraform may not know the list length at plan time and the validation cannot be keyed off values that do not exist yet. Set `validate_subnet_egress = false` in that case; the subnets are used as given. Note that the flag switches off **both** supplied-subnet checks — the egress walk and the "is this subnet even in `vpc_id`" check — because a `for_each` over a list of unknown length is rejected whichever check it feeds.
 
 > **A VPC endpoint alone is not enough to reach Stream.** The egress check accepts a subnet whose default route targets a VPC endpoint, but the scanner uploads SBOMs to your tenant's **public** hostname. Unlike `real-time-events` and `flow-logs`, this module has no `enable_privatelink` support yet, so a subnet with no internet path will pass validation and then time out on every upload. Until PrivateLink lands here, give the scanner a subnet with real egress.
@@ -291,6 +293,32 @@ No modules.
 terraform test
 ```
 
-One case is deliberately **not** covered here: a `vpc_id` that is unknown at plan time (`vpc_id = module.vpc.vpc_id`). `terraform test` can only supply known values through `variables`, so reproducing it needs a root module that builds a VPC and feeds its id into this one. The in-repo test asserts subnet validation instead, and says so.
+### The one case `terraform test` cannot cover
+
+`terraform test` can only supply **known** values through `variables`, so it cannot reproduce the failure mode this module has shipped twice:
+
+> `vpc_id` and `subnet_ids` come from resources created in the same apply, so their values are unknown at plan while the list **length** is known. Any for-expression carrying an `if` predicate over those values becomes wholly unknown, which makes the index-keyed `byo_subnets` map unknown and fails every bring-your-own validation with `Invalid for_each argument`.
+
+Both times it was invisible to a fully green suite. **Reproduce it with a throwaway root module** after any change to `local.byo_vpc_id`, `local.byo_subnet_ids`, `local.byo_subnets`, or the data sources keyed off them:
+
+```hcl
+resource "aws_vpc" "t" { cidr_block = "10.60.0.0/16" }
+
+resource "aws_subnet" "private" {
+  count      = 2                     # length known at plan, ids are not
+  vpc_id     = aws_vpc.t.id
+  cidr_block = cidrsubnet("10.60.0.0/16", 8, count.index)
+}
+
+module "scanner" {
+  source             = "../.."
+  customer_id        = "your-workspace-id"
+  create_scanner_vpc = false
+  vpc_id             = aws_vpc.t.id
+  subnet_ids         = aws_subnet.private[*].id
+}
+```
+
+`terraform plan` must succeed. If it reports `Invalid for_each argument`, a filter has been reintroduced into one of those locals.
 
 Requires Terraform >= 1.7 for `mock_provider` — stricter than the module's own `required_version` of 1.3. The tests use mock providers throughout and make no AWS API calls.

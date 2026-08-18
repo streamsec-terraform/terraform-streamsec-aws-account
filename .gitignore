@@ -60,7 +60,3 @@ tfplan.*
 *.tfplan
 *.tfplan.*
 scanner-test/
-
-# The unknown-value harness is a real root module; ignore its local state.
-modules/*/tests/unknown-values/.terraform/
-modules/*/tests/unknown-values/.terraform.lock.hcl
