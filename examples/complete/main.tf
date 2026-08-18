@@ -127,44 +127,21 @@ module "eks_audit_us_east_2" {
   depends_on = [module.account]
 }
 
-# Agentless vulnerability scanning — one module instance per region you want
-# scanned. customer_id is the same value as the provider's workspace_id above.
-#
-# Delete the console's CloudFormation scanner stack for a region before applying
-# here. The module refuses to apply while one is present: ecs:CreateCluster is an
-# upsert, so two scanners in a region end up deleting each other's snapshots.
-#
-# Default networking: a dedicated VPC with a NAT gateway (~$32/mo per region) so
-# the Fargate task runs with no public IP, plus interface and gateway VPC
-# endpoints so snapshot block reads bypass the NAT — measured at a ~96% cut in
-# NAT traffic, which is most of the scanner's running cost.
+# Agentless vulnerability scanning — one instance per region you want scanned.
+# customer_id is the provider's workspace_id. Delete the console's CloudFormation
+# scanner stack for the region first; the module refuses to apply alongside one.
 module "volume_scanner_us_east_1" {
   source      = "../../modules/volume-scanner"
   customer_id = "xxxxxxxxxxxx"
-
-  # Encrypted volumes are scanned by default. Customer-managed CMKs need the
-  # KMS grants this turns on; without them those instances report no findings.
-  # scan_encrypted_volumes = true
-
   providers = {
     aws = aws.aws-east-1
   }
   depends_on = [module.account]
 }
 
-# Bring your own private subnets instead, to avoid a second NAT gateway. Each
-# needs a 0.0.0.0/0 route to a NAT gateway, NAT instance, appliance ENI, Gateway
-# Load Balancer endpoint, Transit Gateway, virtual private gateway, Cloud WAN
-# core network or Outposts local gateway. An S3/DynamoDB gateway endpoint is NOT
-# egress and is rejected.
-#
-# Checked at plan time when Terraform can read the module's data sources. The
-# depends_on below defers them whenever module.account has pending changes — a
-# first apply, for instance — and the checks then run at apply instead.
-#
-# No VPC endpoints are created in this mode, since the module does not own the
-# VPC. Add an interface endpoint for the EBS Direct API to your own VPC to get
-# the same saving.
+# Bring your own private subnets instead of a dedicated VPC. Each needs a
+# 0.0.0.0/0 route to real egress (NAT gateway, Transit Gateway, VPN, appliance).
+# No VPC endpoints are created here, so block reads cross your NAT.
 module "volume_scanner_us_east_2" {
   source             = "../../modules/volume-scanner"
   customer_id        = "xxxxxxxxxxxx"

@@ -3,7 +3,7 @@
 ################################################################################
 
 variable "scanner_image" {
-  description = "ECR image URI for the EBS scanner. Public ECR (same registry as the k8s agents) so the Fargate task can pull without cross-account private-ECR auth; :latest tracks the newest v* release."
+  description = "ECR image URI for the scanner. Not reachable from aws-cn — mirror it and override there."
   type        = string
   default     = "public.ecr.aws/stream-security/volume-scanner:latest"
 }
@@ -16,31 +16,31 @@ variable "scanner_image" {
 ################################################################################
 
 variable "scan_language_packages" {
-  description = "Detect language-level packages on disk (Python wheels, npm package-lock, Ruby gemspec, Go modules, Rust Cargo, Java pom). The only toggle on by default — it gives the SBOM coverage most customers want from the agentless scanner."
+  description = "Detect language-level packages on disk (Python, Node, Ruby, Go, Rust, Java). The only toggle on by default."
   type        = bool
   default     = true
 }
 
 variable "scan_databases" {
-  description = "Detect installed databases (MySQL, Postgres, MongoDB, Redis, etc.) via their on-disk data-directory signatures. Adds a filesystem walk to each instance scan."
+  description = "Detect installed databases from their on-disk signatures. Adds a filesystem walk per instance."
   type        = bool
   default     = false
 }
 
 variable "scan_ai_workloads" {
-  description = "Detect AI / ML framework installs (PyTorch, vLLM, Transformers, LangChain, OpenAI / Anthropic SDKs) and surface them as workload metadata."
+  description = "Detect AI/ML framework installs and surface them as workload metadata."
   type        = bool
   default     = false
 }
 
 variable "scan_secrets" {
-  description = "Detect secrets and credentials in the filesystem (55+ secret types). Significantly increases scan duration on package-heavy hosts."
+  description = "Detect secrets and credentials on disk. Significantly increases scan duration."
   type        = bool
   default     = false
 }
 
 variable "workload_kinds" {
-  description = "Serverless/container workload kinds to scan in addition to EC2 instances. \"lambda\" scans Lambda function code + layers (zip) and Lambda container images; \"ecs\" scans the images of running Fargate tasks (EC2-launch-type containers are already covered by the instance disk scan). Set to \"\" to disable workload scanning entirely."
+  description = "Workloads to scan besides EC2: \"lambda\", \"ecs\", \"lambda,ecs\", or \"\" to disable. Also gates the matching IAM grants."
   type        = string
   default     = "lambda,ecs"
 
@@ -71,7 +71,7 @@ variable "workload_kinds" {
 ################################################################################
 
 variable "shard_size" {
-  description = "Instances per child task. Lower = more child tasks, more parallelism, higher RunTask volume. Higher = fewer children, longer per-task wall-clock."
+  description = "Instances per child task. Lower means more parallelism; higher means fewer, longer-running children."
   type        = number
   default     = 100
 
@@ -82,7 +82,7 @@ variable "shard_size" {
 }
 
 variable "max_concurrent_shards" {
-  description = "Maximum number of child scanner tasks the orchestrator keeps in flight at any moment. Caps EBS-Direct API rate, Fargate launch throttling, and the ingest endpoint's concurrent load."
+  description = "Maximum child scanner tasks in flight at once. Each consumes one subnet IP address."
   type        = number
   default     = 10
 
@@ -97,7 +97,7 @@ variable "max_concurrent_shards" {
 ################################################################################
 
 variable "task_cpu" {
-  description = "Fargate task CPU units. The default is a t3.xlarge profile (4 vCPU / 16 GB) sized for max_concurrent_shards = 10. Must be one of Fargate's discrete sizes: 256, 512, 1024, 2048, 4096, 8192, 16384."
+  description = "Fargate task CPU units. One of 256, 512, 1024, 2048, 4096, 8192, 16384."
   type        = string
   default     = "4096"
 
@@ -111,7 +111,7 @@ variable "task_cpu" {
 }
 
 variable "task_memory" {
-  description = "Fargate task memory in MiB. Raise this before raising max_concurrent_shards — Syft uses 250-400 MB per concurrent host scan. Must be a value Fargate allows for the chosen task_cpu."
+  description = "Fargate task memory in MiB. Raise before raising max_concurrent_shards. Must be valid for the chosen task_cpu."
   type        = string
   default     = "16384"
 
@@ -125,7 +125,7 @@ variable "task_memory" {
 }
 
 variable "ephemeral_storage_size_gib" {
-  description = "Task ephemeral storage in GiB, used for the L2 disk cache (2 GB x 10 concurrent scans by default). Minimum 21."
+  description = "Task ephemeral storage in GiB for the scanner's disk cache. Minimum 21."
   type        = number
   default     = 50
 
@@ -148,13 +148,13 @@ variable "ephemeral_storage_size_gib" {
 ################################################################################
 
 variable "create_scanner_vpc" {
-  description = "Create a dedicated VPC, subnet pair, Internet Gateway and NAT Gateway for the scanner. Set to false to run the scanner in existing private subnets, which must have a default route to a NAT Gateway, VPC Endpoint or Transit Gateway."
+  description = "Create a dedicated VPC, subnets, Internet Gateway and NAT Gateway for the scanner. False to use your own private subnets."
   type        = bool
   default     = true
 }
 
 variable "create_ebs_vpc_endpoint" {
-  description = "Create the interface VPC endpoint for the EBS Direct API so snapshot block reads bypass the NAT Gateway. Defaults to on whenever the module creates the VPC: block reads are the dominant egress cost and NAT data processing is ~4.5x the PrivateLink rate for the same bytes. Set false where the endpoint service is unavailable in your region or partition — the free S3 gateway endpoint is unaffected and is always created alongside a module-managed VPC. Leave unset in bring-your-own-subnet mode; the module does not create endpoints in a VPC it does not own, and setting this true there is rejected rather than silently ignored."
+  description = "Create the EBS Direct API interface endpoint so snapshot block reads bypass the NAT Gateway, which is the bulk of the scanner's egress. On by default when the module creates the VPC. Leave unset otherwise."
   type        = bool
 
   # Tri-state on purpose. Unset means "on when the module owns the VPC, off
@@ -165,7 +165,7 @@ variable "create_ebs_vpc_endpoint" {
 }
 
 variable "scanner_vpc_cidr" {
-  description = "CIDR block for the scanner VPC when create_scanner_vpc is true. Split into two equal halves: the lower one is the public subnet (NAT Gateway only, no Fargate task ever runs there) and the upper one is the private subnet where the scanner runs."
+  description = "CIDR for the scanner VPC. Split in half: public for the NAT Gateway, private for the tasks."
   type        = string
   default     = "10.255.0.0/24"
 
@@ -189,19 +189,19 @@ variable "scanner_vpc_cidr" {
 }
 
 variable "validate_subnet_egress" {
-  description = "Validate at plan time that every supplied subnet has a default route to a NAT gateway, NAT instance, appliance ENI, VPC endpoint or Transit Gateway. Set to false when subnet_ids are created in the same apply and their count is not known until then — Terraform cannot key the validation data sources off values it does not have yet."
+  description = "Check supplied subnets for egress, VPC membership, zone and capacity. Set false when the subnet list length is unknown at plan; that disables all of those checks."
   type        = bool
   default     = true
 }
 
 variable "vpc_id" {
-  description = "VPC for the scanner Fargate tasks. Required when create_scanner_vpc is false. The scanner uses this VPC only for egress — it scans the whole account/region through the EBS Direct API regardless of which VPC the scanned workloads are in."
+  description = "VPC for the scanner tasks, required when create_scanner_vpc is false. Used for egress only; the scan covers the whole region regardless."
   type        = string
   default     = null
 }
 
 variable "subnet_ids" {
-  description = "COST NOTE: the scanner reads snapshot blocks over the EBS Direct API, which is the dominant source of egress traffic, and if these subnets reach it through a NAT Gateway you pay NAT data processing on every byte. Adding an interface VPC endpoint for com.amazonaws.<region>.ebs to your VPC (plus a gateway endpoint for S3) typically cuts the scanner's total AWS cost by roughly half. The module does not create them in this mode because it does not own the VPC; in the default networking mode it creates both for you. Private subnets for the scanner Fargate tasks. Required when create_scanner_vpc is false. Each subnet MUST have a default route to a NAT Gateway, VPC Endpoint or Transit Gateway — the tasks run with no public IP, so a public subnet with only an Internet Gateway route is a black hole. Validated at plan time."
+  description = "Existing private subnets for the scanner tasks, required when create_scanner_vpc is false. Add an EBS Direct API interface endpoint to your VPC to keep block reads off the NAT Gateway."
   type        = list(string)
   default     = []
   # A blank element cannot be filtered out in a local: a for-expression with a
@@ -220,7 +220,7 @@ variable "subnet_ids" {
 ################################################################################
 
 variable "schedule_expression" {
-  description = "EventBridge schedule for the daily scan. Must be a cron expression: a rate(...) rule with State ENABLED fires once at rule creation as well as on the interval, which would launch a second orchestrator concurrently with the initial-scan trigger."
+  description = "EventBridge schedule for the daily scan. Must be a six-field cron expression; rate(...) is rejected."
   type        = string
   default     = "cron(0 3 * * ? *)"
 
@@ -236,13 +236,13 @@ variable "schedule_expression" {
 }
 
 variable "trigger_initial_scan" {
-  description = "Run one immediate scan at apply time so the first results do not wait for the next scheduled fire. Failures are swallowed — the daily schedule is the fallback and a failed first scan never fails the apply."
+  description = "Run one immediate scan at apply time. Failures are swallowed; the daily schedule is the fallback."
   type        = bool
   default     = true
 }
 
 variable "collection_token_secret_name" {
-  description = "Base name for the Secrets Manager secret holding the Stream collection token the scanner authenticates its SBOM uploads with. The region is appended, so one secret exists per deployed region."
+  description = "Base name for the Secrets Manager secret holding the collection token. Region and a random suffix are appended."
   type        = string
   default     = "streamsec-scanner-collection-token"
   # The only name-forming input without a character check. Secrets Manager accepts
@@ -255,7 +255,7 @@ variable "collection_token_secret_name" {
 }
 
 variable "secret_recovery_window_days" {
-  description = "Days Secrets Manager waits before deleting the collection-token secret. 0 deletes immediately. Any other value must be 7-30, the range Secrets Manager accepts."
+  description = "Days Secrets Manager waits before deleting the secret. 0, or 7-30."
   type        = number
   default     = 0
 
@@ -269,19 +269,19 @@ variable "secret_recovery_window_days" {
 }
 
 variable "allow_cloudformation_coexistence" {
-  description = "Permit applying this module into a region where the console's CloudFormation scanner stack is still deployed. Off by default: the two scan every volume twice and compete over snapshot retention, since each deletes snapshots tagged Purpose=ebs-package-collector account-wide — including the other's. Turn on only for a deliberate side-by-side migration."
+  description = "Allow deploying alongside another scanner in the same region. Off by default: two scanners scan every volume twice and delete each other's snapshots."
   type        = bool
   default     = false
 }
 
 variable "scan_encrypted_volumes" {
-  description = "Grant the scanner task the KMS permissions it needs to read snapshots of ENCRYPTED EBS volumes. Leaving this off means encrypted instances are silently skipped — the scanner snapshots them, fails every block read, and reports no findings for them with no error surfaced anywhere. Turn it off only if every volume in the region is unencrypted, or if you deliberately want encrypted volumes excluded."
+  description = "Grant the KMS permissions needed to read snapshots of encrypted volumes. Off means those instances report no findings, with no error anywhere."
   type        = bool
   default     = true
 }
 
 variable "kms_key_arns" {
-  description = "KMS keys the scanner may use to read encrypted volumes. Defaults to [\"*\"] because customer CMK ARNs are not knowable at plan time; narrow it to the specific EBS keys in the region if you can enumerate them. Ignored when scan_encrypted_volumes is false."
+  description = "KMS keys the scanner may use for encrypted volumes. Narrow from [\"*\"] if you can enumerate your EBS keys."
   type        = list(string)
   default     = ["*"]
 
@@ -292,7 +292,7 @@ variable "kms_key_arns" {
 }
 
 variable "log_retention_days" {
-  description = "Retention in days for the scanner's CloudWatch log groups. Must be one of CloudWatch's fixed retention values, or 0 to retain forever."
+  description = "Retention in days for the scanner log groups. Must be a CloudWatch retention value, or 0 to keep forever."
   type        = number
   default     = 30
   # The provider schema already rejects a bad value at plan time — verified, it is
@@ -312,7 +312,7 @@ variable "log_retention_days" {
 ################################################################################
 
 variable "customer_id" {
-  description = "Stream Security customer/workspace id — the same value configured as workspace_id on the streamsec provider. Sent to the scanner as COLLECTOR_CUSTOMER_ID and COLLECTOR_STREAM_SCAN_WORKSPACE, and used for the streamsec:customer tag. This becomes optional once terraform-provider-streamsec exposes customer_id as a data source attribute."
+  description = "Stream Security workspace id — the same value as the provider's workspace_id. A wrong value is silent: SBOMs are dropped by ingest and the region still looks healthy."
   type        = string
   default     = null
   # Checked here rather than only in a precondition deep in the graph, so a
@@ -325,7 +325,7 @@ variable "customer_id" {
 }
 
 variable "tenant_name" {
-  description = "Stream Security tenant name, sent to the scanner as COLLECTOR_TENANT_NAME. Defaults to the first DNS label of the provider's host, which is correct for a per-tenant hostname (https://<tenant>.streamsec.io) but wrong behind a shared/regional endpoint, a custom CNAME or a PrivateLink endpoint DNS name — set it explicitly in those cases."
+  description = "Stream Security tenant name. Defaults to the first DNS label of the provider host; set it explicitly behind a shared endpoint, custom CNAME or PrivateLink DNS."
   type        = string
   default     = null
   validation {
@@ -335,7 +335,7 @@ variable "tenant_name" {
 }
 
 variable "resource_prefix" {
-  description = "Optional prefix prepended to all created resource names. Empty keeps names identical to the CloudFormation deployment. Capped at 9 characters because the generated IAM role names already consume all but 10 of IAM's 64-character limit."
+  description = "Prefix for all created resource names. Max 9 characters, letters/digits/hyphens — IAM role names consume the rest of the 64-char limit."
   type        = string
   default     = ""
 
