@@ -346,6 +346,18 @@ data "aws_route_tables" "byo_explicit" {
 # vpc_id is an ARGUMENT, not count/for_each, so an unknown value is fine here:
 # Terraform simply defers the read. The fallback covers a caller who supplied
 # subnets but omitted vpc_id — the subnets themselves name the VPC.
+# Read via the subnets' own vpc_id rather than var.vpc_id: it is the VPC the
+# tasks will actually run in, and it sidesteps the empty-string case entirely.
+#
+# The count gate matches byo_main's — length(byo_subnets) is known whenever the
+# supplied list's length is, which is the same condition the whole index-keyed
+# validation design rests on.
+data "aws_vpc" "byo" {
+  count = local.byo_validate && length(local.byo_subnets) > 0 ? 1 : 0
+
+  id = try(values(data.aws_subnet.byo)[0].vpc_id, null)
+}
+
 data "aws_route_table" "byo_main" {
   count = local.byo_validate && length(local.byo_subnets) > 0 ? 1 : 0
 
@@ -420,6 +432,17 @@ resource "aws_security_group" "this" {
     precondition {
       condition     = !local.byo_validate || length(local.byo_subnets) == 0 || local.byo_min_free_ips >= local.scanner_peak_task_count
       error_message = "max_concurrent_shards = ${var.max_concurrent_shards} needs ${local.scanner_peak_task_count} concurrent task ENIs (the orchestrator, its children, and the workload child when workload_kinds is set), and ECS placement is best-effort so they can all land in one subnet — but the smallest supplied subnet is sized for only ${local.byo_min_free_ips} addresses after AWS reserves five. Note this measures subnet SIZE, not current free addresses — a large but heavily-used shared subnet can still exhaust at scan time. Supply larger subnets, or lower max_concurrent_shards."
+    }
+
+    # enable_dns_support only. A Fargate task resolves the EBS Direct API, ECR and
+    # the Stream ingest hostname through the VPC resolver, and none of that works
+    # without it — the plan is clean, the apply succeeds, and every scan fails on
+    # DNS. enable_dns_hostnames is NOT required here: it governs whether instances
+    # get DNS names, and this mode creates no interface endpoint that would need
+    # private DNS.
+    precondition {
+      condition     = !local.byo_validate || length(local.byo_subnets) == 0 || try(one(data.aws_vpc.byo[*].enable_dns_support), true)
+      error_message = "VPC ${local.byo_vpc_id != "" ? local.byo_vpc_id : "(supplied subnets')"} has enableDnsSupport disabled. The scanner task resolves the EBS Direct API and the Stream ingest hostname through the VPC resolver, so every scan would fail on DNS while the deployment looked healthy."
     }
 
     precondition {

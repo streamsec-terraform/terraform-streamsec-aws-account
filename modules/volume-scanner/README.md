@@ -98,6 +98,8 @@ If your `subnet_ids` are created in the same apply (`module.vpc.private_subnets`
 
 > **A VPC endpoint alone is not enough to reach Stream.** The egress check accepts a subnet whose default route targets a VPC endpoint, but the scanner uploads SBOMs to your tenant's **public** hostname. Unlike `real-time-events` and `flow-logs`, this module has no `enable_privatelink` support yet, so a subnet with no internet path will pass validation and then time out on every upload. Until PrivateLink lands here, give the scanner a subnet with real egress.
 
+Supplied subnets are also checked for VPC membership, a standard availability zone (Fargate is not offered in Local Zones), an IPv4 CIDR, enough addresses for the peak task count, and that their VPC has DNS resolution enabled — without it the task cannot resolve the EBS Direct API or Stream ingest, and every scan fails while the deployment looks healthy.
+
 Only a literal `0.0.0.0/0` route counts. A default route expressed as a **managed prefix list** is *not* accepted: a prefix list's contents are not readable from the route table, and the commonest one in a private subnet is the S3 gateway endpoint, which says nothing about internet access — accepting it let subnets with no internet path through. Likewise a `vpce-` gateway route is never internet egress. If your default route genuinely is a prefix list, set `validate_subnet_egress = false`.
 
 The module also checks that the **smallest** supplied subnet is large enough for the peak ENI count — `max_concurrent_shards`, plus the orchestrator, plus one workload child when `workload_kinds` is set. It uses the subnet's **CIDR size**, not its current free-address count: the live count drops while the scanner's own children are running, which would refuse any apply that overlapped a scan. The minimum rather than the sum, because ECS placement across a subnet list is best-effort and the whole fan-out can land in one subnet.
@@ -227,6 +229,7 @@ No modules.
 | [aws_route_table.byo_main](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/route_table) | data source |
 | [aws_route_tables.byo_explicit](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/route_tables) | data source |
 | [aws_subnet.byo](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/subnet) | data source |
+| [aws_vpc.byo](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/vpc) | data source |
 | [aws_vpc_endpoint_service.ebs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/vpc_endpoint_service) | data source |
 | [aws_vpc_endpoint_service.s3](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/vpc_endpoint_service) | data source |
 | [streamsec_aws_account.this](https://registry.terraform.io/providers/streamsec-terraform/streamsec/latest/docs/data-sources/aws_account) | data source |

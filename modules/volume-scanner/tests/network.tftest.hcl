@@ -57,6 +57,13 @@ mock_provider "aws" {
       availability_zone = "us-east-1a"
     }
   }
+  # DNS support ON by default; a run overrides it to prove the check fires.
+  mock_data "aws_vpc" {
+    defaults = {
+      enable_dns_support   = true
+      enable_dns_hostnames = true
+    }
+  }
   mock_data "aws_route_tables" {
     defaults = { ids = ["rtb-explicit"] }
   }
@@ -322,6 +329,29 @@ run "ebs_endpoint_can_be_disabled_without_losing_s3" {
 # Fargate is not offered in Local Zones or Wavelength zones. The module-managed
 # path filters them out of AZ selection; bring-your-own never checked, so such a
 # subnet passed everything and then failed every RunTask while looking healthy.
+# A Fargate task resolves the EBS Direct API, ECR and the Stream ingest hostname
+# through the VPC resolver. With enableDnsSupport off, none of that resolves —
+# the plan is clean, the apply succeeds, and every scan fails on DNS.
+run "byo_vpc_without_dns_support_is_rejected" {
+  command = plan
+
+  variables {
+    create_scanner_vpc = false
+    vpc_id             = "vpc-scanner"
+    subnet_ids         = ["subnet-private-a"]
+  }
+
+  override_data {
+    target = data.aws_vpc.byo[0]
+    values = {
+      enable_dns_support   = false
+      enable_dns_hostnames = true
+    }
+  }
+
+  expect_failures = [aws_security_group.this]
+}
+
 run "byo_subnet_in_a_local_zone_is_rejected" {
   command = plan
 
