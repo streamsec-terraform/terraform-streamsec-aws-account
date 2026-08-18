@@ -355,7 +355,11 @@ data "aws_route_tables" "byo_explicit" {
 data "aws_vpc" "byo" {
   count = local.byo_validate && length(local.byo_subnets) > 0 ? 1 : 0
 
-  id = try(values(data.aws_subnet.byo)[0].vpc_id, null)
+  # No try(..., null) fallback: the count gate above already guarantees a subnet,
+  # and data "aws_vpc" with every argument null resolves to the account's DEFAULT
+  # VPC — so a fallback that ever fired would silently validate the wrong VPC
+  # instead of failing.
+  id = values(data.aws_subnet.byo)[0].vpc_id
 }
 
 data "aws_route_table" "byo_main" {
@@ -434,6 +438,12 @@ resource "aws_security_group" "this" {
       error_message = "max_concurrent_shards = ${var.max_concurrent_shards} needs ${local.scanner_peak_task_count} concurrent task ENIs (the orchestrator, its children, and the workload child when workload_kinds is set), and ECS placement is best-effort so they can all land in one subnet — but the smallest supplied subnet is sized for only ${local.byo_min_free_ips} addresses after AWS reserves five. Note this measures subnet SIZE, not current free addresses — a large but heavily-used shared subnet can still exhaust at scan time. Supply larger subnets, or lower max_concurrent_shards."
     }
 
+    # coalesce, NOT try: one([]) is null and try() catches ERRORS, not nulls, so
+    # try(one(...), true) yields null. Terraform only short-circuits || from
+    # v1.12; below that both operands are always evaluated and cty's OrFunc
+    # rejects a null argument, so this failed every plan in BOTH modes on the
+    # 1.3-1.11 range required_version promises to support.
+    #
     # enable_dns_support only. A Fargate task resolves the EBS Direct API, ECR and
     # the Stream ingest hostname through the VPC resolver, and none of that works
     # without it — the plan is clean, the apply succeeds, and every scan fails on
@@ -441,7 +451,7 @@ resource "aws_security_group" "this" {
     # get DNS names, and this mode creates no interface endpoint that would need
     # private DNS.
     precondition {
-      condition     = !local.byo_validate || length(local.byo_subnets) == 0 || try(one(data.aws_vpc.byo[*].enable_dns_support), true)
+      condition     = !local.byo_validate || length(local.byo_subnets) == 0 || coalesce(one(data.aws_vpc.byo[*].enable_dns_support), true)
       error_message = "VPC ${local.byo_vpc_id != "" ? local.byo_vpc_id : "(supplied subnets')"} has enableDnsSupport disabled. The scanner task resolves the EBS Direct API and the Stream ingest hostname through the VPC resolver, so every scan would fail on DNS while the deployment looked healthy."
     }
 

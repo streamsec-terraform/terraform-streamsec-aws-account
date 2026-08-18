@@ -119,7 +119,7 @@ variable "task_memory" {
     # Digits only. "16384.0" satisfies tonumber() and, because cty compares
     # numbers by value, also satisfies the Fargate contains() check — then reaches
     # RegisterTaskDefinition verbatim and is rejected mid-apply.
-    condition     = can(regex("^[0-9]+$", var.task_memory)) && tonumber(var.task_memory) >= 512
+    condition     = can(regex("^[0-9]+$", var.task_memory)) && try(tonumber(var.task_memory), 0) >= 512
     error_message = "task_memory must be a whole number of MiB written without a decimal point, at least 512."
   }
 }
@@ -179,11 +179,12 @@ variable "scanner_vpc_cidr" {
   # a supernet ("10.0.0.0/8") plans clean and fails with InvalidVpc.Range — after
   # the availability-zone lookup has run and the rest of the graph is in flight.
   validation {
-    condition = can(cidrsubnet(var.scanner_vpc_cidr, 1, 1)) && can(
-      tonumber(split("/", var.scanner_vpc_cidr)[1])
-      ) && tonumber(split("/", var.scanner_vpc_cidr)[1]) <= 27 && tonumber(
-      split("/", var.scanner_vpc_cidr)[1]
-    ) >= 16
+    # Every operand is TOTAL — try() gives each a value rather than raising — so
+    # this does not depend on || / && short-circuiting, which Terraform only does
+    # from v1.12. Below that both sides are always evaluated, and an unguarded
+    # split("/", "10.255.0.0")[1] raised "Invalid index" instead of emitting the
+    # error_message below.
+    condition     = can(cidrsubnet(var.scanner_vpc_cidr, 1, 1)) && try(tonumber(split("/", var.scanner_vpc_cidr)[1]), 0) <= 27 && try(tonumber(split("/", var.scanner_vpc_cidr)[1]), 0) >= 16
     error_message = "scanner_vpc_cidr must be a valid IPv4 CIDR block between /16 and /27. AWS rejects VPCs larger than /16, and the block is split into two subnets, which AWS rejects below /28."
   }
 }
