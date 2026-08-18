@@ -822,3 +822,32 @@ run "egress_validation_can_be_skipped" {
     error_message = "validate_subnet_egress = false must read no validation data sources, so subnet ids that are unknown until apply do not break for_each."
   }
 }
+
+# These assert that a blank vpc_id trips the module's own preconditions. They do
+# NOT guard the data-source wiring, and saying so matters: mock_provider returns
+# data whatever vpc_id filter it is given, so reverting the consumers back to raw
+# var.vpc_id leaves both of these green — verified. The wiring is only observable
+# against real AWS, where an empty filter makes the singular route-table data
+# source abort the plan before any precondition is reached.
+run "blank_vpc_id_is_caught_by_the_precondition_not_a_data_source" {
+  command = plan
+
+  variables {
+    create_scanner_vpc = false
+    vpc_id             = "   "
+    subnet_ids         = ["subnet-private-a"]
+  }
+
+  expect_failures = [aws_security_group.this]
+}
+
+run "blank_vpc_id_also_trips_the_create_scanner_vpc_conflict" {
+  command = plan
+
+  variables {
+    create_scanner_vpc = true
+    vpc_id             = "vpc-scanner"
+  }
+
+  expect_failures = [aws_security_group.this]
+}

@@ -329,7 +329,7 @@ data "aws_subnet" "byo" {
 data "aws_route_tables" "byo_explicit" {
   for_each = local.byo_subnets
 
-  vpc_id = var.vpc_id
+  vpc_id = local.byo_vpc_id != "" ? local.byo_vpc_id : null
 
   filter {
     name   = "association.subnet-id"
@@ -349,7 +349,7 @@ data "aws_route_tables" "byo_explicit" {
 data "aws_route_table" "byo_main" {
   count = local.byo_validate && length(local.byo_subnets) > 0 ? 1 : 0
 
-  vpc_id = var.vpc_id != null ? var.vpc_id : try(values(data.aws_subnet.byo)[0].vpc_id, null)
+  vpc_id = local.byo_vpc_id != "" ? local.byo_vpc_id : try(values(data.aws_subnet.byo)[0].vpc_id, null)
 
   filter {
     name   = "association.main"
@@ -404,7 +404,7 @@ resource "aws_security_group" "this" {
     }
 
     precondition {
-      condition     = !var.create_scanner_vpc || (var.vpc_id == null && length(var.subnet_ids) == 0)
+      condition     = !var.create_scanner_vpc || (local.byo_vpc_id == "" && length(local.byo_subnet_ids) == 0)
       error_message = "vpc_id / subnet_ids were supplied while create_scanner_vpc is true, so they would be ignored and the module would provision its own VPC and NAT Gateway (~$32/mo per region). Set create_scanner_vpc = false to use the supplied network, or drop vpc_id and subnet_ids."
     }
 
@@ -442,7 +442,7 @@ resource "aws_security_group" "this" {
 
     precondition {
       condition     = length(local.byo_wrong_vpc_subnets) == 0
-      error_message = "Subnet(s) ${join(", ", local.byo_wrong_vpc_subnets)} are not in VPC ${coalesce(var.vpc_id, "(unset)")}. Pick subnets from the chosen VPC."
+      error_message = "Subnet(s) ${join(", ", local.byo_wrong_vpc_subnets)} are not in VPC ${local.byo_vpc_id != "" ? local.byo_vpc_id : "(unset)"}. Pick subnets from the chosen VPC."
     }
 
   }
