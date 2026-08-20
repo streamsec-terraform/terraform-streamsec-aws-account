@@ -103,6 +103,44 @@ variables {
   customer_id = "customer-abc"
 }
 
+# command = apply: every assertion here compares one resource's configured
+# argument against another resource's generated id, and those ids are unknown
+# at plan. Under plan Terraform reports "Unknown condition value" and fails the
+# run outright rather than passing it, which is at least loud — but it means
+# the wiring can only be checked after apply.
+run "module_owned_private_subnet_actually_routes_to_the_nat" {
+  command = apply
+
+  assert {
+    condition = alltrue([
+      aws_route.private_nat[0].destination_cidr_block == "0.0.0.0/0",
+      aws_route.private_nat[0].nat_gateway_id == aws_nat_gateway.this[0].id,
+      aws_route.private_nat[0].route_table_id == aws_route_table.private[0].id,
+    ])
+    error_message = "The private route table must carry a default route to the module's own NAT Gateway. Without it the scanner task has no egress and every scan fails at the first API call, with nothing in the plan to show why."
+  }
+
+  assert {
+    condition = alltrue([
+      aws_route_table_association.private[0].subnet_id == aws_subnet.private[0].id,
+      aws_route_table_association.private[0].route_table_id == aws_route_table.private[0].id,
+    ])
+    error_message = "The scanner subnet must be associated with the private route table. Unassociated, it falls back to the VPC main route table, which has no default route."
+  }
+
+  # The NAT must sit in the PUBLIC subnet. In the private one it routes to
+  # itself and the failure looks identical to a missing route.
+  assert {
+    condition     = aws_nat_gateway.this[0].subnet_id == aws_subnet.public[0].id
+    error_message = "The NAT Gateway must live in the public subnet, not the private one it serves."
+  }
+
+  assert {
+    condition     = aws_route.public_internet[0].gateway_id == aws_internet_gateway.this[0].id
+    error_message = "The public route table must default-route to the Internet Gateway, or the NAT Gateway itself has no path out."
+  }
+}
+
 run "default_provisions_the_scanner_vpc" {
   command = plan
 

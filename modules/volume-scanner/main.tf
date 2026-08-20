@@ -434,6 +434,12 @@ resource "aws_secretsmanager_secret" "collection_token" {
   tags = local.tags
 
   lifecycle {
+    # Renaming collection_token_secret_name is ForceNew. Without this Terraform
+    # deletes the live secret first, and any scanner task that pulls the token
+    # in that window fails; the delete is also a scheduled deletion, so a
+    # rollback cannot recreate the old name until the recovery window expires.
+    create_before_destroy = true
+
     precondition {
       condition     = local.cloudformation_coexistence_ok
       error_message = local.cloudformation_coexistence_error
@@ -442,6 +448,10 @@ resource "aws_secretsmanager_secret" "collection_token" {
 }
 
 resource "aws_secretsmanager_secret_version" "collection_token" {
+  lifecycle {
+    create_before_destroy = true
+  }
+
   secret_id     = aws_secretsmanager_secret.collection_token.id
   secret_string = data.streamsec_aws_account.this.streamsec_collection_token
 }
