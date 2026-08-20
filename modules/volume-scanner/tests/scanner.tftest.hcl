@@ -571,28 +571,41 @@ run "kms_via_service_is_partition_correct_in_china" {
   }
 
   assert {
-    condition = alltrue([
-      for sid in ["ReadEncryptedVolumes", "GrantEC2SnapshotAccessToKeys"] :
-      contains(
-        [for s in jsondecode(aws_iam_role_policy.task.policy).Statement : try(s.Condition.StringEquals["kms:ViaService"], []) if s.Sid == sid][0],
-        "ebs.cn-north-1.amazonaws.com.cn"
-      )
-    ])
-    error_message = "In aws-cn the kms:ViaService values must use the .amazonaws.com.cn suffix on BOTH KMS statements, or the condition never matches, kms:Decrypt is implicitly denied and every CMK-encrypted volume silently reports nothing."
+    condition = [
+      for s in jsondecode(aws_iam_role_policy.task.policy).Statement :
+      try(s.Condition.StringEquals["kms:ViaService"], []) if s.Sid == "ReadEncryptedVolumes"
+    ][0] == ["ec2.cn-north-1.amazonaws.com.cn"]
+    error_message = "In aws-cn the service principal ends .amazonaws.com.cn. Hardcoding the commercial suffix makes the condition unmatchable, which denies kms:Decrypt and silently reports nothing for every CMK-encrypted volume there."
   }
 }
 
-run "kms_via_service_is_scoped_to_ebs_and_ec2_in_aws" {
+# Matches the CloudFormation template exactly: two actions, one ViaService value.
+# Anything beyond this is privilege the console stack does not hand out.
+run "kms_grant_matches_the_cloudformation_template_exactly" {
   command = plan
 
   assert {
-    condition = alltrue([
-      for sid in ["ReadEncryptedVolumes", "GrantEC2SnapshotAccessToKeys"] :
-      [for s in jsondecode(aws_iam_role_policy.task.policy).Statement : try(s.Condition.StringEquals["kms:ViaService"], []) if s.Sid == sid][0] == [
-        "ec2.us-east-1.amazonaws.com", "ebs.us-east-1.amazonaws.com"
-      ]
-    ])
-    error_message = "Both KMS statements must be confined to the EC2 and EBS data planes — dropping the condition widens the grant to every CMK in the account, and getting the values wrong denies the block reads it exists to enable."
+    condition = [
+      for s in jsondecode(aws_iam_role_policy.task.policy).Statement :
+      s if s.Sid == "ReadEncryptedVolumes"
+    ][0].Condition.StringEquals["kms:ViaService"] == ["ec2.us-east-1.amazonaws.com"]
+    error_message = "kms:ViaService must be exactly ec2.<region>, as the CloudFormation template grants. Dropping the condition widens the grant to every CMK in the account; adding values widens it past what the console stack hands out."
+  }
+
+  assert {
+    condition = toset([
+      for s in jsondecode(aws_iam_role_policy.task.policy).Statement :
+      s if s.Sid == "ReadEncryptedVolumes"
+    ][0].Action) == toset(["kms:Decrypt", "kms:DescribeKey"])
+    error_message = "The KMS grant must be exactly kms:Decrypt + kms:DescribeKey. GenerateDataKeyWithoutPlaintext, ReEncryptFrom/To and CreateGrant were doc-derived guesses for a snapshot-copy path this scanner does not have, and DEV-21730 measured CreateSnapshot needing none of them."
+  }
+
+  assert {
+    condition = length([
+      for s in jsondecode(aws_iam_role_policy.task.policy).Statement :
+      s if s.Sid == "GrantEC2SnapshotAccessToKeys"
+    ]) == 0
+    error_message = "kms:CreateGrant is a mutating action on every CMK reachable through the EC2 data plane, held by a role that runs third-party container code. The CloudFormation template does not grant it and neither should this module."
   }
 }
 
@@ -705,18 +718,11 @@ run "kms_grants_are_present_by_default" {
   command = plan
 
   assert {
-    condition = alltrue([
-      for sid in ["ReadEncryptedVolumes", "GrantEC2SnapshotAccessToKeys"] :
-      contains([for s in jsondecode(aws_iam_role_policy.task.policy).Statement : s.Sid], sid)
-    ])
-    error_message = "Without KMS grants the scanner snapshots an encrypted volume successfully and then fails every block read, reporting zero findings with no error — so they must be on by default."
-  }
-
-  assert {
-    condition = try(jsondecode(aws_iam_role_policy.task.policy).Statement[
-      index([for s in jsondecode(aws_iam_role_policy.task.policy).Statement : s.Sid], "GrantEC2SnapshotAccessToKeys")
-    ].Condition.Bool["kms:GrantIsForAWSResource"], null) == "true"
-    error_message = "kms:CreateGrant must be conditioned on kms:GrantIsForAWSResource, so the role cannot mint grants of its own."
+    condition = contains(
+      [for s in jsondecode(aws_iam_role_policy.task.policy).Statement : s.Sid],
+      "ReadEncryptedVolumes"
+    )
+    error_message = "The KMS grant must be present by default. Without it, CMK-encrypted volumes fail with ResourceNotFoundException rather than AccessDenied, so they drop out of results with the apply succeeding and the console showing the region healthy."
   }
 }
 

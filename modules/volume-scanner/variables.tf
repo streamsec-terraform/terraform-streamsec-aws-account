@@ -1,5 +1,15 @@
 ################################################################################
-# Scanner Image
+# What the Stream console asks you for
+#
+# These are the CloudFormation template's Parameters, one for one. Deploying
+# from the console presents exactly this set and nothing else, so a caller who
+# sets only these gets the same scanner the console installs.
+#
+# create_scanner_vpc is the one addition. In the console it is not a parameter
+# at all — it is a render-time flag (`create_network`) chosen when the template
+# is generated. A Terraform module has no render step, so the choice has to
+# surface as an input. vpc_id / subnet_ids are the console's VpcId / SubnetIds,
+# which it only renders when that flag is off.
 ################################################################################
 
 variable "scanner_image" {
@@ -9,13 +19,8 @@ variable "scanner_image" {
   nullable    = false
 }
 
-################################################################################
-# Scanner Features
-#
 # The scanner image defaults all of these to false; this module opts in to
 # language-package scanning only, matching the CloudFormation template.
-################################################################################
-
 variable "scan_language_packages" {
   description = "Detect language-level packages on disk (Python, Node, Ruby, Go, Rust, Java). The only toggle on by default."
   type        = bool
@@ -68,14 +73,9 @@ variable "workload_kinds" {
   }
 }
 
-################################################################################
-# Scanner Scaling
-#
 # The orchestrator task discovers instances and launches one child Fargate task
 # per shard. The defaults (100 instances per shard, 10 concurrent) scan up to
 # 1000 instances per wave; raise max_concurrent_shards for larger fleets.
-################################################################################
-
 variable "shard_size" {
   description = "Instances per child task. Lower means more parallelism; higher means fewer, longer-running children."
   type        = number
@@ -100,8 +100,54 @@ variable "max_concurrent_shards" {
   }
 }
 
+# Default (create_scanner_vpc = true) provisions a dedicated VPC with a public +
+# private subnet pair, an Internet Gateway on the public subnet, and a NAT
+# Gateway with a stable Elastic IP. The scanner Fargate task runs in the private
+# subnet with no public IP — outbound reaches AWS APIs, public ECR, the Anchore
+# Grype DB and Stream ingest through the NAT. This satisfies enterprise policies
+# that flag any public IP on compute (SOC 2, CIS AWS Foundations, PCI-DSS) and
+# gives a stable egress IP to allowlist upstream.
+variable "create_scanner_vpc" {
+  description = "Create a dedicated VPC, subnets, Internet Gateway and NAT Gateway for the scanner. False to use your own private subnets."
+  type        = bool
+  default     = true
+  nullable    = false
+}
+
+variable "vpc_id" {
+  description = "VPC for the scanner tasks, required when create_scanner_vpc is false. Used for egress only; the scan covers the whole region regardless."
+  type        = string
+  default     = null
+}
+
+variable "subnet_ids" {
+  description = "Existing private subnets for the scanner tasks, required when create_scanner_vpc is false. Add an EBS Direct API interface endpoint to your VPC to keep block reads off the NAT Gateway."
+  type        = list(string)
+  default     = []
+  nullable    = false
+  # A blank element cannot be filtered out in a local: a for-expression with a
+  # condition becomes wholly unknown when the values are unknown, which breaks the
+  # index-keyed validation design. Rejecting it at the input works instead, and
+  # Terraform skips variable validation for unknown values, so the standard
+  # `subnet_ids = module.vpc.private_subnets` wiring is unaffected.
+  validation {
+    condition     = alltrue([for id in var.subnet_ids : trimspace(id) != ""])
+    error_message = "subnet_ids must not contain blank entries. An empty or whitespace-only id reaches RunTask verbatim and every task fails to launch after an otherwise clean apply."
+  }
+}
+
+
 ################################################################################
-# Task Sizing
+# Advanced
+#
+# The console does not expose any of these; the CloudFormation template hardcodes
+# them. Every default below reproduces the console deployment exactly — task
+# sizing (4096/16384), ephemeral storage (50 GiB), log retention (30 days), the
+# VPC CIDR (10.255.0.0/24), the schedule (03:00 UTC daily, enabled) and the
+# secret recovery window (30 days) are all the template's own values.
+#
+# You should not need to set any of them. They exist so that a customer who has
+# a reason to differ is not forced to fork the module.
 ################################################################################
 
 variable "task_cpu" {
@@ -146,36 +192,6 @@ variable "ephemeral_storage_size_gib" {
   }
 }
 
-################################################################################
-# Networking
-#
-# Default (create_scanner_vpc = true) provisions a dedicated VPC with a public +
-# private subnet pair, an Internet Gateway on the public subnet, and a NAT
-# Gateway with a stable Elastic IP. The scanner Fargate task runs in the private
-# subnet with no public IP — outbound reaches AWS APIs, public ECR, the Anchore
-# Grype DB and Stream ingest through the NAT. This satisfies enterprise policies
-# that flag any public IP on compute (SOC 2, CIS AWS Foundations, PCI-DSS) and
-# gives a stable egress IP to allowlist upstream.
-################################################################################
-
-variable "create_scanner_vpc" {
-  description = "Create a dedicated VPC, subnets, Internet Gateway and NAT Gateway for the scanner. False to use your own private subnets."
-  type        = bool
-  default     = true
-  nullable    = false
-}
-
-variable "create_ebs_vpc_endpoint" {
-  description = "Create the EBS Direct API interface endpoint so snapshot block reads bypass the NAT Gateway, which is the bulk of the scanner's egress. On by default when the module creates the VPC. Leave unset otherwise."
-  type        = bool
-
-  # Tri-state on purpose. Unset means "on when the module owns the VPC, off
-  # otherwise", so bring-your-own-subnet callers need no ceremony; an EXPLICIT
-  # true in that mode is a real misunderstanding and gets a precondition rather
-  # than silence.
-  default = null
-}
-
 variable "scanner_vpc_cidr" {
   description = "CIDR for the scanner VPC. Split in half: public for the NAT Gateway, private for the tasks."
   type        = string
@@ -202,38 +218,23 @@ variable "scanner_vpc_cidr" {
   }
 }
 
+variable "create_ebs_vpc_endpoint" {
+  description = "Create the EBS Direct API interface endpoint so snapshot block reads bypass the NAT Gateway, which is the bulk of the scanner's egress. On by default when the module creates the VPC. Leave unset otherwise."
+  type        = bool
+
+  # Tri-state on purpose. Unset means "on when the module owns the VPC, off
+  # otherwise", so bring-your-own-subnet callers need no ceremony; an EXPLICIT
+  # true in that mode is a real misunderstanding and gets a precondition rather
+  # than silence.
+  default = null
+}
+
 variable "validate_subnet_egress" {
   description = "Check supplied subnets for egress, VPC membership, zone and capacity. Set false when the subnet list length is unknown at plan; that disables all of those checks."
   type        = bool
   default     = true
   nullable    = false
 }
-
-variable "vpc_id" {
-  description = "VPC for the scanner tasks, required when create_scanner_vpc is false. Used for egress only; the scan covers the whole region regardless."
-  type        = string
-  default     = null
-}
-
-variable "subnet_ids" {
-  description = "Existing private subnets for the scanner tasks, required when create_scanner_vpc is false. Add an EBS Direct API interface endpoint to your VPC to keep block reads off the NAT Gateway."
-  type        = list(string)
-  default     = []
-  nullable    = false
-  # A blank element cannot be filtered out in a local: a for-expression with a
-  # condition becomes wholly unknown when the values are unknown, which breaks the
-  # index-keyed validation design. Rejecting it at the input works instead, and
-  # Terraform skips variable validation for unknown values, so the standard
-  # `subnet_ids = module.vpc.private_subnets` wiring is unaffected.
-  validation {
-    condition     = alltrue([for id in var.subnet_ids : trimspace(id) != ""])
-    error_message = "subnet_ids must not contain blank entries. An empty or whitespace-only id reaches RunTask verbatim and every task fails to launch after an otherwise clean apply."
-  }
-}
-
-################################################################################
-# Schedule
-################################################################################
 
 variable "schedule_expression" {
   description = "EventBridge schedule for the daily scan. Must be a six-field cron expression; rate(...) is rejected."
@@ -266,6 +267,23 @@ variable "trigger_initial_scan" {
   nullable    = false
 }
 
+variable "log_retention_days" {
+  description = "Retention in days for the scanner log groups. Must be a CloudWatch retention value, or 0 to keep forever."
+  type        = number
+  default     = 30
+  nullable    = false
+  # The provider schema already rejects a bad value at plan time — verified, it is
+  # not an apply-time failure — so this is for the message and for consistency
+  # with every other numeric input here, not to close a correctness gap.
+  validation {
+    condition = contains(
+      [0, 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653],
+      var.log_retention_days
+    )
+    error_message = "log_retention_days must be one of CloudWatch's retention values: 0 (forever), 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288 or 3653."
+  }
+}
+
 variable "collection_token_secret_name" {
   description = "Base name for the Secrets Manager secret holding the collection token. Region and a random suffix are appended."
   type        = string
@@ -283,8 +301,13 @@ variable "collection_token_secret_name" {
 variable "secret_recovery_window_days" {
   description = "Days Secrets Manager waits before deleting the secret. 0, or 7-30."
   type        = number
-  default     = 0
-  nullable    = false
+  # 30 matches the console stack, which omits RecoveryWindowInDays and so takes
+  # the Secrets Manager default. This was 0 so that repeated test teardowns left
+  # nothing behind — a testing convenience that had no business being a customer
+  # default, since it makes destroy delete the token immediately and
+  # irrecoverably where the console stack leaves it restorable for 30 days.
+  default  = 30
+  nullable = false
 
   # Secrets Manager accepts 0 (force delete) or 7-30. Everything in between is
   # rejected by the DeleteSecret call at destroy time — the worst moment to find
@@ -293,13 +316,6 @@ variable "secret_recovery_window_days" {
     condition     = var.secret_recovery_window_days == 0 || (var.secret_recovery_window_days >= 7 && var.secret_recovery_window_days <= 30)
     error_message = "secret_recovery_window_days must be 0 (delete immediately) or between 7 and 30."
   }
-}
-
-variable "allow_cloudformation_coexistence" {
-  description = "Allow deploying alongside another scanner in the same region. Off by default: two scanners scan every volume twice and delete each other's snapshots."
-  type        = bool
-  default     = false
-  nullable    = false
 }
 
 variable "scan_encrypted_volumes" {
@@ -321,26 +337,12 @@ variable "kms_key_arns" {
   }
 }
 
-variable "log_retention_days" {
-  description = "Retention in days for the scanner log groups. Must be a CloudWatch retention value, or 0 to keep forever."
-  type        = number
-  default     = 30
+variable "allow_cloudformation_coexistence" {
+  description = "Allow deploying alongside another scanner in the same region. Off by default: two scanners scan every volume twice and delete each other's snapshots."
+  type        = bool
+  default     = false
   nullable    = false
-  # The provider schema already rejects a bad value at plan time — verified, it is
-  # not an apply-time failure — so this is for the message and for consistency
-  # with every other numeric input here, not to close a correctness gap.
-  validation {
-    condition = contains(
-      [0, 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653],
-      var.log_retention_days
-    )
-    error_message = "log_retention_days must be one of CloudWatch's retention values: 0 (forever), 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288 or 3653."
-  }
 }
-
-################################################################################
-# General
-################################################################################
 
 variable "customer_id" {
   description = "Stream Security workspace id — the same value as the provider's workspace_id. A wrong value is silent: SBOMs are dropped by ingest and the region still looks healthy."

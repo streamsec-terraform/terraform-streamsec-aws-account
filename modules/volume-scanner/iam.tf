@@ -115,62 +115,59 @@ locals {
   # least-privilege pattern AWS documents, so the role cannot mint grants of its
   # own — only ones EC2 creates on its behalf.
   #
-  # kms:ViaService confines the "*" default to keys used THROUGH the EBS and EC2
-  # data planes, so a role that can read encrypted volumes cannot also decrypt
-  # S3 objects, RDS storage or Secrets Manager values protected by the same CMK.
-  # Both service names are required: ec2.<region> covers CreateSnapshot of an
-  # encrypted volume, ebs.<region> covers the EBS-direct block reads.
+  # kms:ViaService confines the "*" default to keys used THROUGH the EC2/EBS data
+  # plane, so a role that can read encrypted volumes cannot also decrypt S3
+  # objects, RDS storage or Secrets Manager values protected by the same CMK.
+  #
+  # ec2.<region> ONLY, matching the CloudFormation template. This module
+  # previously also listed ebs.<region> on the theory that the EBS Direct block
+  # reads present as their own service principal. They do not: DEV-21730
+  # measured both calls against a real CMK-encrypted snapshot and found
+  # kms:DescribeKey -> ebs:ListSnapshotBlocks and kms:Decrypt ->
+  # ebs:GetSnapshotBlock BOTH arrive as ec2.<region>. ViaService is a list, so
+  # the extra value was an inert widening rather than a bug — but it was
+  # unevidenced, and the console stack has run on ec2-only in production.
+  #
   # aws-cn service principals end .amazonaws.com.cn. Hardcoding the commercial
   # suffix meant the condition could never match there, implicitly denying
   # kms:Decrypt and silently reporting nothing for every CMK-encrypted volume —
   # the exact failure this condition's own comment warns about.
   kms_endpoint_suffix = local.partition == "aws-cn" ? "amazonaws.com.cn" : "amazonaws.com"
 
-  kms_via_services = [
-    "ec2.${local.region}.${local.kms_endpoint_suffix}",
-    "ebs.${local.region}.${local.kms_endpoint_suffix}",
-  ]
+  kms_via_services = ["ec2.${local.region}.${local.kms_endpoint_suffix}"]
 
+  # Exactly the two actions the CloudFormation template grants, and no more.
+  # This module previously added kms:GenerateDataKeyWithoutPlaintext,
+  # kms:ReEncryptFrom, kms:ReEncryptTo and a whole kms:CreateGrant statement,
+  # derived from AWS documentation on snapshot COPY rather than from anything
+  # the scanner does. The scanner has no copy or re-encrypt path, and DEV-21730
+  # measured ec2:CreateSnapshot needing neither CreateGrant nor
+  # GenerateDataKeyWithoutPlaintext. They were pure privilege surface — a
+  # mutating grant on every CMK reachable through the EC2 data plane, held by a
+  # role that runs third-party container code.
   kms_statements = [
     {
-      Sid    = "ReadEncryptedVolumes"
-      Effect = "Allow"
-      Action = [
-        "kms:Decrypt",
-        "kms:DescribeKey",
-        "kms:GenerateDataKeyWithoutPlaintext",
-        "kms:ReEncryptFrom",
-        "kms:ReEncryptTo",
-      ]
-      Resource = var.kms_key_arns
-      Condition = {
-        StringEquals = { "kms:ViaService" = local.kms_via_services }
-      }
-    },
-    {
-      Sid      = "GrantEC2SnapshotAccessToKeys"
+      Sid      = "ReadEncryptedVolumes"
       Effect   = "Allow"
-      Action   = "kms:CreateGrant"
+      Action   = ["kms:Decrypt", "kms:DescribeKey"]
       Resource = var.kms_key_arns
       Condition = {
-        Bool         = { "kms:GrantIsForAWSResource" = "true" }
         StringEquals = { "kms:ViaService" = local.kms_via_services }
       }
     },
   ]
 
-  # Shared by all three launchers (orchestrator, EventBridge, initial scan). They
-  # were three near-identical copies, differing only in Sid presence and PassRole
-  # ordering — which is how a missing grant hid behind a vacuous test. One
-  # definition keeps them in lockstep.
-  run_scanner_task_statements = [
-    {
-      Sid       = "RunScannerTask"
-      Effect    = "Allow"
-      Action    = "ecs:RunTask"
-      Resource  = local.run_task_resources
-      Condition = { ArnEquals = { "ecs:cluster" = aws_ecs_cluster.this.arn } }
-    },
+  # PassRole is identical for all three launchers (orchestrator, EventBridge,
+  # initial scan). They were three near-identical copies, differing only in Sid
+  # presence and PassRole ordering — which is how a missing grant hid behind a
+  # vacuous test. One definition keeps them in lockstep.
+  #
+  # RunTask is NOT identical, because the three launchers pass different ARN
+  # forms. The CloudFormation template scopes all three to !Ref
+  # ScannerTaskDefinition — the pinned revision — and rewrites them on every
+  # stack update. Two of the three are matched exactly below; the orchestrator
+  # is not, deliberately. See run_task_statement_* .
+  pass_scanner_roles_statement = [
     {
       Sid    = "PassScannerRoles"
       Effect = "Allow"
@@ -185,6 +182,39 @@ locals {
       Condition = {
         StringEquals = { "iam:PassedToService" = "ecs-tasks.amazonaws.com" }
       }
+    },
+  ]
+
+  # EventBridge and the initial-scan Lambda are each configured with one exact
+  # revision ARN and launch nothing else, so they get the CloudFormation
+  # template's scoping verbatim: that one revision.
+  run_pinned_task_statement = [
+    {
+      Sid       = "RunScannerTask"
+      Effect    = "Allow"
+      Action    = "ecs:RunTask"
+      Resource  = [aws_ecs_task_definition.this.arn]
+      Condition = { ArnEquals = { "ecs:cluster" = aws_ecs_cluster.this.arn } }
+    },
+  ]
+
+  # The orchestrator is the one launcher that does NOT get the pinned revision.
+  # It is handed the revision-LESS family ARN in COLLECTOR_ECS_TASK_DEF_ARN
+  # (main.tf, matching the CloudFormation template's own env var) and calls
+  # RunTask with that form, so authorizing it against a single revision ARN
+  # depends on ECS resolving family -> latest ACTIVE revision before IAM
+  # evaluates the request. The console stack relies on exactly that and works in
+  # production, but it is an undocumented resolution order to hang the fan-out
+  # on: the failure mode is a mid-scan AccessDenied on every child task, after
+  # snapshots are already created. This module authorizes the form it actually
+  # passes instead. Documented divergence, not an accidental widening.
+  run_family_task_statement = [
+    {
+      Sid       = "RunScannerTask"
+      Effect    = "Allow"
+      Action    = "ecs:RunTask"
+      Resource  = local.run_task_resources
+      Condition = { ArnEquals = { "ecs:cluster" = aws_ecs_cluster.this.arn } }
     },
   ]
 
@@ -332,7 +362,7 @@ resource "aws_iam_role_policy" "orchestrator" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = concat(local.run_scanner_task_statements, [
+    Statement = concat(local.run_family_task_statement, local.pass_scanner_roles_statement, [
       {
         Sid       = "OrchestratorDescribeTasks"
         Effect    = "Allow"
@@ -433,7 +463,7 @@ resource "aws_iam_role_policy" "events" {
 
   policy = jsonencode({
     Version   = "2012-10-17"
-    Statement = local.run_scanner_task_statements
+    Statement = concat(local.run_pinned_task_statement, local.pass_scanner_roles_statement)
   })
 }
 
@@ -483,7 +513,7 @@ resource "aws_iam_role_policy" "initial_scan" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = concat(local.run_scanner_task_statements, [
+    Statement = concat(local.run_pinned_task_statement, local.pass_scanner_roles_statement, [
       {
         # The function refuses to start a second orchestrator while one is
         # already running. Without this the ListTasks call is denied on every

@@ -70,9 +70,16 @@ resource "aws_internet_gateway" "this" {
 resource "aws_subnet" "public" {
   count = var.create_scanner_vpc ? 1 : 0
 
-  vpc_id                  = aws_vpc.this[0].id
-  cidr_block              = local.scanner_public_subnet_cidr
-  availability_zone       = local.scanner_az
+  vpc_id            = aws_vpc.this[0].id
+  cidr_block        = local.scanner_public_subnet_cidr
+  availability_zone = local.scanner_az
+
+  # The CloudFormation template sets MapPublicIpOnLaunch: true here. This is the
+  # one place the module deliberately does not match it. Nothing is ever launched
+  # into this subnet — it exists to hold the NAT Gateway, which takes its public
+  # address from an Elastic IP, not from subnet auto-assignment — so true buys
+  # nothing and trips CIS "ensure subnets do not auto-assign public IPs". Left
+  # false; the template is the side worth changing.
   map_public_ip_on_launch = false
 
   tags = merge(local.tags, { Name = "${local.name}-public-subnet" })

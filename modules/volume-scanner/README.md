@@ -23,6 +23,33 @@ This is the Terraform equivalent of the CloudFormation stack the Stream console 
 > ```
 > After that, normal `terraform apply` works as usual.
 
+## What the console asks you for
+
+Deploying from **Integrations → Vulnerability Scanners → Stream Agentless Scanner** presents exactly eleven parameters. Each maps to one module input, with the same default:
+
+| Console parameter | Module input | Default |
+|---|---|---|
+| `ScannerImage` | `scanner_image` | `public.ecr.aws/stream-security/volume-scanner:latest` |
+| `ScannerRegion` | *(the `aws` provider's region)* | — |
+| `ScanLanguagePackages` | `scan_language_packages` | `true` |
+| `ScanDatabases` | `scan_databases` | `false` |
+| `ScanAIWorkloads` | `scan_ai_workloads` | `false` |
+| `ScanSecrets` | `scan_secrets` | `false` |
+| `WorkloadKinds` | `workload_kinds` | `"lambda,ecs"` |
+| `ShardSize` | `shard_size` | `100` |
+| `MaxConcurrentShards` | `max_concurrent_shards` | `10` |
+| `VpcId` | `vpc_id` | — (bring-your-own-network only) |
+| `SubnetIds` | `subnet_ids` | — (bring-your-own-network only) |
+
+`create_scanner_vpc` is the only input with no console parameter behind it. In the console the choice is made when the template is *generated* (`create_network`), not when it is deployed; a Terraform module has no generation step, so it has to be an input. `vpc_id` and `subnet_ids` are what the console renders when that choice is "use my own network".
+
+Everything else the module exposes is under **Advanced** in `variables.tf`. The console does not offer those — the CloudFormation template hardcodes them — and every default reproduces the template's own value: `4096`/`16384` CPU and memory, 50 GiB ephemeral storage, 30-day log retention, `10.255.0.0/24` for the scanner VPC, `cron(0 3 * * ? *)` enabled, and a 30-day secret recovery window. **Setting nothing but the console parameters gives you the console's deployment.**
+
+Two intentional differences are worth knowing, because both are visible:
+
+- **Resource names carry a `-tf` marker.** `ecs:CreateCluster` is an upsert, so a cluster named identically to the console stack's would be silently adopted and a later `terraform destroy` would delete it out from under the live stack.
+- **The public subnet does not auto-assign public IPs**, where the template sets `MapPublicIpOnLaunch: true`. Nothing is ever launched into that subnet — it holds the NAT gateway, which uses an Elastic IP — so the template's value buys nothing and trips CIS "ensure subnets do not auto-assign public IPs".
+
 ## Usage
 
 The module is per account **and** region — deploy one instance per region you want scanned.
@@ -260,7 +287,7 @@ No modules.
 | <a name="input_scanner_vpc_cidr"></a> [scanner\_vpc\_cidr](#input\_scanner\_vpc\_cidr) | CIDR for the scanner VPC. Split in half: public for the NAT Gateway, private for the tasks. | `string` | `"10.255.0.0/24"` | no |
 | <a name="input_schedule_enabled"></a> [schedule\_enabled](#input\_schedule\_enabled) | Enable the daily scan schedule. Set false to pause scanning — before a destroy, during an incident, or for a maintenance window. | `bool` | `true` | no |
 | <a name="input_schedule_expression"></a> [schedule\_expression](#input\_schedule\_expression) | EventBridge schedule for the daily scan. Must be a six-field cron expression; rate(...) is rejected. | `string` | `"cron(0 3 * * ? *)"` | no |
-| <a name="input_secret_recovery_window_days"></a> [secret\_recovery\_window\_days](#input\_secret\_recovery\_window\_days) | Days Secrets Manager waits before deleting the secret. 0, or 7-30. | `number` | `0` | no |
+| <a name="input_secret_recovery_window_days"></a> [secret\_recovery\_window\_days](#input\_secret\_recovery\_window\_days) | Days Secrets Manager waits before deleting the secret. 0, or 7-30. | `number` | `30` | no |
 | <a name="input_shard_size"></a> [shard\_size](#input\_shard\_size) | Instances per child task. Lower means more parallelism; higher means fewer, longer-running children. | `number` | `100` | no |
 | <a name="input_subnet_ids"></a> [subnet\_ids](#input\_subnet\_ids) | Existing private subnets for the scanner tasks, required when create\_scanner\_vpc is false. Add an EBS Direct API interface endpoint to your VPC to keep block reads off the NAT Gateway. | `list(string)` | `[]` | no |
 | <a name="input_tags"></a> [tags](#input\_tags) | A map of global tags to add to all created resources | `map(string)` | `{}` | no |
