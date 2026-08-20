@@ -78,6 +78,8 @@ By default (`create_scanner_vpc = true`) the module provisions a dedicated `10.2
 - **public** — holds the NAT gateway only, with auto-assign public IP off. No Fargate task ever runs here.
 - **private** — where the scanner runs, with no public IP. Egress goes out through the NAT gateway's Elastic IP.
 
+Destroy-then-apply **releases** that Elastic IP and allocates a new one, so an upstream allowlist pointing at it goes stale silently. An in-place `scanner_vpc_cidr` change keeps it.
+
 That Elastic IP is stable across NAT gateway replacements, so you can allowlist a single upstream egress IP instead of the whole Fargate range. It's exposed as the `nat_gateway_public_ip` output.
 
 By default the module also creates two **VPC endpoints** in that VPC: an interface endpoint for `com.amazonaws.<region>.ebs` and a gateway endpoint for S3. Snapshot block reads are the scanner's dominant egress, and NAT data processing costs roughly 4.5x the PrivateLink rate for the same bytes. Measured on a three-instance fleet in eu-west-1, this took NAT inbound traffic for one scan from **3,385 MiB to 122 MiB — a 96% reduction** — with the scan result unchanged. The interface endpoint adds ~$7.30/month; the S3 gateway endpoint is free.
@@ -149,7 +151,7 @@ Terraform does not roll back. An apply that fails after the NAT gateway exists l
 
 ## Uninstalling
 
-`terraform destroy` removes everything in your account. It does not yet report the region as uninstalled to Stream — that happens once the `streamsec_aws_scanner_ack` block in `ack.tf` is enabled. Until then the region keeps the green **Connected** install-state badge its first scan report set, even though nothing is deployed; the *scan* status is the honest signal — it goes stale once the heartbeats stop.
+`terraform destroy` removes everything in your account **provided no scan is running**. Scanner tasks are launched out of band, so Terraform has no dependency on them: a destroy that overlaps a scan tears down the IAM policies, task definition, secret and log groups first, then fails on the cluster after 10 minutes and the subnets after 20, leaving the VPC, NAT gateway and Elastic IP behind — and the running orchestrator loses the only permission that can delete the snapshots it created. Set `schedule_enabled = false`, apply, wait for tasks to drain, then destroy. It does not yet report the region as uninstalled to Stream — that happens once the `streamsec_aws_scanner_ack` block in `ack.tf` is enabled. Until then the region keeps the green **Connected** install-state badge its first scan report set, even though nothing is deployed; the *scan* status is the honest signal — it goes stale once the heartbeats stop.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
@@ -256,6 +258,7 @@ No modules.
 | <a name="input_scan_secrets"></a> [scan\_secrets](#input\_scan\_secrets) | Detect secrets and credentials on disk. Significantly increases scan duration. | `bool` | `false` | no |
 | <a name="input_scanner_image"></a> [scanner\_image](#input\_scanner\_image) | ECR image URI for the scanner. Not reachable from aws-cn — mirror it and override there. | `string` | `"public.ecr.aws/stream-security/volume-scanner:latest"` | no |
 | <a name="input_scanner_vpc_cidr"></a> [scanner\_vpc\_cidr](#input\_scanner\_vpc\_cidr) | CIDR for the scanner VPC. Split in half: public for the NAT Gateway, private for the tasks. | `string` | `"10.255.0.0/24"` | no |
+| <a name="input_schedule_enabled"></a> [schedule\_enabled](#input\_schedule\_enabled) | Enable the daily scan schedule. Set false to pause scanning — before a destroy, during an incident, or for a maintenance window. | `bool` | `true` | no |
 | <a name="input_schedule_expression"></a> [schedule\_expression](#input\_schedule\_expression) | EventBridge schedule for the daily scan. Must be a six-field cron expression; rate(...) is rejected. | `string` | `"cron(0 3 * * ? *)"` | no |
 | <a name="input_secret_recovery_window_days"></a> [secret\_recovery\_window\_days](#input\_secret\_recovery\_window\_days) | Days Secrets Manager waits before deleting the secret. 0, or 7-30. | `number` | `0` | no |
 | <a name="input_shard_size"></a> [shard\_size](#input\_shard\_size) | Instances per child task. Lower means more parallelism; higher means fewer, longer-running children. | `number` | `100` | no |

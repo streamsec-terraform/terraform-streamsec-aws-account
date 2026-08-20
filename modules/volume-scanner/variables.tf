@@ -6,6 +6,7 @@ variable "scanner_image" {
   description = "ECR image URI for the scanner. Not reachable from aws-cn — mirror it and override there."
   type        = string
   default     = "public.ecr.aws/stream-security/volume-scanner:latest"
+  nullable    = false
 }
 
 ################################################################################
@@ -19,30 +20,35 @@ variable "scan_language_packages" {
   description = "Detect language-level packages on disk (Python, Node, Ruby, Go, Rust, Java). The only toggle on by default."
   type        = bool
   default     = true
+  nullable    = false
 }
 
 variable "scan_databases" {
   description = "Detect installed databases from their on-disk signatures. Adds a filesystem walk per instance."
   type        = bool
   default     = false
+  nullable    = false
 }
 
 variable "scan_ai_workloads" {
   description = "Detect AI/ML framework installs and surface them as workload metadata."
   type        = bool
   default     = false
+  nullable    = false
 }
 
 variable "scan_secrets" {
   description = "Detect secrets and credentials on disk. Significantly increases scan duration."
   type        = bool
   default     = false
+  nullable    = false
 }
 
 variable "workload_kinds" {
   description = "Workloads to scan besides EC2: \"lambda\", \"ecs\", \"lambda,ecs\", or \"\" to disable. Also gates the matching IAM grants."
   type        = string
   default     = "lambda,ecs"
+  nullable    = false
 
   # Normalizes before checking, so "ecs,lambda" and "lambda, ecs" are accepted as
   # the same set rather than rejected for ordering or spacing. An exact-string
@@ -74,6 +80,7 @@ variable "shard_size" {
   description = "Instances per child task. Lower means more parallelism; higher means fewer, longer-running children."
   type        = number
   default     = 100
+  nullable    = false
 
   validation {
     condition     = var.shard_size >= 1 && var.shard_size <= 5000 && floor(var.shard_size) == var.shard_size
@@ -85,6 +92,7 @@ variable "max_concurrent_shards" {
   description = "Maximum child scanner tasks in flight at once. Each consumes one subnet IP address."
   type        = number
   default     = 10
+  nullable    = false
 
   validation {
     condition     = var.max_concurrent_shards >= 1 && var.max_concurrent_shards <= 100 && floor(var.max_concurrent_shards) == var.max_concurrent_shards
@@ -100,6 +108,7 @@ variable "task_cpu" {
   description = "Fargate task CPU units. One of 256, 512, 1024, 2048, 4096, 8192, 16384."
   type        = string
   default     = "4096"
+  nullable    = false
 
   # Fargate accepts only these seven values. Anything else is rejected by
   # RegisterTaskDefinition mid-apply, after the VPC, NAT gateway, cluster, secret
@@ -114,6 +123,7 @@ variable "task_memory" {
   description = "Fargate task memory in MiB. Raise before raising max_concurrent_shards. Must be valid for the chosen task_cpu."
   type        = string
   default     = "16384"
+  nullable    = false
 
   validation {
     # Digits only. "16384.0" satisfies tonumber() and, because cty compares
@@ -128,6 +138,7 @@ variable "ephemeral_storage_size_gib" {
   description = "Task ephemeral storage in GiB for the scanner's disk cache. Minimum 21."
   type        = number
   default     = 50
+  nullable    = false
 
   validation {
     condition     = var.ephemeral_storage_size_gib >= 21 && var.ephemeral_storage_size_gib <= 200
@@ -151,6 +162,7 @@ variable "create_scanner_vpc" {
   description = "Create a dedicated VPC, subnets, Internet Gateway and NAT Gateway for the scanner. False to use your own private subnets."
   type        = bool
   default     = true
+  nullable    = false
 }
 
 variable "create_ebs_vpc_endpoint" {
@@ -168,6 +180,7 @@ variable "scanner_vpc_cidr" {
   description = "CIDR for the scanner VPC. Split in half: public for the NAT Gateway, private for the tasks."
   type        = string
   default     = "10.255.0.0/24"
+  nullable    = false
 
   # BOTH bounds matter, and both fail mid-apply if unchecked.
   #
@@ -193,6 +206,7 @@ variable "validate_subnet_egress" {
   description = "Check supplied subnets for egress, VPC membership, zone and capacity. Set false when the subnet list length is unknown at plan; that disables all of those checks."
   type        = bool
   default     = true
+  nullable    = false
 }
 
 variable "vpc_id" {
@@ -205,6 +219,7 @@ variable "subnet_ids" {
   description = "Existing private subnets for the scanner tasks, required when create_scanner_vpc is false. Add an EBS Direct API interface endpoint to your VPC to keep block reads off the NAT Gateway."
   type        = list(string)
   default     = []
+  nullable    = false
   # A blank element cannot be filtered out in a local: a for-expression with a
   # condition becomes wholly unknown when the values are unknown, which breaks the
   # index-keyed validation design. Rejecting it at the input works instead, and
@@ -224,6 +239,7 @@ variable "schedule_expression" {
   description = "EventBridge schedule for the daily scan. Must be a six-field cron expression; rate(...) is rejected."
   type        = string
   default     = "cron(0 3 * * ? *)"
+  nullable    = false
 
   validation {
     # EventBridge cron takes SIX fields, not the five of Unix cron, and the
@@ -236,16 +252,25 @@ variable "schedule_expression" {
   }
 }
 
+variable "schedule_enabled" {
+  description = "Enable the daily scan schedule. Set false to pause scanning — before a destroy, during an incident, or for a maintenance window."
+  type        = bool
+  nullable    = false
+  default     = true
+}
+
 variable "trigger_initial_scan" {
   description = "Run one immediate scan at apply time. Failures are swallowed; the daily schedule is the fallback."
   type        = bool
   default     = true
+  nullable    = false
 }
 
 variable "collection_token_secret_name" {
   description = "Base name for the Secrets Manager secret holding the collection token. Region and a random suffix are appended."
   type        = string
   default     = "streamsec-scanner-collection-token"
+  nullable    = false
   # The only name-forming input without a character check. Secrets Manager accepts
   # [A-Za-z0-9/_+=.@-]; anything else fails CreateSecret mid-apply, after the VPC,
   # NAT gateway and Elastic IP already exist.
@@ -259,6 +284,7 @@ variable "secret_recovery_window_days" {
   description = "Days Secrets Manager waits before deleting the secret. 0, or 7-30."
   type        = number
   default     = 0
+  nullable    = false
 
   # Secrets Manager accepts 0 (force delete) or 7-30. Everything in between is
   # rejected by the DeleteSecret call at destroy time — the worst moment to find
@@ -273,18 +299,21 @@ variable "allow_cloudformation_coexistence" {
   description = "Allow deploying alongside another scanner in the same region. Off by default: two scanners scan every volume twice and delete each other's snapshots."
   type        = bool
   default     = false
+  nullable    = false
 }
 
 variable "scan_encrypted_volumes" {
   description = "Grant the KMS permissions needed to read snapshots of encrypted volumes. Off means those instances report no findings, with no error anywhere."
   type        = bool
   default     = true
+  nullable    = false
 }
 
 variable "kms_key_arns" {
   description = "KMS keys the scanner may use for encrypted volumes. Narrow from [\"*\"] if you can enumerate your EBS keys."
   type        = list(string)
   default     = ["*"]
+  nullable    = false
 
   validation {
     condition     = length(var.kms_key_arns) > 0
@@ -296,6 +325,7 @@ variable "log_retention_days" {
   description = "Retention in days for the scanner log groups. Must be a CloudWatch retention value, or 0 to keep forever."
   type        = number
   default     = 30
+  nullable    = false
   # The provider schema already rejects a bad value at plan time — verified, it is
   # not an apply-time failure — so this is for the message and for consistency
   # with every other numeric input here, not to close a correctness gap.
@@ -339,6 +369,7 @@ variable "resource_prefix" {
   description = "Prefix for all created resource names. Max 9 characters, letters/digits/hyphens — IAM role names consume the rest of the 64-char limit."
   type        = string
   default     = ""
+  nullable    = false
 
   # The longest generated name is the execution role:
   #   <prefix>-streamsec-ebs-scanner-tf-<region>-execution-role
@@ -372,4 +403,5 @@ variable "tags" {
   description = "A map of global tags to add to all created resources"
   type        = map(string)
   default     = {}
+  nullable    = false
 }

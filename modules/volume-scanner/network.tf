@@ -539,7 +539,12 @@ locals {
 
 resource "aws_vpc_security_group_egress_rule" "all" {
   security_group_id = aws_security_group.this.id
-  description       = "Allow all outbound - AWS APIs, public ECR, Grype DB, Stream ingest"
-  ip_protocol       = "-1"
-  cidr_ipv4         = "0.0.0.0/0"
+  # All protocols, deliberately for now. The four named destinations are HTTPS,
+  # but SG egress also governs DNS to the VPC resolver, and possibly NTP, so
+  # narrowing to tcp/443 risks breaking name resolution for every scan. Tightening
+  # this needs a live run to confirm what the container actually opens; it is not
+  # a change to make from reading the code.
+  description = "Allow all outbound - AWS APIs, public ECR, Grype DB, Stream ingest, and DNS to the VPC resolver"
+  ip_protocol = "-1"
+  cidr_ipv4   = "0.0.0.0/0"
 }

@@ -1,7 +1,6 @@
 terraform {
   # 1.3 for startswith(), used by the bring-your-own-subnet egress check.
-  # Lifecycle preconditions and replace_triggered_by (1.2) set the earlier floor;
-  # startswith raised it.
+  # Lifecycle preconditions (1.2) set the earlier floor; startswith raised it.
   required_version = ">= 1.3"
 
   required_providers {

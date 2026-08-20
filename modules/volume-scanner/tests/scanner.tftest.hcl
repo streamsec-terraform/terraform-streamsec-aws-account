@@ -216,8 +216,14 @@ run "initial_scan_is_created_by_default" {
   }
 }
 
+# command = apply, not plan. random_string is unmocked so the secret name is
+# unknown at plan: startswith() on an unknown returns Unknown unless the known
+# prefix is at least as long as the tested prefix, and length() refines only to
+# an inclusive lower bound — so both assertions below were indeterminate and
+# therefore skipped, not passed. Every regression shortening the name's known
+# prefix was undetectable.
 run "resource_prefix_is_applied" {
-  command = plan
+  command = apply
 
   variables {
     resource_prefix = "acme"
@@ -620,7 +626,7 @@ run "whitespace_only_workload_kinds_is_rejected" {
 }
 
 run "secret_suffix_avoids_the_shape_aws_warns_about" {
-  command = plan
+  command = apply
 
   # AWS documents that a name ending in a hyphen plus SIX characters collides
   # with the suffix Secrets Manager appends itself, so a partial-ARN lookup can
@@ -628,6 +634,70 @@ run "secret_suffix_avoids_the_shape_aws_warns_about" {
   assert {
     condition     = length(regexall("-[a-z0-9]{6}$", aws_secretsmanager_secret.collection_token.name)) == 0
     error_message = "The generated secret name must not end in a hyphen followed by exactly six characters."
+  }
+}
+
+# The snapshot statements were never asserted — six runs read this policy and
+# every one filters on Workload* or the KMS Sids. These are jsonencode() over
+# locals, so they are known at plan and cost nothing to check.
+run "snapshot_grants_keep_their_scoping_conditions" {
+  command = plan
+
+  assert {
+    condition = try([
+      for s in jsondecode(aws_iam_role_policy.task.policy).Statement :
+      s if s.Sid == "ReadAndDeleteOwnSnapshots"
+    ][0].Condition.StringEquals["aws:ResourceTag/Purpose"], "") == "ebs-package-collector"
+    error_message = "ec2:DeleteSnapshot and the EBS block reads must stay conditioned on the Purpose tag. Without it this role — running third-party container code — can delete every snapshot in the region."
+  }
+
+  assert {
+    condition = try([
+      for s in jsondecode(aws_iam_role_policy.task.policy).Statement :
+      s if s.Sid == "CreateTaggedSnapshot"
+    ][0].Condition.StringEquals["aws:RequestTag/Purpose"], "") == "ebs-package-collector"
+    error_message = "CreateSnapshot on the snapshot ARN must be gated on RequestTag, not ResourceTag — the tag is being applied by the call, not already present."
+  }
+
+  assert {
+    condition = try([
+      for s in jsondecode(aws_iam_role_policy.task.policy).Statement :
+      s if s.Sid == "TagSnapshotsAtCreate"
+    ][0].Condition.StringEquals["ec2:CreateAction"], "") == "CreateSnapshot"
+    error_message = "ec2:CreateTags must be gated on ec2:CreateAction, or the role can retag any snapshot in the account into its own delete scope."
+  }
+
+  # The account field is deliberately EMPTY here; pinning it made every
+  # CreateSnapshot fail with UnauthorizedOperation, verified against real AWS.
+  assert {
+    condition = alltrue([
+      for s in jsondecode(aws_iam_role_policy.task.policy).Statement :
+      length(regexall("^arn:aws:ec2:us-east-1::snapshot/\\*$", tostring(s.Resource))) > 0
+      if s.Sid == "CreateTaggedSnapshot" || s.Sid == "ReadAndDeleteOwnSnapshots"
+    ])
+    error_message = "Snapshot ARNs must be region-scoped with an EMPTY account field. Pinning the account makes every CreateSnapshot fail with UnauthorizedOperation and produces zero findings with no plan-time signal."
+  }
+}
+
+# T2 — the only test reading the launcher policies filters on ecs:RunTask, which
+# excludes the PassRole statement in the same shared local.
+run "pass_role_stays_scoped_and_confined_to_ecs" {
+  command = apply
+
+  assert {
+    condition = alltrue([
+      for policy in [
+        aws_iam_role_policy.orchestrator.policy,
+        aws_iam_role_policy.events.policy,
+        aws_iam_role_policy.initial_scan[0].policy,
+        ] : alltrue([
+          for s in jsondecode(policy).Statement :
+          try(s.Condition.StringEquals["iam:PassedToService"], "") == "ecs-tasks.amazonaws.com"
+          && toset(s.Resource) == toset([aws_iam_role.task.arn, aws_iam_role.execution.arn])
+          if contains(flatten([s.Action]), "iam:PassRole")
+      ])
+    ])
+    error_message = "Every iam:PassRole grant must be confined to ecs-tasks.amazonaws.com and to the two scanner roles. The scanner task role holds this policy itself, so that condition is the only thing stopping code in the container passing these roles to any service."
   }
 }
 

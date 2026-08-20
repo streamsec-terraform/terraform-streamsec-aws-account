@@ -478,6 +478,13 @@ resource "aws_cloudwatch_log_group" "this" {
 ################################################################################
 
 resource "aws_ecs_task_definition" "this" {
+  # Every attribute this module sets is ForceNew, so without this Terraform
+  # deregisters the family's only ACTIVE revision before registering the
+  # replacement. A schedule firing in that window fails RunTask on an INACTIVE
+  # revision and, with no DLQ on the target, that day's scan silently does not
+  # happen; an apply landing mid-scan drops shards the same way.
+  skip_destroy = true
+
   family                   = local.name
   cpu                      = var.task_cpu
   memory                   = var.task_memory
@@ -556,6 +563,15 @@ resource "aws_ecs_task_definition" "this" {
       error_message = "Fargate rejects task_cpu = ${var.task_cpu} with task_memory = ${var.task_memory}. At that CPU size the allowed memory values are ${join(", ", [for m in local.task_memory_allowed : tostring(m)])} MiB. Left unchecked this fails at RegisterTaskDefinition mid-apply, after the NAT gateway and Elastic IP are already billing."
     }
 
+    # The token and whole-disk SBOM contents cross the NAT to this URL. Nothing
+    # else constrains the scheme: derived_tenant_name strips http:// as well as
+    # https://, so a plaintext host is accepted, and a schemeless one leaves the
+    # behaviour entirely to the container's HTTP client.
+    precondition {
+      condition     = startswith(local.api_url, "https://")
+      error_message = "The Stream host resolved to \"${local.api_url}\", which is not https. The scanner posts SBOMs and its collection token to this URL over the NAT gateway; set the streamsec provider host to an https URL."
+    }
+
     precondition {
       condition     = local.tenant_name != ""
       error_message = "tenant_name resolved to an empty string. Leave it unset to derive the tenant from the provider host, or set it to your tenant name — an empty value tags every SBOM with a tenant that does not exist, ingest drops them, and the console still shows the region healthy."
@@ -576,7 +592,11 @@ resource "aws_cloudwatch_event_rule" "daily" {
   name                = "${local.regional_name}-daily"
   description         = "Trigger the Stream Security EBS scanner on a schedule"
   schedule_expression = var.schedule_expression
-  state               = "ENABLED"
+  # Variable, not a literal. aws_cloudwatch_event_rule.state is Optional and not
+  # Computed, so a literal meant an operator who disabled the rule in the console
+  # — to pause scanning before a destroy or during an incident — had it silently
+  # re-enabled by the next apply, including an unattended drift-correction run.
+  state = var.schedule_enabled ? "ENABLED" : "DISABLED"
 
   tags = local.tags
 }
