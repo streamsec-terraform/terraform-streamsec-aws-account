@@ -69,12 +69,12 @@ resource "aws_subnet" "private" {
     # would otherwise defer the failure to CreateVpcEndpoint.
     precondition {
       condition     = !local.create_ebs_endpoint || length(local.candidate_azs) > 0
-      error_message = "No availability zone in ${local.region} offers both a standard AZ and the EBS Direct API interface endpoint service. Set create_ebs_vpc_endpoint = false to deploy without it (snapshot block reads will cross the NAT Gateway), or supply your own subnets with create_scanner_vpc = false."
+      error_message = "No availability zone in ${local.region} offers both a standard AZ and the EBS Direct API interface endpoint service. Set create_ebs_vpc_endpoint = false to deploy without it, or supply your own subnets with create_scanner_vpc = false."
     }
 
     precondition {
       condition     = local.scanner_private_subnet_capacity >= local.scanner_peak_task_count
-      error_message = "max_concurrent_shards = ${var.max_concurrent_shards} needs ${local.scanner_peak_task_count} concurrent task ENIs (the orchestrator, its children, and the workload child when workload_kinds is set), but the private subnet ${local.scanner_private_subnet_cidr} carved out of scanner_vpc_cidr only holds ${local.scanner_private_subnet_capacity}. Widen scanner_vpc_cidr or lower max_concurrent_shards."
+      error_message = "max_concurrent_shards = ${var.max_concurrent_shards} needs ${local.scanner_peak_task_count} concurrent task ENIs, but the private subnet ${local.scanner_private_subnet_cidr} holds only ${local.scanner_private_subnet_capacity}. Widen scanner_vpc_cidr or lower max_concurrent_shards."
     }
   }
 }
@@ -289,39 +289,39 @@ resource "aws_security_group" "this" {
   lifecycle {
     precondition {
       condition     = var.create_scanner_vpc || local.byo_enabled
-      error_message = "create_scanner_vpc is false, so vpc_id and subnet_ids are both required. Provide existing private subnets with NAT egress, or set create_scanner_vpc = true to have the module provision a VPC with a NAT Gateway."
+      error_message = "create_scanner_vpc = false requires both vpc_id and subnet_ids. Supply existing private subnets with NAT egress, or set create_scanner_vpc = true."
     }
 
     precondition {
       condition     = var.create_scanner_vpc || var.create_ebs_vpc_endpoint != true
-      error_message = "create_ebs_vpc_endpoint was explicitly set to true while create_scanner_vpc is false, so it would be silently ignored — the module does not create endpoints in a VPC it does not own, and a second S3 gateway endpoint on a route table that already has one fails with RouteAlreadyExists. Leave it unset and add an interface endpoint for the EBS Direct API to your own VPC to get the same saving."
+      error_message = "create_ebs_vpc_endpoint = true is ignored when create_scanner_vpc = false: the module does not create endpoints in a VPC it does not own. Leave it unset and add an EBS Direct API interface endpoint to your own VPC."
     }
 
     precondition {
       condition     = !var.create_scanner_vpc || (local.byo_vpc_id == "" && length(local.byo_subnet_ids) == 0)
-      error_message = "vpc_id / subnet_ids were supplied while create_scanner_vpc is true, so they would be ignored and the module would provision its own VPC and NAT Gateway (~$32/mo per region). Set create_scanner_vpc = false to use the supplied network, or drop vpc_id and subnet_ids."
+      error_message = "vpc_id / subnet_ids were supplied while create_scanner_vpc is true, so they would be ignored. Set create_scanner_vpc = false to use the supplied network, or drop vpc_id and subnet_ids."
     }
 
     precondition {
       condition     = !local.byo_validate || length(local.byo_subnets) == 0 || local.byo_min_free_ips >= local.scanner_peak_task_count
-      error_message = "max_concurrent_shards = ${var.max_concurrent_shards} needs ${local.scanner_peak_task_count} concurrent task ENIs (the orchestrator, its children, and the workload child when workload_kinds is set), and ECS placement is best-effort so they can all land in one subnet — but the smallest supplied subnet is sized for only ${local.byo_min_free_ips} addresses after AWS reserves five. Note this measures subnet SIZE, not current free addresses — a large but heavily-used shared subnet can still exhaust at scan time. Supply larger subnets, or lower max_concurrent_shards."
+      error_message = "max_concurrent_shards = ${var.max_concurrent_shards} needs ${local.scanner_peak_task_count} concurrent task ENIs that can all land in one subnet, but the smallest supplied subnet is sized for only ${local.byo_min_free_ips} addresses after AWS's five reserved. Supply larger subnets, or lower max_concurrent_shards."
     }
 
     # coalesce, NOT try: one([]) is null and try() catches errors, not nulls, so
     # try(one(...), true) yields null, which || rejects before Terraform 1.12.
     precondition {
       condition     = !local.byo_validate || length(local.byo_subnets) == 0 || coalesce(one(data.aws_vpc.byo[*].enable_dns_support), true)
-      error_message = "VPC ${local.byo_vpc_id != "" ? local.byo_vpc_id : "(supplied subnets')"} has enableDnsSupport disabled. The scanner task resolves the EBS Direct API and the Stream ingest hostname through the VPC resolver, so every scan would fail on DNS while the deployment looked healthy."
+      error_message = "VPC ${local.byo_vpc_id != "" ? local.byo_vpc_id : "(supplied subnets')"} has enableDnsSupport disabled. The scanner resolves the EBS Direct API and the Stream ingest host through the VPC resolver; enable DNS support."
     }
 
     precondition {
       condition     = length(local.byo_ipv6_only_subnets) == 0
-      error_message = "Subnet(s) ${join(", ", local.byo_ipv6_only_subnets)} have no IPv4 CIDR. The scanner task needs an IPv4 address per ENI and reaches the EBS Direct API over IPv4, so an IPv6-only subnet cannot run it."
+      error_message = "Subnet(s) ${join(", ", local.byo_ipv6_only_subnets)} have no IPv4 CIDR. The scanner task needs an IPv4 address per ENI; supply dual-stack or IPv4 subnets."
     }
 
     precondition {
       condition     = length(local.byo_non_standard_az_subnets) == 0
-      error_message = "Subnet(s) ${join(", ", local.byo_non_standard_az_subnets)} are not in a standard availability zone of ${local.region}. Fargate is not offered in Local Zones or Wavelength zones, so every task launch would fail with InvalidParameterException while the install looked healthy."
+      error_message = "Subnet(s) ${join(", ", local.byo_non_standard_az_subnets)} are not in a standard availability zone of ${local.region}. Fargate is not offered in Local Zones or Wavelength zones; supply subnets in a standard AZ."
     }
 
     precondition {

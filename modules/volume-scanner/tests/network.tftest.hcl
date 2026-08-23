@@ -1,18 +1,11 @@
-# NOTE: running these tests requires Terraform >= 1.7 (mock_provider blocks) —
-# stricter than the module's own required_version. Older versions fail to parse
-# this file when running `terraform test`; plan/apply of the module itself is
-# unaffected, tests/ is ignored there.
+# NOTE: `terraform test` on this file needs Terraform >= 1.7 (mock_provider),
+# stricter than the module's own required_version. Plan/apply is unaffected.
 
 # Every route object below spells out ALL target fields, including the ones set
-# to "". mock_provider generates a random value for any attribute left unset —
-# nested attributes included — so an omitted nat_gateway_id reads as a real NAT
-# gateway and an egress-less subnet is silently accepted. Adding a new accepted
-# target in main.tf means adding it here too.
-#
-# The same applies to any override_data on data.aws_subnet.byo: cidr_block AND
-# availability_zone must both be supplied, or the generated garbage reaches the
-# capacity arithmetic and the standard-AZ check, and the run dies on "Invalid
-# index" or trips an unrelated precondition rather than testing what it names.
+# to "": mock_provider generates a random value for any attribute left unset, so
+# an omitted nat_gateway_id reads as a real NAT gateway. A new accepted target in
+# main.tf means adding it here too. Same for override_data on data.aws_subnet.byo:
+# cidr_block AND availability_zone must both be supplied.
 mock_provider "aws" {
   mock_resource "aws_iam_role" {
     defaults = { arn = "arn:aws:iam::111111111111:role/mock-scanner-role" }
@@ -103,11 +96,9 @@ variables {
   customer_id = "customer-abc"
 }
 
-# command = apply: every assertion here compares one resource's configured
-# argument against another resource's generated id, and those ids are unknown
-# at plan. Under plan Terraform reports "Unknown condition value" and fails the
-# run outright rather than passing it, which is at least loud — but it means
-# the wiring can only be checked after apply.
+# command = apply: these compare one resource's argument against another's
+# generated id, unknown at plan — under plan the run fails on "Unknown condition
+# value" rather than checking the wiring.
 run "module_owned_private_subnet_actually_routes_to_the_nat" {
   command = apply
 
@@ -117,7 +108,7 @@ run "module_owned_private_subnet_actually_routes_to_the_nat" {
       aws_route.private_nat[0].nat_gateway_id == aws_nat_gateway.this[0].id,
       aws_route.private_nat[0].route_table_id == aws_route_table.private[0].id,
     ])
-    error_message = "The private route table must carry a default route to the module's own NAT Gateway. Without it the scanner task has no egress and every scan fails at the first API call, with nothing in the plan to show why."
+    error_message = "The private route table must default-route to the module's NAT Gateway."
   }
 
   assert {
@@ -125,19 +116,19 @@ run "module_owned_private_subnet_actually_routes_to_the_nat" {
       aws_route_table_association.private[0].subnet_id == aws_subnet.private[0].id,
       aws_route_table_association.private[0].route_table_id == aws_route_table.private[0].id,
     ])
-    error_message = "The scanner subnet must be associated with the private route table. Unassociated, it falls back to the VPC main route table, which has no default route."
+    error_message = "The scanner subnet must be associated with the private route table."
   }
 
   # The NAT must sit in the PUBLIC subnet. In the private one it routes to
   # itself and the failure looks identical to a missing route.
   assert {
     condition     = aws_nat_gateway.this[0].subnet_id == aws_subnet.public[0].id
-    error_message = "The NAT Gateway must live in the public subnet, not the private one it serves."
+    error_message = "The NAT Gateway must live in the public subnet."
   }
 
   assert {
     condition     = aws_route.public_internet[0].gateway_id == aws_internet_gateway.this[0].id
-    error_message = "The public route table must default-route to the Internet Gateway, or the NAT Gateway itself has no path out."
+    error_message = "The public route table must default-route to the Internet Gateway."
   }
 }
 
@@ -146,33 +137,32 @@ run "default_provisions_the_scanner_vpc" {
 
   assert {
     condition     = length(aws_vpc.this) == 1 && length(aws_nat_gateway.this) == 1 && length(aws_eip.nat) == 1
-    error_message = "With defaults the module must provision its own VPC with a NAT Gateway and an Elastic IP."
+    error_message = "Defaults must provision the VPC, NAT Gateway and Elastic IP."
   }
 
   assert {
     condition     = aws_subnet.public[0].cidr_block == "10.255.0.0/25" && aws_subnet.private[0].cidr_block == "10.255.0.128/25"
-    error_message = "The scanner VPC must split into the same public/private /25 pair the CloudFormation template uses."
+    error_message = "The scanner VPC must split into the public/private /25 pair."
   }
 
   assert {
     condition     = aws_subnet.private[0].map_public_ip_on_launch == false
-    error_message = "The private subnet must not assign public IPs — the scanner task runs without one."
+    error_message = "The private subnet must not assign public IPs."
   }
 
   assert {
     condition     = aws_subnet.public[0].availability_zone == aws_subnet.private[0].availability_zone
-    error_message = "Both subnets must sit in a single availability zone, so one NAT Gateway serves the scanner."
+    error_message = "Both subnets must sit in one availability zone."
   }
 
   assert {
     condition     = aws_cloudwatch_event_target.daily.ecs_target[0].network_configuration[0].assign_public_ip == false
-    error_message = "The scheduled task must launch with no public IP in either network mode."
+    error_message = "The scheduled task must launch with no public IP."
   }
 }
 
-# A /27 VPC halves into a /28 private subnet: 16 addresses, 5 reserved by AWS and
-# 1 taken by the EBS endpoint ENI, leaving 10. 20 children plus the orchestrator
-# does not fit.
+# A /27 halves into a /28 private subnet: 16 addresses, 5 reserved by AWS and 1
+# for the EBS endpoint ENI leaves 10, so 20 children do not fit.
 run "concurrency_beyond_the_subnet_capacity_is_rejected" {
   command = plan
 
@@ -194,13 +184,12 @@ run "concurrency_within_the_subnet_capacity_is_accepted" {
 
   assert {
     condition     = aws_subnet.private[0].cidr_block == "10.255.0.16/28"
-    error_message = "A /28 holds 16 addresses: 5 reserved by AWS and 1 for the EBS endpoint ENI leaves 10, so 8 children plus the orchestrator plus the workload child must fit."
+    error_message = "8 shards plus orchestrator, workload child and endpoint ENI must fit the /28."
   }
 }
 
-# The EBS interface endpoint puts an ENI of its own in the private subnet. Miss
-# it and the capacity check passes at exactly the boundary while the last child
-# task fails ENI provisioning with an opaque ResourceInitializationError.
+# The EBS interface endpoint puts an ENI of its own in the private subnet; miss
+# it and the last child task fails with an opaque ResourceInitializationError.
 run "endpoint_eni_is_counted_against_subnet_capacity" {
   command = plan
 
@@ -223,13 +212,12 @@ run "same_config_fits_once_the_endpoint_is_disabled" {
 
   assert {
     condition     = length(aws_vpc_endpoint.ebs) == 0
-    error_message = "With no endpoint ENI the /28's full 11 usable addresses are available, so the same concurrency fits — proving the capacity maths tracks the endpoint rather than being a blanket reduction."
+    error_message = "With the endpoint disabled the same concurrency must fit the /28."
   }
 }
 
-# The orchestrator launches a dedicated workload child in addition to its shard
-# children whenever workload_kinds is non-empty, so the same concurrency needs one
-# more ENI with workload scanning on than with it off.
+# With workload_kinds non-empty the orchestrator also launches a dedicated
+# workload child, so the same concurrency needs one more ENI.
 run "workload_child_task_is_counted_against_capacity" {
   command = plan
 
@@ -241,7 +229,7 @@ run "workload_child_task_is_counted_against_capacity" {
 
   assert {
     condition     = aws_subnet.private[0].cidr_block == "10.255.0.16/28"
-    error_message = "With workload scanning off the budget is orchestrator + 9 children = 10, which exactly fits the /28's 10 usable addresses."
+    error_message = "With workload scanning off, orchestrator + 9 children must fit the /28."
   }
 }
 
@@ -266,7 +254,7 @@ run "the_default_cidr_holds_the_maximum_concurrency" {
 
   assert {
     condition     = aws_subnet.private[0].cidr_block == "10.255.0.128/25"
-    error_message = "The default scanner_vpc_cidr must hold max_concurrent_shards at its ceiling, so the capacity check never fires on defaults."
+    error_message = "The default CIDR must hold max_concurrent_shards at its ceiling."
   }
 }
 
@@ -279,17 +267,17 @@ run "vpc_endpoints_are_created_by_default" {
       length(aws_vpc_endpoint.s3) == 1,
       length(aws_security_group.endpoints) == 1,
     ])
-    error_message = "Snapshot block reads are the dominant egress cost, so the EBS interface endpoint and the free S3 gateway endpoint must be on by default."
+    error_message = "The EBS interface and S3 gateway endpoints must be on by default."
   }
 
   assert {
     condition     = aws_vpc_endpoint.ebs[0].service_name == data.aws_vpc_endpoint_service.ebs[0].service_name && aws_vpc_endpoint.ebs[0].vpc_endpoint_type == "Interface" && aws_vpc_endpoint.ebs[0].private_dns_enabled == true
-    error_message = "The EBS endpoint must take its service name from the resolver (so aws-cn's cn. prefix works) and be an interface endpoint with private DNS — without private DNS the EBS Direct API hostname does not resolve to it and traffic silently stays on the NAT."
+    error_message = "The EBS endpoint must use the resolved service name, Interface type and private DNS."
   }
 
   assert {
     condition     = aws_vpc_endpoint.s3[0].vpc_endpoint_type == "Gateway"
-    error_message = "The S3 endpoint must be a gateway endpoint — it is free and attaches to the private route table."
+    error_message = "The S3 endpoint must be a Gateway endpoint."
   }
 }
 
@@ -308,9 +296,8 @@ run "endpoints_requested_in_byo_mode_are_rejected" {
   expect_failures = [aws_security_group.this]
 }
 
-# AZ names map to different physical AZs per account and an interface endpoint
-# service is not offered in every AZ, so the chosen AZ must come from the
-# intersection rather than blindly from names[0].
+# AZ names map to different physical AZs per account and the endpoint service is
+# not offered in every AZ, so the AZ must come from the intersection, not names[0].
 run "scanner_az_comes_from_the_endpoint_service_zones" {
   command = plan
 
@@ -324,7 +311,7 @@ run "scanner_az_comes_from_the_endpoint_service_zones" {
 
   assert {
     condition     = aws_subnet.private[0].availability_zone == "us-east-1b"
-    error_message = "The subnet must land in an AZ the EBS endpoint service actually serves, not simply the first AZ in the region."
+    error_message = "The subnet must land in an AZ the EBS endpoint service serves."
   }
 }
 
@@ -353,23 +340,18 @@ run "ebs_endpoint_can_be_disabled_without_losing_s3" {
     condition = alltrue([
       length(aws_vpc_endpoint.ebs) == 0,
       length(aws_security_group.endpoints) == 0,
-      # The free gateway endpoint survives. The opt-out exists for a missing EBS
-      # interface service; dropping S3 too would put ECR layer pulls back on the
-      # NAT for no reason.
+      # The free gateway endpoint survives: the opt-out exists for a missing EBS
+      # interface service, and dropping S3 puts ECR layer pulls back on the NAT.
       length(aws_vpc_endpoint.s3) == 1,
     ])
-    error_message = "create_ebs_vpc_endpoint = false must drop only the interface endpoint and its security group, leaving the free S3 gateway endpoint in place."
+    error_message = "create_ebs_vpc_endpoint = false must drop only the interface endpoint and its SG."
   }
 }
 
 # We do not own the caller's VPC, and a second S3 gateway endpoint on a route
-# table that already has one fails with RouteAlreadyExists.
-# Fargate is not offered in Local Zones or Wavelength zones. The module-managed
-# path filters them out of AZ selection; bring-your-own never checked, so such a
-# subnet passed everything and then failed every RunTask while looking healthy.
-# A Fargate task resolves the EBS Direct API, ECR and the Stream ingest hostname
-# through the VPC resolver. With enableDnsSupport off, none of that resolves —
-# the plan is clean, the apply succeeds, and every scan fails on DNS.
+# table that already has one fails with RouteAlreadyExists. Fargate is not offered
+# in Local Zones or Wavelength zones. And with enableDnsSupport off, nothing the
+# task resolves — plan is clean, apply succeeds, every scan fails on DNS.
 run "byo_vpc_without_dns_support_is_rejected" {
   command = plan
 
@@ -434,9 +416,8 @@ run "byo_ipv6_only_subnet_is_reported_not_crashed" {
   expect_failures = [aws_security_group.this]
 }
 
-# Mutation-checked: replacing the BYO branch of local.scanner_subnet_ids with an
-# empty list previously passed all 65 runs, because nothing asserted the supplied
-# subnets actually reach the fan-out.
+# Mutation-checked: emptying the BYO branch of local.scanner_subnet_ids used to
+# pass every run, because nothing asserted the subnets reach the fan-out.
 run "byo_subnets_reach_the_fan_out_wiring" {
   command = apply
 
@@ -448,7 +429,7 @@ run "byo_subnets_reach_the_fan_out_wiring" {
 
   assert {
     condition     = contains([for e in jsondecode(aws_ecs_task_definition.this.container_definitions)[0].environment : "${e.name}=${e.value}"], "COLLECTOR_ECS_SUBNET_IDS=subnet-private-a,subnet-private-b")
-    error_message = "The supplied subnet ids must reach COLLECTOR_ECS_SUBNET_IDS, trimmed — the orchestrator launches every child with them, and an untrimmed or empty value fails every RunTask at runtime."
+    error_message = "The supplied subnet ids must reach COLLECTOR_ECS_SUBNET_IDS, trimmed."
   }
 
   # subnets is a SET, so it is compared by membership and size rather than by
@@ -478,7 +459,7 @@ run "byo_mode_creates_no_endpoints" {
       length(aws_vpc_endpoint.s3) == 0,
       length(aws_security_group.endpoints) == 0,
     ])
-    error_message = "Bring-your-own-subnet mode must create no VPC endpoints in a VPC the module does not own."
+    error_message = "Bring-your-own-subnet mode must create no VPC endpoints."
   }
 }
 
@@ -493,7 +474,7 @@ run "byo_subnet_with_nat_egress_is_accepted" {
 
   assert {
     condition     = length(aws_vpc.this) == 0 && length(aws_nat_gateway.this) == 0
-    error_message = "With create_scanner_vpc = false the module must not provision any network infrastructure."
+    error_message = "create_scanner_vpc = false must provision no network infrastructure."
   }
 
   assert {
@@ -531,21 +512,16 @@ run "byo_subnet_behind_a_transit_gateway_is_accepted" {
 
   assert {
     condition     = aws_security_group.this.vpc_id == "vpc-scanner"
-    error_message = "A Transit Gateway default route must be accepted — it may egress through a central-egress VPC, which is not knowable from here."
+    error_message = "A Transit Gateway default route must be accepted as egress."
   }
 }
 
 # NOTE: every bring-your-own failure below names aws_security_group.this, which
-# carries six preconditions, so any one of them satisfies the assertion. That is
-# deliberate: the checks were moved to a leaf resource to make the assertions
-# discriminating and moved back when it turned out to weaken the gate in the
-# apply-deferred path. Gate strength beat assertion precision.
-#
-# This proves an IGW-only subnet is REJECTED. It cannot prove the
-# public-subnet-specific wording survives: that wording is one branch of a
-# format() inside byo_bad_subnets, not its own precondition, and expect_failures
-# names a resource rather than a condition. Verified by deleting the igw- branch
-# — the subnet is still rejected by the same check and this run stays green.
+# carries six preconditions, so any one of them satisfies the assertion —
+# deliberate: moving the checks to a leaf resource weakened the gate in the
+# apply-deferred path. So this proves an IGW-only subnet is rejected, but not
+# that the public-subnet wording survives; that wording is a format() branch
+# inside byo_bad_subnets, not its own precondition.
 run "byo_igw_only_subnet_is_rejected" {
   command = plan
 
@@ -666,7 +642,7 @@ run "byo_subnet_behind_a_nat_instance_is_accepted" {
 
   assert {
     condition     = aws_security_group.this.vpc_id == "vpc-scanner"
-    error_message = "A NAT instance or inspection/firewall appliance ENI is valid egress and must be accepted — it appears as network_interface_id / instance_id, not nat_gateway_id."
+    error_message = "A NAT instance or appliance ENI default route must be accepted as egress."
   }
 }
 
@@ -699,18 +675,14 @@ run "byo_subnet_behind_cloud_wan_is_accepted" {
 
   assert {
     condition     = aws_security_group.this.vpc_id == "vpc-scanner"
-    error_message = "A Cloud WAN core-network default route is central egress and must be accepted."
+    error_message = "A Cloud WAN core-network default route must be accepted as egress."
   }
 }
 
 # NOTE: this asserts both supplied subnets are validated. It does NOT reproduce
-# the unknown-at-plan vpc_id regression, because `variables` blocks can only
-# supply known values — a literal vpc_id here is known, so folding
-# `var.vpc_id != null` back into local.byo_validate would leave this green.
-#
-# That regression is covered out-of-band by a root-module harness that builds an
-# aws_vpc and feeds its id into the module, which is the only way to produce a
-# genuinely unknown value. See the note in README.md under Tests.
+# the unknown-at-plan vpc_id regression — a `variables` block can only supply
+# known values — which is covered out-of-band by a root-module harness. See the
+# note in README.md under Tests.
 run "byo_subnets_are_each_validated" {
   command = plan
 
@@ -722,7 +694,7 @@ run "byo_subnets_are_each_validated" {
 
   assert {
     condition     = length(data.aws_subnet.byo) == 2
-    error_message = "Both supplied subnets must be validated; the gate feeding for_each must depend only on the two bool variables, never on vpc_id."
+    error_message = "Both supplied subnets must be validated; the for_each gate must not read vpc_id."
   }
 }
 
@@ -755,7 +727,7 @@ run "byo_subnet_behind_a_virtual_private_gateway_is_accepted" {
 
   assert {
     condition     = aws_security_group.this.vpc_id == "vpc-scanner"
-    error_message = "A virtual private gateway default route is on-prem egress over VPN or Direct Connect — a standard enterprise topology — and must be accepted."
+    error_message = "A virtual private gateway default route must be accepted as egress."
   }
 }
 
@@ -783,10 +755,8 @@ run "byo_subnet_too_small_for_peak_concurrency_is_rejected" {
   expect_failures = [aws_security_group.this]
 }
 
-# An isolated private subnet whose ONLY non-local route is the standard S3
-# gateway endpoint. This is the commonest route in an enterprise private subnet
-# and says nothing about internet access — accepting it as egress waves through
-# a subnet with no internet path at all.
+# An isolated private subnet whose ONLY non-local route is the S3 gateway
+# endpoint: common in enterprise private subnets, and not internet egress.
 run "s3_gateway_endpoint_route_is_not_egress" {
   command = plan
 
@@ -817,9 +787,8 @@ run "s3_gateway_endpoint_route_is_not_egress" {
   expect_failures = [aws_security_group.this]
 }
 
-# A genuinely public subnet that also carries the S3 gateway endpoint route. The
-# prefix-list rule set has_egress = true, which short-circuited the IGW-only
-# rejection and let a public subnet through.
+# A genuinely public subnet that also carries the S3 gateway endpoint route: the
+# prefix-list rule set has_egress = true and short-circuited the IGW rejection.
 run "public_subnet_with_an_s3_endpoint_is_still_rejected" {
   command = plan
 
@@ -887,16 +856,13 @@ run "egress_validation_can_be_skipped" {
 
   assert {
     condition     = length(data.aws_route_table.byo_main) == 0 && length(data.aws_subnet.byo) == 0
-    error_message = "validate_subnet_egress = false must read no validation data sources, so subnet ids that are unknown until apply do not break for_each."
+    error_message = "validate_subnet_egress = false must read no validation data sources."
   }
 }
 
-# These assert that a blank vpc_id trips the module's own preconditions. They do
-# NOT guard the data-source wiring, and saying so matters: mock_provider returns
-# data whatever vpc_id filter it is given, so reverting the consumers back to raw
-# var.vpc_id leaves both of these green — verified. The wiring is only observable
-# against real AWS, where an empty filter makes the singular route-table data
-# source abort the plan before any precondition is reached.
+# These assert a blank vpc_id trips the module's own preconditions. They do NOT
+# guard the data-source wiring: mock_provider returns data for any filter, so
+# reverting the consumers to raw var.vpc_id leaves both green — verified.
 run "blank_vpc_id_is_caught_by_the_precondition_not_a_data_source" {
   command = plan
 

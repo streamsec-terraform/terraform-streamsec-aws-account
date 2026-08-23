@@ -1,7 +1,5 @@
-# NOTE: running these tests requires Terraform >= 1.7 (mock_provider blocks) —
-# stricter than the module's own required_version. Older versions fail to parse
-# this file when running `terraform test`; plan/apply of the module itself is
-# unaffected, tests/ is ignored there.
+# NOTE: `terraform test` on this file needs Terraform >= 1.7 (mock_provider),
+# stricter than the module's own required_version. Plan/apply is unaffected.
 
 mock_provider "aws" {
   mock_resource "aws_ecs_cluster" {
@@ -70,17 +68,17 @@ run "container_environment_matches_the_cloudformation_defaults" {
       "COLLECTOR_MAX_CONCURRENT_SHARDS=10"] :
       contains([for e in jsondecode(aws_ecs_task_definition.this.container_definitions)[0].environment : "${e.name}=${e.value}"], pair)
     ])
-    error_message = "Default feature toggles and scaling knobs must match the CloudFormation template: only language packages on, lambda+ecs workloads, 100-instance shards, 10 concurrent."
+    error_message = "Default container environment does not match the CloudFormation defaults."
   }
 
   assert {
     condition     = contains([for e in jsondecode(aws_ecs_task_definition.this.container_definitions)[0].environment : "${e.name}=${e.value}"], "COLLECTOR_TENANT_NAME=acme")
-    error_message = "The tenant name must be derived from the first label of the Stream host URL."
+    error_message = "COLLECTOR_TENANT_NAME must come from the first label of the host URL."
   }
 
   assert {
     condition     = contains([for e in jsondecode(aws_ecs_task_definition.this.container_definitions)[0].environment : "${e.name}=${e.value}"], "COLLECTOR_STREAM_SCAN_URL=https://acme.streamsec.io/openapi/vulnerabilities/stream_scan/raw")
-    error_message = "The SBOM ingest URL must be the tenant host plus the stream_scan/raw path."
+    error_message = "COLLECTOR_STREAM_SCAN_URL must be the host plus /stream_scan/raw."
   }
 
   assert {
@@ -88,18 +86,16 @@ run "container_environment_matches_the_cloudformation_defaults" {
       for pair in ["COLLECTOR_CUSTOMER_ID=customer-abc", "COLLECTOR_STREAM_SCAN_WORKSPACE=customer-abc"] :
       contains([for e in jsondecode(aws_ecs_task_definition.this.container_definitions)[0].environment : "${e.name}=${e.value}"], pair)
     ])
-    error_message = "Both the customer id and the scan workspace must carry the configured customer_id."
+    error_message = "Customer id and scan workspace must both carry customer_id."
   }
 
   assert {
     condition     = contains([for e in jsondecode(aws_ecs_task_definition.this.container_definitions)[0].environment : "${e.name}=${e.value}"], "COLLECTOR_ECS_TASK_DEF_ARN=arn:aws:ecs:us-east-1:111111111111:task-definition/streamsec-ebs-scanner-tf")
-    error_message = "The orchestrator must receive a revision-less family ARN, so child tasks always launch on the current ACTIVE revision."
+    error_message = "COLLECTOR_ECS_TASK_DEF_ARN must be the revision-less family ARN."
   }
 
-  # The three values the orchestrator actually launches children WITH. Nothing
-  # asserted them, so any of them wired to the wrong resource would fail the
-  # fan-out at runtime with the whole suite green — the same untested-wiring shape
-  # that let a misplaced IAM grant survive a round.
+  # The three values the orchestrator launches children WITH; nothing else asserts
+  # them, so a mis-wired one fails fan-out at runtime with the suite green.
   assert {
     condition = alltrue([
       for pair in [
@@ -109,14 +105,12 @@ run "container_environment_matches_the_cloudformation_defaults" {
       ] :
       contains([for e in jsondecode(aws_ecs_task_definition.this.container_definitions)[0].environment : "${e.name}=${e.value}"], pair)
     ])
-    error_message = "The orchestrator's fan-out inputs — cluster ARN, subnet ids and security group — must point at this module's own resources, or every child RunTask fails at runtime while the plan and the suite stay clean."
+    error_message = "Fan-out env (cluster ARN, subnet ids, security group) must point at this module's resources."
   }
 }
 
-# The container used to receive var.workload_kinds verbatim while IAM was built
-# from the trimmed list, so "lambda, ecs" granted the ECS statements and then sent
-# " ecs" to the scanner, which matches no kind — workload scanning silently did
-# nothing with the grants still attached.
+# The container used to receive var.workload_kinds verbatim while IAM used the
+# trimmed list, so "lambda, ecs" sent " ecs" to the scanner, matching no kind.
 run "workload_kinds_reach_the_container_normalized" {
   command = apply
 
@@ -126,7 +120,7 @@ run "workload_kinds_reach_the_container_normalized" {
 
   assert {
     condition     = contains([for e in jsondecode(aws_ecs_task_definition.this.container_definitions)[0].environment : "${e.name}=${e.value}"], "COLLECTOR_WORKLOAD_KINDS=ecs,lambda")
-    error_message = "COLLECTOR_WORKLOAD_KINDS must be the trimmed, normalized list — the raw value reaches the scanner's comma split and a padded element matches no kind."
+    error_message = "COLLECTOR_WORKLOAD_KINDS must be the trimmed, normalized list."
   }
 }
 
@@ -154,7 +148,7 @@ run "feature_toggles_reach_the_container" {
       "COLLECTOR_MAX_CONCURRENT_SHARDS=25"] :
       contains([for e in jsondecode(aws_ecs_task_definition.this.container_definitions)[0].environment : "${e.name}=${e.value}"], pair)
     ])
-    error_message = "Every scanner toggle and scaling knob must be plumbed through to the container environment."
+    error_message = "Scanner toggles and scaling knobs must reach the container environment."
   }
 }
 
@@ -163,17 +157,17 @@ run "task_sizing_matches_the_cloudformation_template" {
 
   assert {
     condition     = aws_ecs_task_definition.this.cpu == "4096" && aws_ecs_task_definition.this.memory == "16384"
-    error_message = "Default task sizing must stay at the 4 vCPU / 16 GB profile sized for 10 concurrent shards."
+    error_message = "Default task sizing must stay 4096 CPU / 16384 memory."
   }
 
   assert {
     condition     = aws_ecs_task_definition.this.ephemeral_storage[0].size_in_gib == 50
-    error_message = "Ephemeral storage must default to 50 GiB for the L2 disk cache."
+    error_message = "Ephemeral storage must default to 50 GiB."
   }
 
   assert {
     condition     = aws_ecs_task_definition.this.family == "streamsec-ebs-scanner-tf"
-    error_message = "The task definition family must stay \"streamsec-ebs-scanner-tf\" — deliberately NOT the CloudFormation template's \"streamsec-ebs-scanner\", so a Terraform revision can never be registered into the family the CloudFormation orchestrator launches from."
+    error_message = "Task family must stay streamsec-ebs-scanner-tf, distinct from the CloudFormation family."
   }
 }
 
@@ -182,7 +176,7 @@ run "schedule_uses_cron_not_rate" {
 
   assert {
     condition     = aws_cloudwatch_event_rule.daily.schedule_expression == "cron(0 3 * * ? *)"
-    error_message = "The schedule must be a cron expression: a rate(...) rule fires once at creation as well as on the interval, duplicating the first scan."
+    error_message = "The schedule must be a cron expression, not rate(...)."
   }
 }
 
@@ -199,7 +193,7 @@ run "initial_scan_can_be_disabled" {
       length(aws_lambda_invocation.initial_scan) == 0,
       length(aws_iam_role.initial_scan) == 0,
     ])
-    error_message = "trigger_initial_scan = false must drop the Lambda, its invocation and its IAM role."
+    error_message = "trigger_initial_scan = false must drop the Lambda, invocation and role."
   }
 }
 
@@ -212,16 +206,13 @@ run "initial_scan_is_created_by_default" {
       length(aws_lambda_invocation.initial_scan) == 1,
       length(aws_iam_role.initial_scan) == 1,
     ])
-    error_message = "By default the module must fire one immediate scan, matching the CloudFormation InitialScanTrigger."
+    error_message = "By default the initial-scan Lambda, invocation and role must exist."
   }
 }
 
-# command = apply, not plan. random_string is unmocked so the secret name is
-# unknown at plan: startswith() on an unknown returns Unknown unless the known
-# prefix is at least as long as the tested prefix, and length() refines only to
-# an inclusive lower bound — so both assertions below were indeterminate and
-# therefore skipped, not passed. Every regression shortening the name's known
-# prefix was undetectable.
+# command = apply, not plan: random_string is unmocked, so the secret name is
+# unknown at plan and both assertions below come out indeterminate — skipped
+# rather than passed.
 run "resource_prefix_is_applied" {
   command = apply
 
@@ -231,25 +222,24 @@ run "resource_prefix_is_applied" {
 
   assert {
     condition     = aws_ecs_cluster.this.name == "acme-streamsec-ebs-scanner-tf-us-east-1"
-    error_message = "resource_prefix must prefix the resource names, and names must carry the region so two regions in one account do not collide."
+    error_message = "Resource names must carry resource_prefix and the region."
   }
 
   # startswith, not equality: the name carries a random suffix so that
   # destroy-then-apply works with a non-zero secret_recovery_window_days.
   assert {
     condition     = startswith(aws_secretsmanager_secret.collection_token.name, "acme-streamsec-scanner-collection-token-us-east-1-")
-    error_message = "The Secrets Manager secret must carry resource_prefix too — without it two prefixed deployments in one account/region collide on the same secret name."
+    error_message = "The secret name must carry resource_prefix and the region."
   }
 
   assert {
     condition     = length(aws_secretsmanager_secret.collection_token.name) > length("acme-streamsec-scanner-collection-token-us-east-1-")
-    error_message = "The secret name must end in a random suffix, or a non-zero secret_recovery_window_days blocks destroy-then-apply for the whole window."
+    error_message = "The secret name must end in a random suffix."
   }
 }
 
 # The module must refuse to sit alongside the console's CloudFormation scanner:
-# both would scan every volume, and each one's retention sweep deletes snapshots
-# tagged Purpose=ebs-package-collector account-wide — including the other's.
+# each one's retention sweep deletes the other's Purpose-tagged snapshots.
 run "refuses_to_deploy_alongside_the_cloudformation_scanner" {
   command = plan
 
@@ -260,15 +250,10 @@ run "refuses_to_deploy_alongside_the_cloudformation_scanner" {
     }
   }
 
-  # Both, not just the cluster. The VPC carries the same guard because it has no
-  # dependency on the cluster and would otherwise be created in parallel — and
-  # left behind billing — when the cluster's check trips. The Elastic IP and NAT
-  # gateway are downstream of the VPC, so they are covered by its failure.
-  # The three resources the gate is placed on: the VPC because it and the NAT
-  # gateway downstream of it cost money, the cluster because an identically named
-  # one can be silently adopted, and the secret because it persists the account's
-  # Stream collection token. The IAM roles and log groups may still be created,
-  # but they are inert and recorded in state, so a destroy removes them.
+  # All three, not just the cluster: the VPC (and the NAT downstream of it) costs
+  # money, an identically named cluster is silently adopted, and the secret holds
+  # the collection token. The VPC needs its own guard — it does not depend on the
+  # cluster. IAM roles and log groups may still be created, but are inert.
   expect_failures = [
     aws_ecs_cluster.this,
     aws_vpc.this,
@@ -292,7 +277,7 @@ run "coexistence_can_be_opted_into" {
 
   assert {
     condition     = aws_ecs_cluster.this.name == "streamsec-ebs-scanner-tf-us-east-1"
-    error_message = "allow_cloudformation_coexistence must permit the deploy, and the module's own cluster name must stay distinct from the CloudFormation stack's."
+    error_message = "allow_cloudformation_coexistence must permit the deploy, keeping our own cluster name."
   }
 }
 
@@ -310,7 +295,7 @@ run "our_own_cluster_does_not_trip_the_guard" {
 
   assert {
     condition     = aws_ecs_cluster.this.name == "streamsec-ebs-scanner-tf-us-east-1"
-    error_message = "The presence check must match the CloudFormation name exactly; our own -tf cluster must not look like a collision."
+    error_message = "Our own -tf cluster must not trip the CloudFormation presence check."
   }
 }
 
@@ -323,7 +308,7 @@ run "names_cannot_collide_with_the_cloudformation_stack" {
       aws_ecs_task_definition.this.family != "streamsec-ebs-scanner",
       aws_cloudwatch_log_group.this.name != "/ecs/streamsec-ebs-scanner-us-east-1",
     ])
-    error_message = "Cluster, task-definition family and log group must all differ from the CloudFormation stack's hardcoded names — ecs:CreateCluster is an upsert, so an identical cluster name is silently adopted rather than rejected."
+    error_message = "Cluster, task family and log group must differ from the CloudFormation names."
   }
 }
 
@@ -341,7 +326,7 @@ run "region_with_no_ecs_clusters_still_plans" {
 
   assert {
     condition     = aws_ecs_cluster.this.name == "streamsec-ebs-scanner-tf-us-east-1"
-    error_message = "A region with no existing ECS clusters must plan cleanly — cluster_arns is null there, not an empty list."
+    error_message = "A region with null cluster_arns must still plan."
   }
 }
 
@@ -363,7 +348,7 @@ run "collection_token_is_injected_from_secrets_manager" {
       for e in jsondecode(aws_ecs_task_definition.this.container_definitions)[0].environment :
       e if e.name == "COLLECTOR_STREAM_SCAN_TOKEN"
     ]) == 0
-    error_message = "The collection token must never appear as a plaintext environment variable — it would be printed in plan output, stored unredacted in state, and readable by anything holding ecs:DescribeTaskDefinition."
+    error_message = "The collection token must never be a plaintext environment variable."
   }
 
   assert {
@@ -371,7 +356,7 @@ run "collection_token_is_injected_from_secrets_manager" {
       for s in jsondecode(aws_ecs_task_definition.this.container_definitions)[0].secrets :
       s if s.name == "COLLECTOR_STREAM_SCAN_TOKEN" && s.valueFrom == aws_secretsmanager_secret.collection_token.arn
     ]) == 1
-    error_message = "The collection token must be injected via the task definition's secrets block, sourced from the module's Secrets Manager secret."
+    error_message = "The collection token must come from the secrets block, sourced from this module's secret."
   }
 
   assert {
@@ -379,12 +364,12 @@ run "collection_token_is_injected_from_secrets_manager" {
       jsondecode(aws_iam_role_policy.execution_secrets.policy).Statement[0].Action,
       "secretsmanager:GetSecretValue"
     )
-    error_message = "ECS resolves the secrets block with the execution role, so that role must be able to read the secret."
+    error_message = "The execution role must hold secretsmanager:GetSecretValue."
   }
 
   assert {
     condition     = jsondecode(aws_iam_role_policy.execution_secrets.policy).Statement[0].Resource == aws_secretsmanager_secret.collection_token.arn
-    error_message = "The GetSecretValue grant must be scoped to this module's own collection-token secret, never \"*\" — the execution role would otherwise read every secret in the account."
+    error_message = "GetSecretValue must be scoped to this module's own secret ARN."
   }
 }
 
@@ -400,7 +385,7 @@ run "workload_iam_is_dropped_when_workload_scanning_is_off" {
       for s in jsondecode(aws_iam_role_policy.task.policy).Statement :
       s if startswith(s.Sid, "Workload")
     ]) == 0
-    error_message = "workload_kinds = \"\" is documented as disabling workload scanning entirely, so the account-wide Lambda/ECS/ECR grants must not be attached."
+    error_message = "Empty workload_kinds must attach no Workload* statements."
   }
 }
 
@@ -412,7 +397,7 @@ run "workload_iam_is_present_by_default" {
       for sid in ["WorkloadLambdaList", "WorkloadLambdaGet", "WorkloadEcsDiscovery", "WorkloadImageAuth", "WorkloadImagePull"] :
       contains([for s in jsondecode(aws_iam_role_policy.task.policy).Statement : s.Sid], sid)
     ])
-    error_message = "With the default workload_kinds (lambda,ecs) every workload-scanning statement must be granted."
+    error_message = "Default workload_kinds must grant every Workload* statement."
   }
 }
 
@@ -428,7 +413,7 @@ run "workload_iam_is_scoped_to_lambda_only" {
       for s in jsondecode(aws_iam_role_policy.task.policy).Statement :
       s if startswith(s.Sid, "WorkloadEcs")
     ]) == 0
-    error_message = "workload_kinds = \"lambda\" must not grant account-wide ECS task and task-definition read access."
+    error_message = "workload_kinds = lambda must grant no WorkloadEcs statements."
   }
 
   assert {
@@ -436,7 +421,7 @@ run "workload_iam_is_scoped_to_lambda_only" {
       for sid in ["WorkloadLambdaList", "WorkloadLambdaGet", "WorkloadImageAuth", "WorkloadImagePull"] :
       contains([for s in jsondecode(aws_iam_role_policy.task.policy).Statement : s.Sid], sid)
     ])
-    error_message = "workload_kinds = \"lambda\" must still grant the Lambda statements and the shared ECR image-pull statements."
+    error_message = "workload_kinds = lambda must keep the Lambda and ECR statements."
   }
 }
 
@@ -452,7 +437,7 @@ run "workload_iam_is_scoped_to_ecs_only" {
       for s in jsondecode(aws_iam_role_policy.task.policy).Statement :
       s if startswith(s.Sid, "WorkloadLambda")
     ]) == 0
-    error_message = "workload_kinds = \"ecs\" must not grant account-wide lambda:GetFunction, which downloads function code."
+    error_message = "workload_kinds = ecs must grant no WorkloadLambda statements."
   }
 
   assert {
@@ -460,22 +445,16 @@ run "workload_iam_is_scoped_to_ecs_only" {
       for sid in ["WorkloadEcsDiscovery", "WorkloadImageAuth", "WorkloadImagePull"] :
       contains([for s in jsondecode(aws_iam_role_policy.task.policy).Statement : s.Sid], sid)
     ])
-    error_message = "workload_kinds = \"ecs\" must still grant the ECS statements and the shared ECR image-pull statements."
+    error_message = "workload_kinds = ecs must keep the ECS and ECR statements."
   }
 }
 
 run "run_task_is_scoped_to_the_scanner_cluster" {
   command = apply
 
-  # flatten() normalises `Action = "ecs:RunTask"` and `Action = ["ecs:RunTask"]`
-  # to the same shape. Matching the bare string only — as this test first did —
-  # made a pure-style change to a list silently empty the filter, and alltrue([])
-  # is true, so the one test guarding "no role can launch the scanner task into
-  # another cluster" would have gone permanently green while checking nothing.
-  # flatten() around the OUTER list is the point. Without it, length() counts the
-  # three inner lists — one per policy — and returns 3 no matter how many
-  # statements matched, so deleting a RunTask grant entirely left this green.
-  # Verified by deleting the events policy's statement: the suite now fails.
+  # flatten([s.Action]) normalises the string and list forms of Action; a filter
+  # matching nothing yields alltrue([]) == true. flatten() around the OUTER list
+  # matters too, or length() counts the three per-policy lists and always gets 3.
   assert {
     condition = length(flatten([
       for policy in [
@@ -487,7 +466,7 @@ run "run_task_is_scoped_to_the_scanner_cluster" {
         s if contains(flatten([s.Action]), "ecs:RunTask")
       ]
     ])) == 3
-    error_message = "Expected exactly one ecs:RunTask statement in each of the three policies (orchestrator, events, initial scan). A missing one means a role lost its grant, or the filter stopped matching."
+    error_message = "Expected one ecs:RunTask statement in each of the three launcher policies."
   }
 
   assert {
@@ -502,13 +481,12 @@ run "run_task_is_scoped_to_the_scanner_cluster" {
         if contains(flatten([s.Action]), "ecs:RunTask")
       ]
     ]))
-    error_message = "Every ecs:RunTask grant must be conditioned on the scanner's own cluster, or these roles could launch the task into any cluster in the account."
+    error_message = "Every ecs:RunTask grant must be conditioned on the scanner's own cluster."
   }
 }
 
-# The duplicate-scan guard in initial_scan.py calls ecs:ListTasks. Nothing tested
-# that the grant existed, so when it was added it landed on the EventBridge role
-# instead and the guard stayed dead through a full review round.
+# The duplicate-scan guard in initial_scan.py calls ecs:ListTasks; the grant once
+# landed on the EventBridge role instead and the guard stayed dead.
 run "initial_scan_role_can_check_for_a_running_scan" {
   command = apply
 
@@ -517,25 +495,22 @@ run "initial_scan_role_can_check_for_a_running_scan" {
       for s in jsondecode(aws_iam_role_policy.initial_scan[0].policy).Statement :
       s if contains(flatten([s.Action]), "ecs:ListTasks")
     ]) == 1
-    error_message = "The initial-scan role must hold ecs:ListTasks, or the duplicate-scan guard is denied on every invocation, swallowed by its own except, and a second orchestrator snapshots every volume again."
+    error_message = "The initial-scan role must hold ecs:ListTasks for the duplicate-scan guard."
   }
 
-  # Asserted per ROLE, not per policy. The previous version filtered two of the
-  # three policies attached to aws_iam_role.task and claimed no other role holds
-  # ListTasks — while aws_iam_role_policy.task, on that same role, grants it
-  # account-wide for ECS workload discovery. It stayed green by not looking.
+  # Asserted per ROLE, not per policy: aws_iam_role_policy.task sits on the same
+  # role and grants ListTasks account-wide, so a per-policy filter misses it.
   assert {
     condition = length([
       for s in concat(
         jsondecode(aws_iam_role_policy.events.policy).Statement,
       ) : s if contains(flatten([s.Action]), "ecs:ListTasks")
     ]) == 0
-    error_message = "The EventBridge role never calls ListTasks, so granting it there is an unused permission."
+    error_message = "The EventBridge role must not hold ecs:ListTasks."
   }
 
-  # The scanner task role DOES hold account-wide ecs:ListTasks — workload
-  # discovery needs it to enumerate tasks across every cluster — so it is asserted
-  # as expected rather than absent, and disappears with workload scanning.
+  # The scanner task role DOES hold account-wide ecs:ListTasks for workload
+  # discovery, so it is asserted as expected rather than absent.
   assert {
     condition = length([
       for s in concat(
@@ -543,14 +518,12 @@ run "initial_scan_role_can_check_for_a_running_scan" {
         jsondecode(aws_iam_role_policy.orchestrator.policy).Statement,
       ) : s if contains(flatten([s.Action]), "ecs:ListTasks")
     ]) == 1
-    error_message = "With workload_kinds including ecs, the task role holds exactly one account-wide ecs:ListTasks for workload discovery. A second grant, or none, means the fan-out or the discovery pass changed."
+    error_message = "The task role must hold exactly one account-wide ecs:ListTasks."
   }
 }
 
 # Covers kms_endpoint_suffix only. vpc_endpoint_service_prefix is NOT exercised
-# here — these runs use create_scanner_vpc's default with mocked endpoint
-# services, so the aws-cn service-name prefix is still untested. Said plainly
-# because the previous version of this comment claimed both.
+# here — the endpoint services are mocked, so the aws-cn prefix stays untested.
 run "kms_via_service_is_partition_correct_in_china" {
   command = plan
 
@@ -575,16 +548,12 @@ run "kms_via_service_is_partition_correct_in_china" {
       for s in jsondecode(aws_iam_role_policy.task.policy).Statement :
       try(s.Condition.StringEquals["kms:ViaService"], []) if s.Sid == "ReadEncryptedVolumes"
     ][0] == ["ec2.cn-north-1.amazonaws.com.cn"]
-    error_message = "In aws-cn the service principal ends .amazonaws.com.cn. Hardcoding the commercial suffix makes the condition unmatchable, which denies kms:Decrypt and silently reports nothing for every CMK-encrypted volume there."
+    error_message = "In aws-cn kms:ViaService must use the .amazonaws.com.cn suffix."
   }
 }
 
-# Matches the CloudFormation template exactly: two actions, one ViaService value.
-# Anything beyond this is privilege the console stack does not hand out.
-# The pinned-revision vs revision-less-family split is the module's most-argued
-# IAM decision and nothing asserted it: the existing run checks the count and the
-# ecs:cluster condition but never s.Resource, so swapping the orchestrator to the
-# pinned form — or widening any of the three to "*" — left the suite green.
+# The only run asserting s.Resource on the RunTask grants: the run above checks
+# the count and the ecs:cluster condition, so a swapped or widened ARN passes it.
 run "run_task_resources_keep_their_deliberate_split" {
   command = apply
 
@@ -596,7 +565,19 @@ run "run_task_resources_keep_their_deliberate_split" {
       local.task_definition_family_arn,
       "${local.task_definition_family_arn}:*",
     ])
-    error_message = "The orchestrator must stay authorized for the revision-less family ARN it is actually handed in COLLECTOR_ECS_TASK_DEF_ARN. Pinning it to a single revision makes fan-out depend on ECS resolving family->revision before IAM evaluates, and fails mid-scan with AccessDenied on every child after snapshots already exist."
+    error_message = "The orchestrator's RunTask grant must stay on the family ARN and family ARN:*."
+  }
+
+  assert {
+    condition = length(flatten([
+      for policy in [
+        aws_iam_role_policy.events.policy,
+        aws_iam_role_policy.initial_scan[0].policy,
+        ] : [
+        for s in jsondecode(policy).Statement : s if try(s.Sid, "") == "RunScannerTask"
+      ]
+    ])) == 2
+    error_message = "A RunScannerTask statement went missing from events or initial_scan."
   }
 
   assert {
@@ -610,7 +591,7 @@ run "run_task_resources_keep_their_deliberate_split" {
           if try(s.Sid, "") == "RunScannerTask"
       ])
     ])
-    error_message = "EventBridge and the initial-scan Lambda each launch one exact revision, so both must stay pinned to that revision ARN — this is the CloudFormation template's own scoping. Widening them to the family authorizes every revision that skip_destroy leaves ACTIVE."
+    error_message = "EventBridge and initial-scan RunTask grants must stay pinned to the revision ARN."
   }
 }
 
@@ -622,7 +603,7 @@ run "kms_grant_matches_the_cloudformation_template_exactly" {
       for s in jsondecode(aws_iam_role_policy.task.policy).Statement :
       s if s.Sid == "ReadEncryptedVolumes"
     ][0].Condition.StringEquals["kms:ViaService"] == ["ec2.us-east-1.amazonaws.com"]
-    error_message = "kms:ViaService must be exactly ec2.<region>, as the CloudFormation template grants. Dropping the condition widens the grant to every CMK in the account; adding values widens it past what the console stack hands out."
+    error_message = "kms:ViaService must be exactly ec2.<region>."
   }
 
   assert {
@@ -630,7 +611,7 @@ run "kms_grant_matches_the_cloudformation_template_exactly" {
       for s in jsondecode(aws_iam_role_policy.task.policy).Statement :
       s if s.Sid == "ReadEncryptedVolumes"
     ][0].Action) == toset(["kms:Decrypt", "kms:DescribeKey"])
-    error_message = "The KMS grant must be exactly kms:Decrypt + kms:DescribeKey. GenerateDataKeyWithoutPlaintext, ReEncryptFrom/To and CreateGrant were doc-derived guesses for a snapshot-copy path this scanner does not have, and DEV-21730 measured CreateSnapshot needing none of them."
+    error_message = "The KMS grant must be exactly kms:Decrypt + kms:DescribeKey."
   }
 
   assert {
@@ -638,13 +619,12 @@ run "kms_grant_matches_the_cloudformation_template_exactly" {
       for s in jsondecode(aws_iam_role_policy.task.policy).Statement :
       s if s.Sid == "GrantEC2SnapshotAccessToKeys"
     ]) == 0
-    error_message = "kms:CreateGrant is a mutating action on every CMK reachable through the EC2 data plane, held by a role that runs third-party container code. The CloudFormation template does not grant it and neither should this module."
+    error_message = "kms:CreateGrant must never be granted."
   }
 }
 
-# The module advertises China support and tests its partition paths, so the
-# unreachable default image should fail at plan with the reason rather than at
-# task start with an opaque CannotPullContainerError.
+# The default image is unreachable from aws-cn, so it should fail at plan with
+# the reason rather than at task start with an opaque CannotPullContainerError.
 run "china_partition_rejects_the_public_ecr_default_image" {
   command = plan
 
@@ -679,13 +659,12 @@ run "secret_suffix_avoids_the_shape_aws_warns_about" {
   # resolve to the wrong secret.
   assert {
     condition     = length(regexall("-[a-z0-9]{6}$", aws_secretsmanager_secret.collection_token.name)) == 0
-    error_message = "The generated secret name must not end in a hyphen followed by exactly six characters."
+    error_message = "The secret name must not end in a hyphen plus six characters."
   }
 }
 
-# The snapshot statements were never asserted — six runs read this policy and
-# every one filters on Workload* or the KMS Sids. These are jsonencode() over
-# locals, so they are known at plan and cost nothing to check.
+# No other run asserts the snapshot statements; every one filters on Workload*
+# or the KMS Sids.
 run "snapshot_grants_keep_their_scoping_conditions" {
   command = plan
 
@@ -694,7 +673,7 @@ run "snapshot_grants_keep_their_scoping_conditions" {
       for s in jsondecode(aws_iam_role_policy.task.policy).Statement :
       s if s.Sid == "ReadAndDeleteOwnSnapshots"
     ][0].Condition.StringEquals["aws:ResourceTag/Purpose"], "") == "ebs-package-collector"
-    error_message = "ec2:DeleteSnapshot and the EBS block reads must stay conditioned on the Purpose tag. Without it this role — running third-party container code — can delete every snapshot in the region."
+    error_message = "Snapshot read/delete must stay conditioned on aws:ResourceTag/Purpose."
   }
 
   assert {
@@ -702,7 +681,7 @@ run "snapshot_grants_keep_their_scoping_conditions" {
       for s in jsondecode(aws_iam_role_policy.task.policy).Statement :
       s if s.Sid == "CreateTaggedSnapshot"
     ][0].Condition.StringEquals["aws:RequestTag/Purpose"], "") == "ebs-package-collector"
-    error_message = "CreateSnapshot on the snapshot ARN must be gated on RequestTag, not ResourceTag — the tag is being applied by the call, not already present."
+    error_message = "CreateSnapshot must be gated on aws:RequestTag/Purpose, not ResourceTag."
   }
 
   assert {
@@ -710,7 +689,7 @@ run "snapshot_grants_keep_their_scoping_conditions" {
       for s in jsondecode(aws_iam_role_policy.task.policy).Statement :
       s if s.Sid == "TagSnapshotsAtCreate"
     ][0].Condition.StringEquals["ec2:CreateAction"], "") == "CreateSnapshot"
-    error_message = "ec2:CreateTags must be gated on ec2:CreateAction, or the role can retag any snapshot in the account into its own delete scope."
+    error_message = "ec2:CreateTags must be gated on ec2:CreateAction = CreateSnapshot."
   }
 
   # The account field is deliberately EMPTY here; pinning it made every
@@ -721,20 +700,17 @@ run "snapshot_grants_keep_their_scoping_conditions" {
       length(regexall("^arn:aws:ec2:us-east-1::snapshot/\\*$", tostring(s.Resource))) > 0
       if s.Sid == "CreateTaggedSnapshot" || s.Sid == "ReadAndDeleteOwnSnapshots"
     ])
-    error_message = "Snapshot ARNs must be region-scoped with an EMPTY account field. Pinning the account makes every CreateSnapshot fail with UnauthorizedOperation and produces zero findings with no plan-time signal."
+    error_message = "Snapshot ARNs must be region-scoped with an empty account field."
   }
 }
 
-# T2 — the only test reading the launcher policies filters on ecs:RunTask, which
+# The other run reading the launcher policies filters on ecs:RunTask, which
 # excludes the PassRole statement in the same shared local.
 run "pass_role_stays_scoped_and_confined_to_ecs" {
   command = apply
 
-  # Presence FIRST. Everything below filters on iam:PassRole, and a filter that
-  # matches nothing yields alltrue([]) == true — so deleting the grant outright
-  # left this run green while every RunTask failed with "ECS was unable to
-  # assume the role", i.e. the scanner never ran at all. Same trap that
-  # run_task_is_scoped_to_the_scanner_cluster fixed with a count assertion.
+  # Presence FIRST: everything below filters on iam:PassRole, and a filter that
+  # matches nothing yields alltrue([]) == true, so a deleted grant stays green.
   assert {
     condition = length(flatten([
       for policy in [
@@ -745,7 +721,7 @@ run "pass_role_stays_scoped_and_confined_to_ecs" {
         for s in jsondecode(policy).Statement : s if contains(flatten([s.Action]), "iam:PassRole")
       ]
     ])) == 3
-    error_message = "All three launcher policies must carry an iam:PassRole grant. Without it RunTask fails with 'ECS was unable to assume the role' and no scan ever starts."
+    error_message = "All three launcher policies must carry an iam:PassRole grant."
   }
 
   assert {
@@ -761,7 +737,7 @@ run "pass_role_stays_scoped_and_confined_to_ecs" {
           if contains(flatten([s.Action]), "iam:PassRole")
       ])
     ])
-    error_message = "Every iam:PassRole grant must be confined to ecs-tasks.amazonaws.com and to the two scanner roles. The scanner task role holds this policy itself, so that condition is the only thing stopping code in the container passing these roles to any service."
+    error_message = "iam:PassRole must be confined to ecs-tasks.amazonaws.com and the two scanner roles."
   }
 }
 
@@ -773,7 +749,7 @@ run "kms_grants_are_present_by_default" {
       [for s in jsondecode(aws_iam_role_policy.task.policy).Statement : s.Sid],
       "ReadEncryptedVolumes"
     )
-    error_message = "The KMS grant must be present by default. Without it, CMK-encrypted volumes fail with ResourceNotFoundException rather than AccessDenied, so they drop out of results with the apply succeeding and the console showing the region healthy."
+    error_message = "The ReadEncryptedVolumes KMS grant must be present by default."
   }
 }
 
@@ -789,7 +765,7 @@ run "kms_grants_can_be_dropped" {
       for s in jsondecode(aws_iam_role_policy.task.policy).Statement :
       s if startswith(s.Sid, "ReadEncryptedVolumes") || startswith(s.Sid, "GrantEC2")
     ]) == 0
-    error_message = "scan_encrypted_volumes = false must remove the KMS statements entirely, not merely stop using them."
+    error_message = "scan_encrypted_volumes = false must remove the KMS statements."
   }
 }
 
@@ -798,6 +774,14 @@ run "kms_grants_can_be_scoped_to_named_keys" {
 
   variables {
     kms_key_arns = ["arn:aws:kms:us-east-1:111111111111:key/abcd"]
+  }
+
+  assert {
+    condition = length([
+      for s in jsondecode(aws_iam_role_policy.task.policy).Statement :
+      s if startswith(s.Sid, "ReadEncryptedVolumes")
+    ]) == 1
+    error_message = "The KMS statement vanished when kms_key_arns was set."
   }
 
   assert {
@@ -810,9 +794,7 @@ run "kms_grants_can_be_scoped_to_named_keys" {
   }
 }
 
-# Now caught by the variable's own validation, which names the offending input
-# instead of reporting a precondition failure against aws_ecs_task_definition
-# after the whole graph has been evaluated.
+# Caught by the variable's own validation, which names the offending input.
 run "whitespace_only_customer_id_is_rejected" {
   command = plan
 
@@ -845,7 +827,7 @@ run "customer_id_is_trimmed" {
       for pair in ["COLLECTOR_CUSTOMER_ID=customer-abc", "COLLECTOR_STREAM_SCAN_WORKSPACE=customer-abc"] :
       contains([for e in jsondecode(aws_ecs_task_definition.this.container_definitions)[0].environment : "${e.name}=${e.value}"], pair)
     ])
-    error_message = "A pasted workspace id with surrounding whitespace must be trimmed — shipping it verbatim tags every SBOM with a workspace that does not exist and ingest drops them silently."
+    error_message = "customer_id must be trimmed before it reaches the container."
   }
 }
 
@@ -869,9 +851,8 @@ run "invalid_fargate_cpu_is_rejected" {
   expect_failures = [var.task_cpu]
 }
 
-# Fargate accepts only 512, 1024 and 2048 MiB at 256 CPU — the 256 row is the one
-# irregular entry in the matrix, and modelling it as a 512 MiB step let 1536
-# through to fail at RegisterTaskDefinition mid-apply.
+# Fargate accepts only 512, 1024 and 2048 MiB at 256 CPU — the one irregular row;
+# modelling it as a 512 MiB step let 1536 through to fail mid-apply.
 run "irregular_fargate_256_row_rejects_1536" {
   command = plan
 
@@ -916,7 +897,7 @@ run "tenant_name_can_be_overridden" {
 
   assert {
     condition     = contains([for e in jsondecode(aws_ecs_task_definition.this.container_definitions)[0].environment : "${e.name}=${e.value}"], "COLLECTOR_TENANT_NAME=acme-prod")
-    error_message = "tenant_name must override the value derived from the host URL, for tenants behind a shared endpoint, custom CNAME or PrivateLink DNS."
+    error_message = "tenant_name must override the value derived from the host URL."
   }
 }
 

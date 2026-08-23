@@ -1,31 +1,23 @@
 # terraform-streamsec-aws-account/volume-scanner
 
-Terraform module for the Stream Agentless Scanner (EBS) — agentless vulnerability scanning of your EC2 instances, Lambda functions and Fargate task images.
+Terraform module for the Stream Agentless Scanner (EBS) — agentless vulnerability scanning of your EC2 instances, Lambda functions and Fargate task images. A Fargate task runs on a schedule, snapshots EBS volumes, extracts SBOMs, and ships them to Stream Security for CVE matching. No agents on your instances, no credentials granted to Stream.
 
-A Fargate task runs on a schedule, snapshots EBS volumes, extracts SBOMs, and ships them to Stream Security for Grype-based CVE matching. No agents are installed on your instances, and Stream is granted no credentials in your account.
+This is the Terraform equivalent of the CloudFormation stack the console deploys from **Integrations → Vulnerability Scanners → Stream Agentless Scanner**. Deploy a region with one or the other, not both.
 
-This is the Terraform equivalent of the CloudFormation stack the Stream console deploys from **Integrations → Vulnerability Scanners → Stream Agentless Scanner**. Deploy a region with one or the other, not both.
+> **Migrating from the CloudFormation stack: delete it first.** The module refuses to apply while the console's scanner is deployed in the region, and tells you so. Every resource that could collide with the stack's is named `streamsec-ebs-scanner-**tf**-…`, deliberately distinct: `ecs:CreateCluster` is an upsert, so an identically named cluster is *silently adopted* rather than rejected, and a later `terraform destroy` would delete the cluster the live stack depends on. Set `allow_cloudformation_coexistence = true` to run both deliberately — each then scans every volume, and each one's retention sweep deletes snapshots tagged `Purpose=ebs-package-collector` account-wide, including the other's.
 
-> **Migrating from the CloudFormation stack: delete it first.** The module refuses to apply while the console's CloudFormation scanner is still deployed in the region, and tells you so. Delete that stack, let it finish, then apply.
->
-> Every resource whose name could collide with the CloudFormation stack's — the ECS cluster, task definition, log group, IAM roles, security groups — is named `streamsec-ebs-scanner-**tf**-…`, deliberately distinct from the stack's `streamsec-ebs-scanner-…`. (The collection-token secret is the exception: it is named from `collection_token_secret_name` plus a random suffix, so it cannot collide with anything regardless.) That is a safety property, not cosmetics: `ecs:CreateCluster` is an upsert, so an identical cluster name is *silently adopted* rather than rejected, and a later `terraform destroy` would delete the cluster the live stack depends on.
->
-> Set `allow_cloudformation_coexistence = true` to run both deliberately — but note they will each scan every volume, and each one's retention sweep deletes snapshots tagged `Purpose=ebs-package-collector` account-wide, including the other's.
+> **Registration is not wired up yet.** `streamsec_aws_scanner_ack` does not exist in any published provider release, so it is commented out in `ack.tf`. The region still appears in the console — the scanner's own scan reports create the entry, stamped `deployed`, so the badge reads **Connected**. Two gaps until the provider ships it: `terraform destroy` never reports `uninstalled` and the stack metadata stays blank; and on a region ever touched from the console (including merely generating the template) the entry already exists, so scan reports only merge scan fields onto it and the install-state badge keeps whatever the console last set. On those regions ignore the badge and read the scan-status column.
 
-> **Registration is not wired up yet.** The `streamsec_aws_scanner_ack` resource that reports install state back to Stream does not exist in any published provider release, so it is commented out in `ack.tf`. The region still appears in the console: the scanner's own progress reports create the entry on first scan, and a region Stream creates that way is stamped `deployed`, so the badge reads **Connected**. Two gaps remain until the provider ships the resource. First, `terraform destroy` does not report `uninstalled`, and the stack metadata (`stack_id`, `stack_region`, `deployed_at`) stays blank. Second, if the region was ever touched from the console — including merely generating the template, which records `pending` — the entry already exists, so the scanner's reports only merge scan fields onto it and the install-state badge keeps whatever the console last set (`pending`, `failed`, or `uninstalled`) indefinitely. On such a region, ignore the install-state badge and read the scan-status column, which the scanner does keep current. Uncomment the block once the provider ships it.
-
-> **First-time setup: run `terraform apply` twice.**
-> This module needs your Stream Security account to be set up before it can run. If you're deploying both for the first time in the same configuration, apply the account module first, then apply everything:
+> **First-time setup: run `terraform apply` twice.** Your Stream Security account must exist before this module can run.
 > ```bash
 > # Replace "account" with the name you gave the Stream Security account module
 > terraform apply -target=module.account
 > terraform apply
 > ```
-> After that, normal `terraform apply` works as usual.
 
 ## What the console asks you for
 
-Deploying from **Integrations → Vulnerability Scanners → Stream Agentless Scanner** presents exactly eleven parameters. Each maps to one module input, with the same default:
+The console template presents exactly eleven parameters. Each maps to one module input, with the same default:
 
 | Console parameter | Module input | Default |
 |---|---|---|
@@ -41,20 +33,16 @@ Deploying from **Integrations → Vulnerability Scanners → Stream Agentless Sc
 | `VpcId` | `vpc_id` | — (bring-your-own-network only) |
 | `SubnetIds` | `subnet_ids` | — (bring-your-own-network only) |
 
-`create_scanner_vpc` is the only input with no console parameter behind it. In the console the choice is made when the template is *generated* (`create_network`), not when it is deployed; a Terraform module has no generation step, so it has to be an input. `vpc_id` and `subnet_ids` are what the console renders when that choice is "use my own network".
+`create_scanner_vpc` is the only input with no console parameter behind it: the console makes that choice when the template is *generated* (`create_network`), and a module has no generation step. `vpc_id` and `subnet_ids` are what it renders when the choice is "use my own network".
 
-Everything else the module exposes is under **Advanced** in `variables.tf`. The console does not offer those — the CloudFormation template hardcodes them — and every default reproduces the template's own value: `4096`/`16384` CPU and memory, 50 GiB ephemeral storage, 30-day log retention, `10.255.0.0/24` for the scanner VPC, `cron(0 3 * * ? *)` enabled, and a 30-day secret recovery window. **Setting nothing but the console parameters gives you the console's deployment.**
+Every other input is one the CloudFormation template hardcodes, and its default here reproduces the template's value. **Setting nothing but the console parameters gives you the console's deployment**, with two intentional differences:
 
-Two intentional differences are worth knowing, because both are visible:
-
-- **Resource names carry a `-tf` marker.** `ecs:CreateCluster` is an upsert, so a cluster named identically to the console stack's would be silently adopted and a later `terraform destroy` would delete it out from under the live stack.
-- **The public subnet does not auto-assign public IPs**, where the template sets `MapPublicIpOnLaunch: true`. Nothing is ever launched into that subnet — it holds the NAT gateway, which uses an Elastic IP — so the template's value buys nothing and trips CIS "ensure subnets do not auto-assign public IPs".
+- **Resource names carry a `-tf` marker**, for the cluster-adoption reason above.
+- **The public subnet does not auto-assign public IPs**, where the template sets `MapPublicIpOnLaunch: true`. Nothing is ever launched there — it holds the NAT gateway, which uses an Elastic IP — so the template's value buys nothing and trips CIS "ensure subnets do not auto-assign public IPs".
 
 ## Usage
 
-The module is per account **and** region — deploy one instance per region you want scanned.
-
-Planning calls `ecs:ListClusters` to check no CloudFormation-deployed scanner is already running in the region, so the deploying principal needs that permission.
+One instance per account **and** region. Planning calls `ecs:ListClusters` to check for a CloudFormation-deployed scanner, so the deploying principal needs that permission.
 
 ```hcl
 # Basic — dedicated VPC with a NAT gateway, scanning us-east-1
@@ -79,108 +67,76 @@ module "volume_scanner_us_east_2" {
   }
   depends_on = [module.account]
 }
-
-# Turn on the optional scanners
-module "volume_scanner_eu_west_1" {
-  source            = "streamsec-terraform/aws-account//modules/volume-scanner"
-  customer_id       = "your-workspace-id"
-  scan_secrets      = true
-  scan_ai_workloads = true
-  scan_databases    = true
-  providers = {
-    aws = aws.eu-west-1
-  }
-  depends_on = [module.account]
-}
 ```
 
-`customer_id` is the same value you set as `workspace_id` on the `streamsec` provider. It becomes optional once the provider exposes it as a data source attribute.
+The optional scanners — `scan_secrets`, `scan_ai_workloads`, `scan_databases` — are off by default; set them to `true` to enable.
 
-`tenant_name` defaults to the first DNS label of the provider's host, which is right for a per-tenant hostname like `https://acme.streamsec.io`. If your console is reached through a shared or regional endpoint, a custom CNAME, or PrivateLink endpoint DNS, set `tenant_name` explicitly — otherwise the scanner tags every SBOM with a tenant that does not exist, ingest drops them, and you see zero findings with no error anywhere.
+`customer_id` is the same value you set as `workspace_id` on the `streamsec` provider. `tenant_name` defaults to the first DNS label of the provider host; set it explicitly behind a shared endpoint, custom CNAME or PrivateLink DNS, or the scanner tags every SBOM with a tenant that does not exist and ingest drops them silently.
 
 ## Networking
 
-By default (`create_scanner_vpc = true`) the module provisions a dedicated `10.255.0.0/24` VPC in a single availability zone, split into two `/25`s:
+By default (`create_scanner_vpc = true`) the module provisions a dedicated `10.255.0.0/24` VPC in one availability zone, split into two `/25`s: a public half holding only the NAT gateway, and a private half where the scanner runs with no public IP. **A NAT gateway costs roughly $32/month idle per region plus ~$0.045/GB processed** — a deliberate trade-off, since a public IP on the task fails SOC 2, CIS AWS Foundations and PCI-DSS baselines.
 
-- **public** — holds the NAT gateway only, with auto-assign public IP off. No Fargate task ever runs here.
-- **private** — where the scanner runs, with no public IP. Egress goes out through the NAT gateway's Elastic IP.
+The NAT gateway's Elastic IP is stable across NAT replacements and exposed as the `nat_gateway_public_ip` output, so you can allowlist one egress IP instead of the whole Fargate range. Destroy-then-apply **releases** it and allocates a new one, staling that allowlist silently; an in-place `scanner_vpc_cidr` change keeps it.
 
-Destroy-then-apply **releases** that Elastic IP and allocates a new one, so an upstream allowlist pointing at it goes stale silently. An in-place `scanner_vpc_cidr` change keeps it.
+The module also creates two **VPC endpoints** here: interface for `com.amazonaws.<region>.ebs`, gateway for S3. Snapshot block reads dominate the scanner's egress and NAT data processing costs ~4.5x the PrivateLink rate, so this took NAT inbound for one scan on a three-instance eu-west-1 fleet from **3,385 MiB to 122 MiB**. The interface endpoint adds ~$7.30/month; the S3 gateway endpoint is free. The image pull still goes via the NAT, since `public.ecr.aws` is CloudFront-fronted. Set `create_ebs_vpc_endpoint = false` where that EBS service is unavailable in your region or partition.
 
-That Elastic IP is stable across NAT gateway replacements, so you can allowlist a single upstream egress IP instead of the whole Fargate range. It's exposed as the `nat_gateway_public_ip` output.
+### Bring your own subnets
 
-By default the module also creates two **VPC endpoints** in that VPC: an interface endpoint for `com.amazonaws.<region>.ebs` and a gateway endpoint for S3. Snapshot block reads are the scanner's dominant egress, and NAT data processing costs roughly 4.5x the PrivateLink rate for the same bytes. Measured on a three-instance fleet in eu-west-1, this took NAT inbound traffic for one scan from **3,385 MiB to 122 MiB — a 96% reduction** — with the scan result unchanged. The interface endpoint adds ~$7.30/month; the S3 gateway endpoint is free.
+`create_scanner_vpc = false` with `vpc_id` + `subnet_ids` avoids a second NAT gateway. The module then creates **no** VPC endpoints — it does not own that VPC, and a second S3 gateway endpoint on a route table that already has one fails with `RouteAlreadyExists`. Add an EBS interface endpoint yourself for the same saving.
 
-PrivateLink keeps those bytes off the NAT and off the public internet. It does not mean they stay inside your VPC — the endpoint ENI is the entry point to an AWS-managed service that lives outside it. The scanner's own image pull still egresses via the NAT, since `public.ecr.aws` is CloudFront-fronted.
+Each supplied subnet is validated for a `0.0.0.0/0` route to a **NAT gateway, NAT instance, inspection/firewall ENI, VPC endpoint, Transit Gateway, virtual private gateway, Cloud WAN core network, or Outposts local gateway** — the task has no public IP, so an Internet Gateway route is a black hole — plus membership in `vpc_id`, a standard availability zone (no Local Zones or Wavelength; Fargate is not offered there), an IPv4 CIDR, VPC DNS resolution, and enough addresses for the peak task count. A failure names the subnet and the reason, instead of an opaque `ResourceInitializationError` later.
 
-Set `create_ebs_vpc_endpoint = false` if `com.amazonaws.<region>.ebs` is unavailable in your region or partition.
+Three limits of that check:
 
-**A NAT gateway costs roughly $32/month idle per region, plus ~$0.045/GB processed.** That's a deliberate trade-off: running the scanner with a public IP fails SOC 2, CIS AWS Foundations and PCI-DSS baselines that flag public IPs on compute.
+- **Only a literal `0.0.0.0/0` route counts.** A default route via a **managed prefix list** is rejected: its contents are not readable from the route table, and the commonest one in a private subnet is the S3 gateway endpoint. Set `validate_subnet_egress = false` if yours genuinely is a prefix list.
+- **Capacity is judged from CIDR size, not free addresses, and from the smallest subnet, not the sum** — the free count drops while the scanner's own children run, and ECS placement is best-effort so the whole fan-out can land in one subnet. A large but busy shared subnet passes and can still exhaust at scan time.
+- **A blackholed default route passes.** `aws_route_table` exposes no route state, so one whose NAT gateway was deleted still validates. The CloudFormation precheck catches this; this does not.
 
-In bring-your-own-subnet mode the module creates **no** VPC endpoints — it does not own that VPC, and a second S3 gateway endpoint on a route table that already has one fails with `RouteAlreadyExists`. Add an interface endpoint for `com.amazonaws.<region>.ebs` to your own VPC to get the same saving.
+> **When these checks run.** Plan time — but only while Terraform can read the module's data sources. The `depends_on = [module.account]` in every example defers those reads whenever `module.account` has pending changes, moving the checks to **apply**, where a bad subnet leaves the secret, cluster, log group, IAM roles and EventBridge rule behind before failing. Applying the account module on its own first keeps them at plan time.
 
-To avoid the second NAT gateway, set `create_scanner_vpc = false` and supply `vpc_id` + `subnet_ids`. Each subnet must have a `0.0.0.0/0` route to a **NAT gateway, NAT instance, inspection/firewall appliance ENI, VPC endpoint, Transit Gateway, virtual private gateway (VPN / Direct Connect), Cloud WAN core network, or Outposts local gateway** — the scanner task launches with no public IP, so a public subnet routed through an Internet Gateway is a black hole. The module validates this at plan time and tells you exactly which subnet is wrong and why, rather than letting the task fail later with an opaque `ResourceInitializationError`.
+> **A VPC endpoint alone is not enough to reach Stream.** The egress check accepts a default route to a VPC endpoint, but SBOM upload goes to your tenant's **public** hostname and this module has no `enable_privatelink` support yet. Such a subnet passes validation and then times out on every upload.
 
-> **When these checks run.** They are plan-time checks *when Terraform can read the module's data sources*. The `depends_on = [module.account]` wiring every example here uses makes Terraform defer those reads whenever `module.account` has pending changes — on a first apply, or any apply that also changes the account module — so the checks move to **apply** and a bad subnet can leave the secret, cluster, log group, IAM roles and EventBridge rule behind before failing. Applying the account module on its own first (see the two-step note above) keeps them at plan time.
+If `subnet_ids` are created in the same apply (`module.vpc.private_subnets`, `aws_subnet.x[*].id`), the list length is unknown at plan and no `for_each`-keyed check can run. Set `validate_subnet_egress = false`; that disables **all** of the supplied-subnet checks above, and the subnets are used as given.
 
-If your `subnet_ids` are created in the same apply (`module.vpc.private_subnets`, `aws_subnet.x[*].id`), Terraform may not know the list length at plan time and the validation cannot be keyed off values that do not exist yet. Set `validate_subnet_egress = false` in that case; the subnets are used as given. Note that the flag switches off **both** supplied-subnet checks — the egress walk and the "is this subnet even in `vpc_id`" check — because a `for_each` over a list of unknown length is rejected whichever check it feeds.
-
-> **A VPC endpoint alone is not enough to reach Stream.** The egress check accepts a subnet whose default route targets a VPC endpoint, but the scanner uploads SBOMs to your tenant's **public** hostname. Unlike `real-time-events` and `flow-logs`, this module has no `enable_privatelink` support yet, so a subnet with no internet path will pass validation and then time out on every upload. Until PrivateLink lands here, give the scanner a subnet with real egress.
-
-Supplied subnets are also checked for VPC membership, a standard availability zone (Fargate is not offered in Local Zones), an IPv4 CIDR, enough addresses for the peak task count, and that their VPC has DNS resolution enabled — without it the task cannot resolve the EBS Direct API or Stream ingest, and every scan fails while the deployment looks healthy.
-
-Only a literal `0.0.0.0/0` route counts. A default route expressed as a **managed prefix list** is *not* accepted: a prefix list's contents are not readable from the route table, and the commonest one in a private subnet is the S3 gateway endpoint, which says nothing about internet access — accepting it let subnets with no internet path through. Likewise a `vpce-` gateway route is never internet egress. If your default route genuinely is a prefix list, set `validate_subnet_egress = false`.
-
-The module also checks that the **smallest** supplied subnet is large enough for the peak ENI count — `max_concurrent_shards`, plus the orchestrator, plus one workload child when `workload_kinds` is set. It uses the subnet's **CIDR size**, not its current free-address count: the live count drops while the scanner's own children are running, which would refuse any apply that overlapped a scan. The minimum rather than the sum, because ECS placement across a subnet list is best-effort and the whole fan-out can land in one subnet.
-
-The trade-off is that a large but heavily-used shared subnet passes this check and can still exhaust at scan time. Supplied subnets are also rejected if they sit in a Local Zone or Wavelength zone, where Fargate is not offered, or if they have no IPv4 CIDR.
-
-One gap versus the CloudFormation precheck: the `aws_route_table` data source exposes no route *state*, so a blackholed default route — one whose NAT gateway was deleted — still passes validation.
-
-The VPC choice only controls the scanner's **egress**. It scans the whole account/region through the EBS Direct API regardless of which VPC the scanned workloads live in.
+The VPC choice controls only the scanner's **egress**. It scans the whole account/region through the EBS Direct API regardless of where the scanned workloads live.
 
 ## Scanning schedule
 
-A single EventBridge rule fires the scanner daily at 03:00 UTC. The scanner is an orchestrator: it discovers instances and fans out one child Fargate task per shard, capped by `max_concurrent_shards`. The defaults (100 instances per shard, 10 concurrent) cover roughly 1000 instances per wave.
+One EventBridge rule fires the scanner daily at 03:00 UTC. The scanner is an orchestrator: it discovers instances and fans out one child Fargate task per shard, capped by `max_concurrent_shards`. The defaults (100 instances per shard, 10 concurrent) cover roughly 1000 instances per wave. Concurrency is bounded by task memory — Syft uses 250–400 MB per concurrent host scan, so raise `task_memory` first.
 
-Each concurrent task takes one private IP in the scanner subnet. If you shrink `scanner_vpc_cidr`, the module checks at plan time that the private half still holds `max_concurrent_shards + 1` ENIs — plus one more when `workload_kinds` is set, against a usable count that also excludes the EBS endpoint ENI, rather than letting the fan-out die part-way through. The default `/24` holds the maximum concurrency with room to spare.
+Each concurrent task takes one private IP. If you shrink `scanner_vpc_cidr`, the module checks at plan time that the private half still holds `max_concurrent_shards + 1` ENIs, plus one more when `workload_kinds` is set, against a count that also excludes the EBS endpoint ENI. The default `/24` has room to spare.
 
-By default the module also fires **one immediate scan at apply time**, so you don't wait for the first scheduled run. The trigger retries the failures that clear on their own — chiefly IAM eventual consistency, since the policies the task needs were attached seconds earlier by the same apply. Anything left after that is swallowed: the daily schedule is the fallback, and the details land in the initial-scan Lambda's CloudWatch logs. Set `trigger_initial_scan = false` to skip it.
+The module also fires **one immediate scan at apply time** so you don't wait for the first scheduled run. It retries the failures that clear on their own — chiefly IAM eventual consistency, the task's policies having been attached seconds earlier. Anything left is swallowed: the daily schedule is the fallback and the details land in the initial-scan Lambda's logs. Set `trigger_initial_scan = false` to skip it.
 
-Use a cron expression if you override `schedule_expression`. An EventBridge `rate(...)` rule fires once at rule creation *as well as* on the interval, which would duplicate the first scan.
+Override `schedule_expression` with a cron expression only. An EventBridge `rate(...)` rule fires at rule creation *as well as* on the interval, duplicating the first scan.
 
 ## Permissions granted
 
-The collection token the scanner authenticates uploads with is stored in Secrets Manager and injected through the task definition's `secrets` block, never as a plaintext environment variable. That keeps it out of the task definition, which anything holding `ecs:DescribeTaskDefinition` can read — including the scanner task role itself. It does **not** keep it out of Terraform state: `aws_secretsmanager_secret_version` stores the value in state in plaintext, so treat your state file as secret material either way.
-
-The secret's name carries a random suffix, so read it from the `collection_token_secret_name` / `collection_token_secret_arn` outputs rather than reconstructing it. That suffix is what makes `terraform destroy` followed by `terraform apply` work with a non-zero `secret_recovery_window_days`.
+The collection token is injected through the task definition's `secrets` block from Secrets Manager, never as a plaintext environment variable — anything with `ecs:DescribeTaskDefinition`, including the scanner task role, can read that. It is **not** kept out of Terraform state: `aws_secretsmanager_secret_version` stores it in plaintext, so treat state as secret material. The secret name carries a random suffix, which is what makes destroy-then-apply work with a non-zero `secret_recovery_window_days`, so read it from the `collection_token_secret_name` / `collection_token_secret_arn` outputs.
 
 The task role is least-privilege:
 
 - read-only `ec2:Describe{Instances,Volumes,Snapshots}`
 - `ec2:CreateSnapshot`, with tagging restricted to `Purpose = ebs-package-collector`
-- `ec2:DeleteSnapshot` and EBS-direct block reads **only** on snapshots carrying that tag
-
-  The tag is a scoping condition, not a proof of ownership. `Purpose=ebs-package-collector` is a constant shared by every Stream deployment, so any principal in the account that holds `ec2:CreateTags` on snapshots — routinely granted to developers, cost-allocation tooling and CI, and which confers no deletion rights on its own — can apply it to a snapshot you care about and have the scanner's next retention sweep delete it, and its blocks read by the scanner container in the meantime. Scope `ec2:CreateTags` accordingly. A per-deployment tag value would close this, but the scanner image applies the tag itself, so the value is not configurable from this module
-- read-only Lambda, ECS and ECR access for workload scanning, granted per kind: `workload_kinds = "ecs"` gets no account-wide `lambda:GetFunction` (which downloads function code) and `workload_kinds = "lambda"` gets no account-wide ECS task/task-definition read. Setting it to `""` removes all of them — it does not merely stop using them
-- `ecs:RunTask` scoped to the scanner's own cluster, so none of these roles can launch the task into another cluster in the account
-- KMS access for **encrypted** EBS volumes: exactly `kms:Decrypt` and `kms:DescribeKey`, and only via `kms:ViaService = ec2.<region>` — so the role can decrypt volumes through the EC2/EBS data plane and cannot touch the same CMK when it protects S3, RDS or Secrets Manager. This matches the CloudFormation template exactly
+- `ec2:DeleteSnapshot` and EBS-direct block reads **only** on snapshots carrying that tag. The tag scopes access, it does not prove ownership: the value is a constant shared by every Stream deployment, so any principal holding `ec2:CreateTags` on snapshots can apply it to a snapshot you care about and have the next retention sweep delete it. Scope `ec2:CreateTags` accordingly — the scanner image sets the tag itself, so the value is not configurable here
+- read-only Lambda, ECS and ECR access granted per `workload_kinds`: `"ecs"` gets no account-wide `lambda:GetFunction` (which downloads function code), `"lambda"` gets no account-wide ECS read, `""` removes all of them
+- `ecs:RunTask` scoped to the scanner's own cluster
+- for **encrypted** volumes, exactly `kms:Decrypt` and `kms:DescribeKey` and only via `kms:ViaService = ec2.<region>`, so the role cannot touch the same CMK when it protects S3, RDS or Secrets Manager. Matches the CloudFormation template exactly
 
 ### Encrypted volumes
 
-Volumes encrypted with a **customer-managed CMK** need the scanner's identity policy to allow that key. A CMK's default key policy delegates authorisation to IAM, so the EBS direct API rejects the block reads without it — and it reports the rejection as `ResourceNotFoundException: KMS key not found`, not as an access-denied. Without the grants the scanner snapshots the volume successfully and then fails every block read: the task exits, `terraform apply` reports success, the console shows the region healthy, and you see zero findings for those instances.
+Volumes on a **customer-managed CMK** need that key allowed in the scanner's identity policy, because a CMK's default key policy delegates authorisation to IAM. Without it the snapshot succeeds and every block read fails — reported as `ResourceNotFoundException: KMS key not found`, not access-denied — so the task exits, `terraform apply` reports success, the console shows the region healthy, and those instances silently return zero findings. Volumes on the AWS-managed `aws/ebs` key are unaffected, so the gap only bites accounts using their own CMKs.
 
-Volumes encrypted with the **AWS-managed `aws/ebs` key** scan fine without these grants — that key policy grants account principals directly. So the gap only bites accounts using their own CMKs, which is most regulated ones.
-
-`scan_encrypted_volumes` is therefore **on by default**. It defaults to `kms_key_arns = ["*"]` because customer CMK ARNs are not knowable at plan time; narrow it to your region's EBS keys if you can enumerate them, or set `scan_encrypted_volumes = false` to drop the grants entirely and accept that encrypted instances go unscanned.
-
-## If an apply fails partway
-
-Terraform does not roll back. An apply that fails after the NAT gateway exists leaves it — and its Elastic IP — billing until you clean up, where the CloudFormation stack would have self-cleaned. Run `terraform destroy`, or fix the input and re-apply.
+`scan_encrypted_volumes` is therefore on by default with `kms_key_arns = ["*"]`, since customer CMK ARNs are not knowable at plan time. Narrow it if you can enumerate your region's EBS keys, or set it false to drop the grants and accept that encrypted instances go unscanned.
 
 ## Uninstalling
 
-`terraform destroy` removes everything in your account **provided no scan is running**. Scanner tasks are launched out of band, so Terraform has no dependency on them: a destroy that overlaps a scan tears down the IAM policies, task definition, secret and log groups first, then fails on the cluster after 10 minutes and the subnets after 20, leaving the VPC, NAT gateway and Elastic IP behind — and the running orchestrator loses the only permission that can delete the snapshots it created. Set `schedule_enabled = false`, apply, wait for tasks to drain, then destroy. It does not yet report the region as uninstalled to Stream — that happens once the `streamsec_aws_scanner_ack` block in `ack.tf` is enabled. Until then the region keeps the green **Connected** install-state badge its first scan report set, even though nothing is deployed; the *scan* status is the honest signal — it goes stale once the heartbeats stop.
+`terraform destroy` removes everything **provided no scan is running**. Scanner tasks are launched out of band, so Terraform has no dependency on them: a destroy overlapping a scan tears down the IAM policies, task definition, secret and log groups first, then fails on the cluster after 10 minutes and the subnets after 20 — leaving the VPC, NAT gateway and Elastic IP behind, and stripping the running orchestrator of the only permission that can delete the snapshots it created. Set `schedule_enabled = false`, apply, wait for tasks to drain, then destroy.
+
+Nothing reports the region as uninstalled to Stream until the `ack.tf` block is enabled, so the badge stays **Connected**; the scan status is the honest signal once heartbeats stop.
+
+A failed apply is not rolled back either. One that fails after the NAT gateway exists leaves it and its Elastic IP billing until you `terraform destroy` or fix the input and re-apply.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
@@ -318,23 +274,19 @@ No modules.
 | <a name="output_task_role_arn"></a> [task\_role\_arn](#output\_task\_role\_arn) | ARN of the IAM role the scanner task assumes |
 <!-- END_TF_DOCS -->
 
-## Raising throughput
-
-`max_concurrent_shards` is capped by task memory: Syft uses 250–400 MB per concurrent host scan, so raise `task_memory` before raising concurrency. Increasing concurrency also raises EBS Direct API call volume and Fargate launch throughput.
-
 ## Tests
 
 ```bash
 terraform test
 ```
 
+Mock providers throughout, no AWS API calls. Requires Terraform >= 1.7 for `mock_provider`, stricter than the module's own `required_version` of 1.3.
+
 ### The one case `terraform test` cannot cover
 
-`terraform test` can only supply **known** values through `variables`, so it cannot reproduce the failure mode this module has shipped twice:
+Tests can only supply **known** values through `variables`, so they cannot reproduce the failure this module has shipped twice against a green suite: when `vpc_id`/`subnet_ids` come from resources created in the same apply, their values are unknown at plan while the list **length** is known, and any for-expression with an `if` predicate over them becomes wholly unknown — making the index-keyed `byo_subnets` map unknown and failing every bring-your-own validation with `Invalid for_each argument`.
 
-> `vpc_id` and `subnet_ids` come from resources created in the same apply, so their values are unknown at plan while the list **length** is known. Any for-expression carrying an `if` predicate over those values becomes wholly unknown, which makes the index-keyed `byo_subnets` map unknown and fails every bring-your-own validation with `Invalid for_each argument`.
-
-Both times it was invisible to a fully green suite. **Reproduce it with a throwaway root module** after any change to `local.byo_vpc_id`, `local.byo_subnet_ids`, `local.byo_subnets`, or the data sources keyed off them:
+After any change to `local.byo_vpc_id`, `local.byo_subnet_ids`, `local.byo_subnets`, or the data sources keyed off them, plan a throwaway root module. It must succeed; `Invalid for_each argument` means a filter has been reintroduced.
 
 ```hcl
 resource "aws_vpc" "t" { cidr_block = "10.60.0.0/16" }
@@ -353,7 +305,3 @@ module "scanner" {
   subnet_ids         = aws_subnet.private[*].id
 }
 ```
-
-`terraform plan` must succeed. If it reports `Invalid for_each argument`, a filter has been reintroduced into one of those locals.
-
-Requires Terraform >= 1.7 for `mock_provider` — stricter than the module's own `required_version` of 1.3. The tests use mock providers throughout and make no AWS API calls.

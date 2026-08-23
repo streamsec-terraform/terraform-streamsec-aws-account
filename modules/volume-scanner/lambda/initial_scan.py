@@ -1,12 +1,9 @@
 """One-shot trigger that launches the first scanner task at apply time.
 
-Terraform has no native "run an ECS task" resource, so this mirrors the
-InitialScanTrigger custom resource in the CloudFormation template: without it a
-freshly deployed scanner produces nothing until the schedule's first fire.
-
-Errors are deliberately swallowed — this returns normally on failure so the
-apply is never rolled back over a first scan. The daily EventBridge rule is the
-fallback, and the failure is visible in this function's CloudWatch logs.
+Terraform has no "run an ECS task" resource; without this a fresh deployment
+produces nothing until the schedule first fires. Failures are swallowed so an
+apply is never rolled back over a first scan — the daily EventBridge rule is the
+fallback, and the error shows in this function's CloudWatch logs.
 """
 
 import os
@@ -14,27 +11,17 @@ import time
 
 import boto3
 
-# The invocation only re-runs when the Lambda itself is replaced — function_name
-# is ForceNew on aws_lambda_invocation — so a failure here is not retried: the scanner
-# just stays silent until the next scheduled fire. The most likely failure is IAM eventual
-# consistency — the role policies this task needs were attached seconds earlier
-# and may not have propagated yet — so retry the handful of errors that clear on
-# their own. Total sleep is bounded well inside the function's timeout.
-#
-# InvalidParameterException IS here, but only for the transient shape: ECS also
-# returns it for a subnet or security group created seconds earlier that it
-# cannot see yet. A permanently invalid configuration burns the ladder and fails
-# anyway, which costs 50s inside a blocking apply — acceptable next to skipping
-# the first scan entirely on a fresh deploy.
+# aws_lambda_invocation only re-invokes when the Lambda is replaced, so a failure
+# here is never retried. Retry the codes that clear on their own — usually IAM
+# propagation for role policies attached seconds earlier. InvalidParameterException
+# is listed for the same transient reason (subnet/SG not yet visible to ECS); a
+# genuinely bad config burns the full ~50s ladder before failing.
 RETRY_DELAYS_SECONDS = (5, 10, 15, 20)
 
 RETRYABLE_ERROR_CODES = frozenset(
     {
         # ECS returns ClientException — not AccessDenied — when it cannot yet
-        # assume a task or execution role created seconds earlier by the same
-        # apply ("ECS was unable to assume the role ... provided for this task").
-        # That is the precise IAM-propagation case this ladder exists for, and
-        # omitting it meant the ladder never once ran.
+        # assume a task/execution role created seconds earlier by the same apply.
         "ClientException",
         "AccessDeniedException",
         "AccessDenied",
@@ -47,11 +34,9 @@ RETRYABLE_ERROR_CODES = frozenset(
 
 
 def _error_code(exc):
-    # `or {}` rather than a default: botocore exceptions can carry a `response`
-    # attribute set to None, and .get on None raises AttributeError from inside
-    # the except block that exists to contain the failure — which would propagate
-    # out of handler(), fail the invocation, and abort the apply. The module
-    # promises the opposite in three places.
+    # `or {}` rather than a .get default: botocore exceptions can carry response
+    # set to None, and the AttributeError would escape the containing except block
+    # and fail the apply.
     response = getattr(exc, "response", None) or {}
     return (response.get("Error") or {}).get("Code", "")
 
@@ -59,12 +44,9 @@ def _error_code(exc):
 def handler(event, context):
     ecs = boto3.client("ecs")
 
-    # The daily rule and this one-shot both launch an orchestrator, and each
-    # orchestrator snapshots every volume in the region and fans out its own
-    # children. An apply that lands on the schedule — or one that renames the
-    # deployment while a scheduled run is in flight — would double snapshot and
-    # Fargate spend. That is the same collision the cron-only validation on
-    # schedule_expression exists to prevent, so refuse rather than pile on.
+    # The daily rule and this one-shot each launch an orchestrator that snapshots
+    # every volume in the region and fans out children, so an apply overlapping a
+    # scheduled run would double snapshot and Fargate spend.
     try:
         running = ecs.list_tasks(
             cluster=os.environ["CLUSTER_ARN"], desiredStatus="RUNNING"
@@ -116,8 +98,7 @@ def handler(event, context):
             return {"task_arn": task_arn, "failures": [str(f) for f in failures]}
 
         # RunTask can answer 200 with no task and a `failures` entry instead of
-        # raising — capacity, a still-propagating role, a bad subnet. Same
-        # situation as an exception, so it retries the same way.
+        # raising — capacity, a still-propagating role, a bad subnet. Retry it too.
         last_error = str(failures)[:256]
         print(f"initial scan run_task failures: {failures}")
 

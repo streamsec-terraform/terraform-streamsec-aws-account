@@ -32,10 +32,8 @@ locals {
   existing_cluster_arns = try(coalesce(data.aws_ecs_clusters.existing[0].cluster_arns, []), [])
 
   cloudformation_coexistence_error = <<-EOT
-    Another Stream scanner is already running in ${local.region}: ${local.cloudformation_scanner_present ? "the console's CloudFormation stack (ECS cluster \"${local.cloudformation_cluster_name}\")" : "another instance of this module (${join(", ", local.other_tf_scanner_clusters)})"}.
-    Running both scans every volume twice, doubles EBS-snapshot and ingest cost, and the two compete over snapshot retention — each deletes snapshots tagged Purpose=ebs-package-collector account-wide, including the other's.
-    Delete that CloudFormation stack and let it finish, then apply. To run both deliberately, set allow_cloudformation_coexistence = true.
-    ${local.cloudformation_scanner_present ? "" : "If you just changed resource_prefix, the cluster named above is your own previous one, not a second deployment — this guard matches on name and cannot tell them apart, because nothing readable at plan time records the prefix you used last time. Set allow_cloudformation_coexistence = true for that one rename apply, then unset it: the rename replaces the cluster, so the guard recognises the new name from the next apply onward."}
+    Another Stream scanner is already running in ${local.region}: ${local.cloudformation_scanner_present ? "the console's CloudFormation stack (ECS cluster \"${local.cloudformation_cluster_name}\")" : "another instance of this module (${join(", ", local.other_tf_scanner_clusters)})"}. Both scan every volume and delete each other's snapshots tagged Purpose=ebs-package-collector.
+    Remove that deployment, then apply. To run both deliberately, set allow_cloudformation_coexistence = true.${local.cloudformation_scanner_present ? "" : " After a resource_prefix rename the cluster above is your own previous one, which this name-based guard cannot tell apart: set the flag for that one apply, then unset it."}
   EOT
 
   # Maintenance apply: re-running the guard would lock an existing deployment out of destroy.
@@ -328,28 +326,28 @@ resource "aws_ecs_task_definition" "this" {
     # public.ecr.aws has no aws-cn presence, so fail at plan rather than at task start.
     precondition {
       condition     = local.partition != "aws-cn" || !startswith(var.scanner_image, "public.ecr.aws/")
-      error_message = "scanner_image still points at public.ecr.aws, which is not reachable from the aws-cn partition. Mirror the scanner image into an ECR registry in your China account and set scanner_image to it."
+      error_message = "scanner_image points at public.ecr.aws, which the aws-cn partition cannot reach. Mirror the image into an ECR registry in your China account and set scanner_image to it."
     }
 
     precondition {
       condition     = local.task_sizing_is_valid
-      error_message = "Fargate rejects task_cpu = ${var.task_cpu} with task_memory = ${var.task_memory}. At that CPU size the allowed memory values are ${join(", ", [for m in local.task_memory_allowed : tostring(m)])} MiB. Left unchecked this fails at RegisterTaskDefinition mid-apply, after the NAT gateway and Elastic IP are already billing."
+      error_message = "Fargate rejects task_cpu = ${var.task_cpu} with task_memory = ${var.task_memory}. At that CPU size the allowed memory values are ${join(", ", [for m in local.task_memory_allowed : tostring(m)])} MiB."
     }
 
     # Nothing else constrains the scheme: derived_tenant_name strips http:// as well.
     precondition {
       condition     = startswith(local.api_url, "https://")
-      error_message = "The Stream host resolved to \"${local.api_url}\", which is not https. The scanner posts SBOMs and its collection token to this URL over the NAT gateway; set the streamsec provider host to an https URL."
+      error_message = "The Stream host resolved to \"${local.api_url}\", which is not https. The scanner posts SBOMs and its collection token there; set the streamsec provider host to an https URL."
     }
 
     precondition {
       condition     = local.tenant_name != ""
-      error_message = "tenant_name resolved to an empty string. Leave it unset to derive the tenant from the provider host, or set it to your tenant name — an empty value tags every SBOM with a tenant that does not exist, ingest drops them, and the console still shows the region healthy."
+      error_message = "tenant_name resolved to an empty string, which tags every SBOM with a tenant that does not exist. Leave it unset to derive the tenant from the provider host, or set your tenant name."
     }
 
     precondition {
       condition     = local.customer_id != ""
-      error_message = "customer_id is required and must not be blank — set it to the same workspace_id configured on the streamsec provider. The scanner sends it as COLLECTOR_CUSTOMER_ID / COLLECTOR_STREAM_SCAN_WORKSPACE."
+      error_message = "customer_id is required and must not be blank: set it to the same workspace_id configured on the streamsec provider."
     }
   }
 }

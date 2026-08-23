@@ -57,7 +57,7 @@ variable "workload_kinds" {
       var.workload_kinds == "" ||
       length([for kind in split(",", var.workload_kinds) : kind if trimspace(kind) != ""]) > 0
     )
-    error_message = "workload_kinds must be a comma-separated subset of \"lambda\" and \"ecs\", or exactly \"\" to disable workload scanning. A whitespace-only or comma-only value would disable it silently and drop the workload IAM grants with it."
+    error_message = "workload_kinds must be a comma-separated subset of \"lambda\" and \"ecs\", or exactly \"\" to disable workload scanning."
   }
 }
 
@@ -70,7 +70,7 @@ variable "shard_size" {
 
   validation {
     condition     = var.shard_size >= 1 && var.shard_size <= 5000 && floor(var.shard_size) == var.shard_size
-    error_message = "shard_size must be a whole number between 1 and 5000. It is passed to the scanner as COLLECTOR_SHARD_SIZE, which parses an integer."
+    error_message = "shard_size must be a whole number between 1 and 5000."
   }
 }
 
@@ -82,7 +82,7 @@ variable "max_concurrent_shards" {
 
   validation {
     condition     = var.max_concurrent_shards >= 1 && var.max_concurrent_shards <= 100 && floor(var.max_concurrent_shards) == var.max_concurrent_shards
-    error_message = "max_concurrent_shards must be a whole number between 1 and 100. A fraction is shipped verbatim as COLLECTOR_MAX_CONCURRENT_SHARDS and also makes the subnet capacity check compare against a fractional ENI count."
+    error_message = "max_concurrent_shards must be a whole number between 1 and 100."
   }
 }
 
@@ -110,7 +110,7 @@ variable "subnet_ids" {
   # wholly unknown, breaking the index-keyed validation. Reject them at the input.
   validation {
     condition     = alltrue([for id in var.subnet_ids : trimspace(id) != ""])
-    error_message = "subnet_ids must not contain blank entries. An empty or whitespace-only id reaches RunTask verbatim and every task fails to launch after an otherwise clean apply."
+    error_message = "subnet_ids must not contain blank entries: a blank id reaches RunTask verbatim and every task fails to launch."
   }
 }
 
@@ -169,7 +169,7 @@ variable "scanner_vpc_cidr" {
   validation {
     # Every operand is total (try) — Terraform only short-circuits && / || from v1.12.
     condition     = can(cidrsubnet(var.scanner_vpc_cidr, 1, 1)) && try(tonumber(split("/", var.scanner_vpc_cidr)[1]), 0) <= 27 && try(tonumber(split("/", var.scanner_vpc_cidr)[1]), 0) >= 16
-    error_message = "scanner_vpc_cidr must be a valid IPv4 CIDR block between /16 and /27. AWS rejects VPCs larger than /16, and the block is split into two subnets, which AWS rejects below /28."
+    error_message = "scanner_vpc_cidr must be a valid IPv4 CIDR block between /16 and /27: AWS rejects anything larger, and the block is split into two subnets."
   }
 }
 
@@ -200,7 +200,7 @@ variable "schedule_expression" {
     condition = startswith(var.schedule_expression, "cron(") && endswith(var.schedule_expression, ")") && length(
       compact(split(" ", trimspace(replace(replace(var.schedule_expression, "cron(", ""), ")", ""))))
     ) == 6
-    error_message = "schedule_expression must be a closed six-field cron(...) expression. A rate(...) rule fires once at creation as well as on its interval, racing a second full-account orchestrator against the initial scan and doubling snapshot and Fargate spend."
+    error_message = "schedule_expression must be a closed six-field cron(...) expression: a rate(...) rule fires once at creation as well as on its interval, duplicating the first scan."
   }
 }
 
@@ -292,7 +292,7 @@ variable "customer_id" {
   # Checked here so a blank value names this input rather than failing deep in the graph.
   validation {
     condition     = var.customer_id == null ? true : trimspace(var.customer_id) != ""
-    error_message = "customer_id must not be blank. It is sent as COLLECTOR_CUSTOMER_ID / COLLECTOR_STREAM_SCAN_WORKSPACE, and a blank value tags every SBOM with a workspace that does not exist — ingest drops them and the console still shows the region healthy."
+    error_message = "customer_id must not be blank: a blank value tags every SBOM with a workspace that does not exist and ingest drops them. Set it to the streamsec provider's workspace_id."
   }
 }
 
@@ -302,7 +302,7 @@ variable "tenant_name" {
   default     = null
   validation {
     condition     = var.tenant_name == null ? true : trimspace(var.tenant_name) != ""
-    error_message = "tenant_name must not be blank. Leave it unset to derive the tenant from the provider host — a blank value tags every SBOM with a tenant that does not exist, ingest drops them, and the console still shows the region healthy."
+    error_message = "tenant_name must not be blank. Leave it unset to derive the tenant from the provider host."
   }
 }
 
