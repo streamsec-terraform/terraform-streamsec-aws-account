@@ -303,7 +303,11 @@ resource "aws_security_group" "this" {
     }
 
     precondition {
-      condition     = !local.byo_validate || length(local.byo_subnets) == 0 || local.byo_min_free_ips >= local.scanner_peak_task_count
+      # length(byo_ipv4_subnets) == 0 short-circuits BEFORE the comparison: with an
+      # all-IPv6 list byo_min_free_ips falls back to the literal 0, so this fired
+      # too and told the operator to "supply larger subnets", which cannot fix a
+      # subnet with no IPv4 CIDR. The IPv6 precondition below is the real report.
+      condition     = !local.byo_validate || length(local.byo_subnets) == 0 || length(local.byo_ipv4_subnets) == 0 || local.byo_min_free_ips >= local.scanner_peak_task_count
       error_message = "max_concurrent_shards = ${var.max_concurrent_shards} needs ${local.scanner_peak_task_count} concurrent task ENIs that can all land in one subnet, but the smallest supplied subnet is sized for only ${local.byo_min_free_ips} addresses after AWS's five reserved. Supply larger subnets, or lower max_concurrent_shards."
     }
 

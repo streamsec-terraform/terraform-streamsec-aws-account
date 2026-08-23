@@ -417,6 +417,32 @@ run "byo_subnet_in_a_local_zone_is_rejected" {
 
 # cidr_block is empty for an IPv6-only subnet, which used to abort the plan on an
 # unguarded split("/")[1] instead of naming the subnet.
+# A MIXED list isolates the IPv6 precondition: the IPv4 subnet is large enough
+# that capacity passes, so IPv6 is the only precondition that can fire and
+# expect_failures cannot be satisfied by something else. The all-IPv6 run below
+# cannot do this — with no IPv4 subnet at all, capacity has nothing to size from.
+run "ipv6_subnet_in_a_mixed_list_is_reported" {
+  command = plan
+
+  variables {
+    create_scanner_vpc = false
+    vpc_id             = "vpc-scanner"
+    subnet_ids         = ["subnet-private-a", "subnet-ipv6"]
+  }
+
+  override_data {
+    target = data.aws_subnet.byo["1"]
+    values = {
+      id                = "subnet-ipv6"
+      vpc_id            = "vpc-scanner"
+      cidr_block        = ""
+      availability_zone = "us-east-1a"
+    }
+  }
+
+  expect_failures = [aws_security_group.this]
+}
+
 run "byo_ipv6_only_subnet_is_reported_not_crashed" {
   command = plan
 
@@ -502,6 +528,36 @@ run "byo_subnet_with_nat_egress_is_accepted" {
   assert {
     condition     = aws_security_group.this.vpc_id == "vpc-scanner"
     error_message = "The security group must be created in the supplied VPC."
+  }
+}
+
+# The common real case: a subnet with NO explicit route-table association falls
+# back to the VPC's main table. mock_data "aws_route_tables" always returns
+# ids = ["rtb-explicit"], so try() always took the explicit branch and this path
+# was never exercised.
+#
+# What is asserted is the RESOLUTION, not the routes. Mocks are keyed by data
+# source address, not by the id passed in, so data.aws_route_table.byo_explicit
+# returns the same canned routes whichever table it resolved to — the fallback's
+# routes cannot be reached under mock_provider at all. Dropping the second try()
+# argument makes this error instead of resolving, so the assertion still bites.
+run "unassociated_subnet_resolves_to_the_main_route_table" {
+  command = apply
+
+  variables {
+    create_scanner_vpc = false
+    vpc_id             = "vpc-scanner"
+    subnet_ids         = ["subnet-private-a"]
+  }
+
+  override_data {
+    target = data.aws_route_tables.byo_explicit["0"]
+    values = { ids = [] }
+  }
+
+  assert {
+    condition     = data.aws_route_table.byo_explicit["0"].route_table_id == data.aws_route_table.byo_main[0].id
+    error_message = "With no explicit association the lookup must fall back to the VPC main route table."
   }
 }
 

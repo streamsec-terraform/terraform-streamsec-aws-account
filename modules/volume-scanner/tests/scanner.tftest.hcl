@@ -283,6 +283,50 @@ run "coexistence_can_be_opted_into" {
 
 # The module's own cluster must never be mistaken for the CloudFormation one, or
 # every re-apply would trip the guard.
+# already_installed: BOTH clusters present. This is the whole "a CloudFormation
+# scanner appearing later must not lock a healthy Terraform deployment out of its
+# own applies" argument, and no fixture supplied both until now.
+run "an_existing_deployment_is_not_locked_out_by_a_later_cfn_stack" {
+  command = plan
+
+  override_data {
+    target = data.aws_ecs_clusters.existing
+    values = {
+      cluster_arns = [
+        "arn:aws:ecs:us-east-1:111111111111:cluster/streamsec-ebs-scanner-us-east-1",
+        "arn:aws:ecs:us-east-1:111111111111:cluster/streamsec-ebs-scanner-tf-us-east-1",
+      ]
+    }
+  }
+
+  assert {
+    condition     = aws_ecs_cluster.this.name == "streamsec-ebs-scanner-tf-us-east-1"
+    error_message = "With this module's own cluster already present the plan must succeed, even alongside a CloudFormation scanner."
+  }
+}
+
+# The duplicate-Terraform-scanner branch: a second -tf cluster under a different
+# resource_prefix. This is also the ONLY branch that emits the resource_prefix
+# rename hint, so that advice was untested.
+run "a_second_terraform_scanner_trips_the_guard" {
+  command = plan
+
+  override_data {
+    target = data.aws_ecs_clusters.existing
+    values = {
+      cluster_arns = ["arn:aws:ecs:us-east-1:111111111111:cluster/other-streamsec-ebs-scanner-tf-us-east-1"]
+    }
+  }
+
+  # All three gated resources, as the CloudFormation-coexistence run asserts:
+  # the VPC and secret carry the guard independently of the cluster.
+  expect_failures = [
+    aws_ecs_cluster.this,
+    aws_vpc.this,
+    aws_secretsmanager_secret.collection_token,
+  ]
+}
+
 run "our_own_cluster_does_not_trip_the_guard" {
   command = plan
 
