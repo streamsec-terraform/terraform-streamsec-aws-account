@@ -8,7 +8,7 @@ This is the Terraform equivalent of the CloudFormation stack the Stream console 
 
 > **Migrating from the CloudFormation stack: delete it first.** The module refuses to apply while the console's CloudFormation scanner is still deployed in the region, and tells you so. Delete that stack, let it finish, then apply.
 >
-> Everything this module creates is named `streamsec-ebs-scanner-**tf**-…`, deliberately distinct from the stack's `streamsec-ebs-scanner-…`. That is a safety property, not cosmetics: `ecs:CreateCluster` is an upsert, so an identical cluster name is *silently adopted* rather than rejected, and a later `terraform destroy` would delete the cluster the live stack depends on.
+> Every resource whose name could collide with the CloudFormation stack's — the ECS cluster, task definition, log group, IAM roles, security groups — is named `streamsec-ebs-scanner-**tf**-…`, deliberately distinct from the stack's `streamsec-ebs-scanner-…`. (The collection-token secret is the exception: it is named from `collection_token_secret_name` plus a random suffix, so it cannot collide with anything regardless.) That is a safety property, not cosmetics: `ecs:CreateCluster` is an upsert, so an identical cluster name is *silently adopted* rather than rejected, and a later `terraform destroy` would delete the cluster the live stack depends on.
 >
 > Set `allow_cloudformation_coexistence = true` to run both deliberately — but note they will each scan every volume, and each one's retention sweep deletes snapshots tagged `Purpose=ebs-package-collector` account-wide, including the other's.
 
@@ -143,7 +143,7 @@ The VPC choice only controls the scanner's **egress**. It scans the whole accoun
 
 A single EventBridge rule fires the scanner daily at 03:00 UTC. The scanner is an orchestrator: it discovers instances and fans out one child Fargate task per shard, capped by `max_concurrent_shards`. The defaults (100 instances per shard, 10 concurrent) cover roughly 1000 instances per wave.
 
-Each concurrent task takes one private IP in the scanner subnet. If you shrink `scanner_vpc_cidr`, the module checks at plan time that the private half still holds `max_concurrent_shards + 1` ENIs, rather than letting the fan-out die part-way through. The default `/24` holds the maximum concurrency with room to spare.
+Each concurrent task takes one private IP in the scanner subnet. If you shrink `scanner_vpc_cidr`, the module checks at plan time that the private half still holds `max_concurrent_shards + 1` ENIs — plus one more when `workload_kinds` is set, against a usable count that also excludes the EBS endpoint ENI, rather than letting the fan-out die part-way through. The default `/24` holds the maximum concurrency with room to spare.
 
 By default the module also fires **one immediate scan at apply time**, so you don't wait for the first scheduled run. The trigger retries the failures that clear on their own — chiefly IAM eventual consistency, since the policies the task needs were attached seconds earlier by the same apply. Anything left after that is swallowed: the daily schedule is the fallback, and the details land in the initial-scan Lambda's CloudWatch logs. Set `trigger_initial_scan = false` to skip it.
 

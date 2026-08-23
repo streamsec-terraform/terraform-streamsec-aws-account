@@ -58,6 +58,7 @@ locals {
     Another Stream scanner is already running in ${local.region}: ${local.cloudformation_scanner_present ? "the console's CloudFormation stack (ECS cluster \"${local.cloudformation_cluster_name}\")" : "another instance of this module (${join(", ", local.other_tf_scanner_clusters)})"}.
     Running both scans every volume twice, doubles EBS-snapshot and ingest cost, and the two compete over snapshot retention — each deletes snapshots tagged Purpose=ebs-package-collector account-wide, including the other's.
     Delete that CloudFormation stack and let it finish, then apply. To run both deliberately, set allow_cloudformation_coexistence = true.
+    ${local.cloudformation_scanner_present ? "" : "If you just changed resource_prefix, the cluster named above is your own previous one, not a second deployment — this guard matches on name and cannot tell them apart, because nothing readable at plan time records the prefix you used last time. Set allow_cloudformation_coexistence = true for that one rename apply, then unset it: the rename replaces the cluster, so the guard recognises the new name from the next apply onward."}
   EOT
 
   # Already installed here, so this is a maintenance apply rather than a new
