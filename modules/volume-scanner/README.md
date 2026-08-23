@@ -159,10 +159,12 @@ The task role is least-privilege:
 
 - read-only `ec2:Describe{Instances,Volumes,Snapshots}`
 - `ec2:CreateSnapshot`, with tagging restricted to `Purpose = ebs-package-collector`
-- `ec2:DeleteSnapshot` and EBS-direct block reads **only** on snapshots carrying that tag, so the scanner cannot touch snapshots created by you or any other tool
+- `ec2:DeleteSnapshot` and EBS-direct block reads **only** on snapshots carrying that tag
+
+  The tag is a scoping condition, not a proof of ownership. `Purpose=ebs-package-collector` is a constant shared by every Stream deployment, so any principal in the account that holds `ec2:CreateTags` on snapshots — routinely granted to developers, cost-allocation tooling and CI, and which confers no deletion rights on its own — can apply it to a snapshot you care about and have the scanner's next retention sweep delete it, and its blocks read by the scanner container in the meantime. Scope `ec2:CreateTags` accordingly. A per-deployment tag value would close this, but the scanner image applies the tag itself and the value is not configurable from here — [DEV-21812] tracks making it an input
 - read-only Lambda, ECS and ECR access for workload scanning, granted per kind: `workload_kinds = "ecs"` gets no account-wide `lambda:GetFunction` (which downloads function code) and `workload_kinds = "lambda"` gets no account-wide ECS task/task-definition read. Setting it to `""` removes all of them — it does not merely stop using them
 - `ecs:RunTask` scoped to the scanner's own cluster, so none of these roles can launch the task into another cluster in the account
-- KMS access for **encrypted** EBS volumes: `kms:Decrypt`, `kms:DescribeKey`, `kms:GenerateDataKeyWithoutPlaintext`, `kms:ReEncryptFrom/To`, plus `kms:CreateGrant` conditioned on `kms:GrantIsForAWSResource` so the role cannot mint grants of its own
+- KMS access for **encrypted** EBS volumes: exactly `kms:Decrypt` and `kms:DescribeKey`, and only via `kms:ViaService = ec2.<region>` — so the role can decrypt volumes through the EC2/EBS data plane and cannot touch the same CMK when it protects S3, RDS or Secrets Manager. This matches the CloudFormation template exactly
 
 ### Encrypted volumes
 

@@ -581,6 +581,39 @@ run "kms_via_service_is_partition_correct_in_china" {
 
 # Matches the CloudFormation template exactly: two actions, one ViaService value.
 # Anything beyond this is privilege the console stack does not hand out.
+# The pinned-revision vs revision-less-family split is the module's most-argued
+# IAM decision and nothing asserted it: the existing run checks the count and the
+# ecs:cluster condition but never s.Resource, so swapping the orchestrator to the
+# pinned form — or widening any of the three to "*" — left the suite green.
+run "run_task_resources_keep_their_deliberate_split" {
+  command = apply
+
+  assert {
+    condition = toset(flatten([
+      for s in jsondecode(aws_iam_role_policy.orchestrator.policy).Statement :
+      flatten([s.Resource]) if try(s.Sid, "") == "RunScannerTask"
+      ])) == toset([
+      local.task_definition_family_arn,
+      "${local.task_definition_family_arn}:*",
+    ])
+    error_message = "The orchestrator must stay authorized for the revision-less family ARN it is actually handed in COLLECTOR_ECS_TASK_DEF_ARN. Pinning it to a single revision makes fan-out depend on ECS resolving family->revision before IAM evaluates, and fails mid-scan with AccessDenied on every child after snapshots already exist."
+  }
+
+  assert {
+    condition = alltrue([
+      for policy in [
+        aws_iam_role_policy.events.policy,
+        aws_iam_role_policy.initial_scan[0].policy,
+        ] : alltrue([
+          for s in jsondecode(policy).Statement :
+          flatten([s.Resource]) == [aws_ecs_task_definition.this.arn]
+          if try(s.Sid, "") == "RunScannerTask"
+      ])
+    ])
+    error_message = "EventBridge and the initial-scan Lambda each launch one exact revision, so both must stay pinned to that revision ARN — this is the CloudFormation template's own scoping. Widening them to the family authorizes every revision that skip_destroy leaves ACTIVE."
+  }
+}
+
 run "kms_grant_matches_the_cloudformation_template_exactly" {
   command = plan
 
@@ -696,6 +729,24 @@ run "snapshot_grants_keep_their_scoping_conditions" {
 # excludes the PassRole statement in the same shared local.
 run "pass_role_stays_scoped_and_confined_to_ecs" {
   command = apply
+
+  # Presence FIRST. Everything below filters on iam:PassRole, and a filter that
+  # matches nothing yields alltrue([]) == true — so deleting the grant outright
+  # left this run green while every RunTask failed with "ECS was unable to
+  # assume the role", i.e. the scanner never ran at all. Same trap that
+  # run_task_is_scoped_to_the_scanner_cluster fixed with a count assertion.
+  assert {
+    condition = length(flatten([
+      for policy in [
+        aws_iam_role_policy.orchestrator.policy,
+        aws_iam_role_policy.events.policy,
+        aws_iam_role_policy.initial_scan[0].policy,
+        ] : [
+        for s in jsondecode(policy).Statement : s if contains(flatten([s.Action]), "iam:PassRole")
+      ]
+    ])) == 3
+    error_message = "All three launcher policies must carry an iam:PassRole grant. Without it RunTask fails with 'ECS was unable to assume the role' and no scan ever starts."
+  }
 
   assert {
     condition = alltrue([
