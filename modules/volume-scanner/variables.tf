@@ -1,15 +1,8 @@
 ################################################################################
-# What the Stream console asks you for
-#
-# These are the CloudFormation template's Parameters, one for one. Deploying
-# from the console presents exactly this set and nothing else, so a caller who
-# sets only these gets the same scanner the console installs.
-#
-# create_scanner_vpc is the one addition. In the console it is not a parameter
-# at all — it is a render-time flag (`create_network`) chosen when the template
-# is generated. A Terraform module has no render step, so the choice has to
-# surface as an input. vpc_id / subnet_ids are the console's VpcId / SubnetIds,
-# which it only renders when that flag is off.
+# What the Stream console asks you for — the CloudFormation template's
+# Parameters, one for one. create_scanner_vpc is the only addition: the console
+# picks it at render time, so it has to surface as an input here. vpc_id and
+# subnet_ids are the console's VpcId / SubnetIds.
 ################################################################################
 
 variable "scanner_image" {
@@ -19,8 +12,7 @@ variable "scanner_image" {
   nullable    = false
 }
 
-# The scanner image defaults all of these to false; this module opts in to
-# language-package scanning only, matching the CloudFormation template.
+# The image defaults every scan toggle to false; this module opts in to language packages only.
 variable "scan_language_packages" {
   description = "Detect language-level packages on disk (Python, Node, Ruby, Go, Rust, Java). The only toggle on by default."
   type        = bool
@@ -55,13 +47,9 @@ variable "workload_kinds" {
   default     = "lambda,ecs"
   nullable    = false
 
-  # Normalizes before checking, so "ecs,lambda" and "lambda, ecs" are accepted as
-  # the same set rather than rejected for ordering or spacing. An exact-string
-  # allow-list also made the trimspace in local.workload_kind_list unreachable.
+  # Normalized before checking, so "ecs, lambda" is accepted. "" disables workload
+  # scanning deliberately; "  " or "," would disable it silently, dropping the IAM grants.
   validation {
-    # Two clauses: every named kind must be known, AND a non-empty input must
-    # yield at least one kind. "" disables workload scanning deliberately; "  "
-    # or "," would disable it SILENTLY, dropping the IAM grants with it.
     condition = length(setsubtract(
       toset([for kind in split(",", var.workload_kinds) : trimspace(kind) if trimspace(kind) != ""]),
       toset(["lambda", "ecs"])
@@ -73,9 +61,7 @@ variable "workload_kinds" {
   }
 }
 
-# The orchestrator task discovers instances and launches one child Fargate task
-# per shard. The defaults (100 instances per shard, 10 concurrent) scan up to
-# 1000 instances per wave; raise max_concurrent_shards for larger fleets.
+# The orchestrator launches one child Fargate task per shard; the defaults scan 1000 per wave.
 variable "shard_size" {
   description = "Instances per child task. Lower means more parallelism; higher means fewer, longer-running children."
   type        = number
@@ -100,13 +86,8 @@ variable "max_concurrent_shards" {
   }
 }
 
-# Default (create_scanner_vpc = true) provisions a dedicated VPC with a public +
-# private subnet pair, an Internet Gateway on the public subnet, and a NAT
-# Gateway with a stable Elastic IP. The scanner Fargate task runs in the private
-# subnet with no public IP — outbound reaches AWS APIs, public ECR, the Anchore
-# Grype DB and Stream ingest through the NAT. This satisfies enterprise policies
-# that flag any public IP on compute (SOC 2, CIS AWS Foundations, PCI-DSS) and
-# gives a stable egress IP to allowlist upstream.
+# Default: a dedicated VPC with a public/private subnet pair, an Internet Gateway
+# and a NAT Gateway with a stable Elastic IP. Tasks run private with no public IP.
 variable "create_scanner_vpc" {
   description = "Create a dedicated VPC, subnets, Internet Gateway and NAT Gateway for the scanner. False to use your own private subnets."
   type        = bool
@@ -125,29 +106,18 @@ variable "subnet_ids" {
   type        = list(string)
   default     = []
   nullable    = false
-  # A blank element cannot be filtered out in a local: a for-expression with a
-  # condition becomes wholly unknown when the values are unknown, which breaks the
-  # index-keyed validation design. Rejecting it at the input works instead, and
-  # Terraform skips variable validation for unknown values, so the standard
-  # `subnet_ids = module.vpc.private_subnets` wiring is unaffected.
+  # Blanks cannot be filtered in a local: a for-expression with an if predicate goes
+  # wholly unknown, breaking the index-keyed validation. Reject them at the input.
   validation {
     condition     = alltrue([for id in var.subnet_ids : trimspace(id) != ""])
     error_message = "subnet_ids must not contain blank entries. An empty or whitespace-only id reaches RunTask verbatim and every task fails to launch after an otherwise clean apply."
   }
 }
 
-
 ################################################################################
-# Advanced
-#
-# The console does not expose any of these; the CloudFormation template hardcodes
-# them. Every default below reproduces the console deployment exactly — task
-# sizing (4096/16384), ephemeral storage (50 GiB), log retention (30 days), the
-# VPC CIDR (10.255.0.0/24), the schedule (03:00 UTC daily, enabled) and the
-# secret recovery window (30 days) are all the template's own values.
-#
-# You should not need to set any of them. They exist so that a customer who has
-# a reason to differ is not forced to fork the module.
+# Advanced — the console exposes none of these; the CloudFormation template
+# hardcodes them, and every default below reproduces the console deployment
+# exactly. They exist so a customer with a reason to differ need not fork.
 ################################################################################
 
 variable "task_cpu" {
@@ -156,9 +126,6 @@ variable "task_cpu" {
   default     = "4096"
   nullable    = false
 
-  # Fargate accepts only these seven values. Anything else is rejected by
-  # RegisterTaskDefinition mid-apply, after the VPC, NAT gateway, cluster, secret
-  # and four IAM roles already exist — so catch it at the input instead.
   validation {
     condition     = contains(["256", "512", "1024", "2048", "4096", "8192", "16384"], var.task_cpu)
     error_message = "task_cpu must be one of Fargate's supported values: 256, 512, 1024, 2048, 4096, 8192, 16384."
@@ -172,9 +139,8 @@ variable "task_memory" {
   nullable    = false
 
   validation {
-    # Digits only. "16384.0" satisfies tonumber() and, because cty compares
-    # numbers by value, also satisfies the Fargate contains() check — then reaches
-    # RegisterTaskDefinition verbatim and is rejected mid-apply.
+    # Digits only: "16384.0" passes tonumber() and, since cty compares numbers by
+    # value, contains() too — then fails RegisterTaskDefinition mid-apply.
     condition     = can(regex("^[0-9]+$", var.task_memory)) && try(tonumber(var.task_memory), 0) >= 512
     error_message = "task_memory must be a whole number of MiB written without a decimal point, at least 512."
   }
@@ -198,21 +164,10 @@ variable "scanner_vpc_cidr" {
   default     = "10.255.0.0/24"
   nullable    = false
 
-  # BOTH bounds matter, and both fail mid-apply if unchecked.
-  #
-  # Lower: cidrsubnet() alone succeeds all the way down to /31, but AWS rejects
-  # any subnet smaller than /28 and this CIDR is halved before it becomes one, so
-  # a /28 VPC plans clean and then fails with InvalidSubnet.Range.
-  #
-  # Upper: AWS rejects a VPC CIDR larger than /16, so carving the scanner out of
-  # a supernet ("10.0.0.0/8") plans clean and fails with InvalidVpc.Range — after
-  # the availability-zone lookup has run and the rest of the graph is in flight.
+  # Both bounds fail mid-apply if unchecked: AWS rejects a VPC CIDR larger than /16,
+  # and the block is halved, so anything below /28 is an invalid subnet.
   validation {
-    # Every operand is TOTAL — try() gives each a value rather than raising — so
-    # this does not depend on || / && short-circuiting, which Terraform only does
-    # from v1.12. Below that both sides are always evaluated, and an unguarded
-    # split("/", "10.255.0.0")[1] raised "Invalid index" instead of emitting the
-    # error_message below.
+    # Every operand is total (try) — Terraform only short-circuits && / || from v1.12.
     condition     = can(cidrsubnet(var.scanner_vpc_cidr, 1, 1)) && try(tonumber(split("/", var.scanner_vpc_cidr)[1]), 0) <= 27 && try(tonumber(split("/", var.scanner_vpc_cidr)[1]), 0) >= 16
     error_message = "scanner_vpc_cidr must be a valid IPv4 CIDR block between /16 and /27. AWS rejects VPCs larger than /16, and the block is split into two subnets, which AWS rejects below /28."
   }
@@ -222,10 +177,8 @@ variable "create_ebs_vpc_endpoint" {
   description = "Create the EBS Direct API interface endpoint so snapshot block reads bypass the NAT Gateway, which is the bulk of the scanner's egress. On by default when the module creates the VPC. Leave unset otherwise."
   type        = bool
 
-  # Tri-state on purpose. Unset means "on when the module owns the VPC, off
-  # otherwise", so bring-your-own-subnet callers need no ceremony; an EXPLICIT
-  # true in that mode is a real misunderstanding and gets a precondition rather
-  # than silence.
+  # Tri-state: null means on when the module owns the VPC, off otherwise; an explicit
+  # true with bring-your-own subnets gets a precondition.
   default = null
 }
 
@@ -242,10 +195,8 @@ variable "schedule_expression" {
   default     = "cron(0 3 * * ? *)"
   nullable    = false
 
+  # EventBridge cron takes SIX fields, not Unix cron's five, and must be closed.
   validation {
-    # EventBridge cron takes SIX fields, not the five of Unix cron, and the
-    # prefix check alone let "cron(0 3 * * ?)" and an unclosed "cron(0 3 * * ? *"
-    # through to fail at CreateRule after most of the stack exists.
     condition = startswith(var.schedule_expression, "cron(") && endswith(var.schedule_expression, ")") && length(
       compact(split(" ", trimspace(replace(replace(var.schedule_expression, "cron(", ""), ")", ""))))
     ) == 6
@@ -272,9 +223,6 @@ variable "log_retention_days" {
   type        = number
   default     = 30
   nullable    = false
-  # The provider schema already rejects a bad value at plan time — verified, it is
-  # not an apply-time failure — so this is for the message and for consistency
-  # with every other numeric input here, not to close a correctness gap.
   validation {
     condition = contains(
       [0, 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653],
@@ -289,9 +237,7 @@ variable "collection_token_secret_name" {
   type        = string
   default     = "streamsec-scanner-collection-token"
   nullable    = false
-  # The only name-forming input without a character check. Secrets Manager accepts
-  # [A-Za-z0-9/_+=.@-]; anything else fails CreateSecret mid-apply, after the VPC,
-  # NAT gateway and Elastic IP already exist.
+  # Secrets Manager accepts [A-Za-z0-9/_+=.@-]; anything else fails CreateSecret mid-apply.
   validation {
     condition     = can(regex("^[A-Za-z0-9/_+=.@-]+$", var.collection_token_secret_name))
     error_message = "collection_token_secret_name may contain only letters, digits and the characters / _ + = . @ - which is what Secrets Manager accepts."
@@ -301,17 +247,12 @@ variable "collection_token_secret_name" {
 variable "secret_recovery_window_days" {
   description = "Days Secrets Manager waits before deleting the secret. 0, or 7-30."
   type        = number
-  # 30 matches the console stack, which omits RecoveryWindowInDays and so takes
-  # the Secrets Manager default. This was 0 so that repeated test teardowns left
-  # nothing behind — a testing convenience that had no business being a customer
-  # default, since it makes destroy delete the token immediately and
-  # irrecoverably where the console stack leaves it restorable for 30 days.
+  # 30 matches the console stack, which omits RecoveryWindowInDays.
   default  = 30
   nullable = false
 
-  # Secrets Manager accepts 0 (force delete) or 7-30. Everything in between is
-  # rejected by the DeleteSecret call at destroy time — the worst moment to find
-  # out, because the rest of the stack is already gone.
+  # Secrets Manager accepts 0 (force delete) or 7-30; values in between are rejected
+  # by DeleteSecret at destroy time, once the rest of the stack is already gone.
   validation {
     condition     = var.secret_recovery_window_days == 0 || (var.secret_recovery_window_days >= 7 && var.secret_recovery_window_days <= 30)
     error_message = "secret_recovery_window_days must be 0 (delete immediately) or between 7 and 30."
@@ -348,9 +289,7 @@ variable "customer_id" {
   description = "Stream Security workspace id — the same value as the provider's workspace_id. A wrong value is silent: SBOMs are dropped by ingest and the region still looks healthy."
   type        = string
   default     = null
-  # Checked here rather than only in a precondition deep in the graph, so a
-  # blank value names the offending input instead of reporting a failure against
-  # aws_ecs_task_definition after both streamsec data sources have been read.
+  # Checked here so a blank value names this input rather than failing deep in the graph.
   validation {
     condition     = var.customer_id == null ? true : trimspace(var.customer_id) != ""
     error_message = "customer_id must not be blank. It is sent as COLLECTOR_CUSTOMER_ID / COLLECTOR_STREAM_SCAN_WORKSPACE, and a blank value tags every SBOM with a workspace that does not exist — ingest drops them and the console still shows the region healthy."
@@ -373,23 +312,9 @@ variable "resource_prefix" {
   default     = ""
   nullable    = false
 
-  # The longest generated name is the execution role:
-  #   <prefix>-streamsec-ebs-scanner-tf-<region>-execution-role
-  #     "streamsec-ebs-scanner-tf"  24
-  #     "-" + region                15  (longest region: ap-southeast-7 / cn-northwest-1, 14)
-  #     "-execution-role"           15
-  #                                ---
-  #                                 54, leaving 10 for "<prefix>-" → 9 for the prefix.
-  #
-  # The "-tf" marker added 3 characters; shortening the initial-scan role suffix
-  # to "-init-role" gave them back, so the cap is unchanged.
-  #
-  # Validation blocks cannot read data sources, so the region cannot be measured
-  # here and the cap has to assume the longest one. Cap it at the input the
-  # operator set rather than letting four IAM errors land mid-plan.
-  # The other half of the contract: ECS cluster names allow only [a-zA-Z0-9_-]
-  # and IAM role names only [\w+=,.@-], so a space or colon fails CreateCluster
-  # mid-apply after the VPC, NAT gateway and Elastic IP exist.
+  # The longest generated name, <prefix>-streamsec-ebs-scanner-tf-<region>-execution-role,
+  # spends 54 of IAM's 64 characters (assuming the longest region, since validation cannot
+  # read data sources), leaving 9 for the prefix. ECS and IAM names also reject other chars.
   validation {
     condition     = can(regex("^[a-zA-Z0-9-]*$", var.resource_prefix))
     error_message = "resource_prefix may contain only letters, digits and hyphens — it becomes part of ECS cluster and IAM role names, which reject anything else."

@@ -2,13 +2,7 @@ data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
 
-# Plural, so it returns an empty list instead of erroring when nothing matches —
-# data.aws_ecs_cluster (singular) raises on a miss and could not be used for a
-# presence check. Requires ecs:ListClusters on the deploying principal.
-#
-# count, so allow_cloudformation_coexistence genuinely switches it off. Without it
-# the ecs:ListClusters requirement was unwaivable and also applied to
-# terraform destroy, blocking a principal that could tear the stack down.
+# Plural: an empty list instead of an error on a miss; count waives the ecs:ListClusters need.
 data "aws_ecs_clusters" "existing" {
   count = var.allow_cloudformation_coexistence ? 0 : 1
 }
@@ -26,32 +20,15 @@ locals {
 
   name_prefix = var.resource_prefix != "" ? "${var.resource_prefix}-" : ""
 
-  # The "-tf" marker is load-bearing, not cosmetic. The CloudFormation stack the
-  # console deploys hardcodes cluster "streamsec-ebs-scanner-<region>" and task
-  # definition family "streamsec-ebs-scanner", with no prefix. Matching those
-  # exactly meant that applying this module into a region that already ran the
-  # CloudFormation scanner did NOT fail cleanly: ecs:CreateCluster is an upsert,
-  # so Terraform silently ADOPTED the live cluster into state, registered a task
-  # definition into the shared family — which the CloudFormation orchestrator
-  # launches children from, using its revision-less family ARN — and a later
-  # terraform destroy then deleted the cluster the working stack depended on.
-  # Observed for real: a live console stack in one of our own accounts produced
-  # byte-identical names.
-  #
-  # Nothing external depends on these names. The console keys scanner regions by
-  # region, and the family name is only ever resolved by the orchestrator through
-  # its own COLLECTOR_ECS_TASK_DEF_ARN.
+  # The "-tf" marker keeps these names off the ones the console CloudFormation stack hardcodes:
+  # ecs:CreateCluster is an upsert, so an identical name silently adopts the live cluster.
   name          = "${local.name_prefix}streamsec-ebs-scanner-tf"
   regional_name = "${local.name}-${local.region}"
 
-  # What the console's CloudFormation stack calls its cluster in this region.
-  # Used only to detect that a CloudFormation-deployed scanner is already running
-  # here; never to name anything this module creates.
+  # What the console's CloudFormation stack calls its cluster here; used only to detect it.
   cloudformation_cluster_name = "streamsec-ebs-scanner-${local.region}"
 
-  # cluster_arns comes back NULL, not [], from a region with no ECS clusters —
-  # which is the normal case for a fresh scanner install. Iterating it directly
-  # fails the plan with "Iteration over null value" before anything is created.
+  # cluster_arns is null, not [], in an empty region; try() catches errors, not nulls.
   existing_cluster_arns = try(coalesce(data.aws_ecs_clusters.existing[0].cluster_arns, []), [])
 
   cloudformation_coexistence_error = <<-EOT
@@ -61,12 +38,7 @@ locals {
     ${local.cloudformation_scanner_present ? "" : "If you just changed resource_prefix, the cluster named above is your own previous one, not a second deployment — this guard matches on name and cannot tell them apart, because nothing readable at plan time records the prefix you used last time. Set allow_cloudformation_coexistence = true for that one rename apply, then unset it: the rename replaces the cluster, so the guard recognises the new name from the next apply onward."}
   EOT
 
-  # Already installed here, so this is a maintenance apply rather than a new
-  # install. Without this the guard is re-evaluated on every plan, and a
-  # CloudFormation scanner appearing in the region LATER would lock a healthy
-  # Terraform deployment out of its own applies — including the apply needed to
-  # destroy it. The hazard is two scanners being created; it is not a reason to
-  # freeze one that already exists.
+  # Maintenance apply: re-running the guard would lock an existing deployment out of destroy.
   already_installed = contains(local.existing_cluster_arns, "${local.cluster_arn_prefix}/${local.regional_name}")
 
   cloudformation_coexistence_ok = var.allow_cloudformation_coexistence || local.already_installed || (!local.cloudformation_scanner_present && !local.duplicate_scanner_present)
@@ -76,24 +48,8 @@ locals {
     arn if endswith(arn, "/${local.cloudformation_cluster_name}")
   ]) > 0
 
-  # Any OTHER instance of this module already present in the region. CloudFormation
-  # hardcoded its cluster name so a second stack simply failed and
-  # one-scanner-per-region was implicit; adding resource_prefix removed that
-  # safety net, and two instances then fight — ReadAndDeleteOwnSnapshots is scoped
-  # by the Purpose tag ACCOUNT-WIDE, not by prefix, so each sweep deletes the
-  # other's snapshots and block reads fail mid-scan on a snapshot that vanished.
-  #
-  # Case-insensitive: resource_prefix permits [a-zA-Z0-9-], and a lowercase-only
-  # pattern silently failed open for any prefix containing a capital.
-  #
-  # KNOWN LIMIT, stated rather than implied. This reads existing clusters at plan
-  # time, so it catches a scanner from an EARLIER apply — the CloudFormation stack,
-  # or a previous Terraform deployment. It cannot catch two module blocks in the
-  # SAME configuration, because neither cluster exists when the data source is
-  # read. Nor can it distinguish a second deployment reusing this deployment's own
-  # prefix, since the names are then identical; ecs:CreateCluster's upsert silently
-  # joins them. Deploy one scanner per region, and give any deliberate second one a
-  # distinct resource_prefix.
+  # Another instance of this module here: snapshot cleanup is tag-scoped account-wide, so two
+  # instances delete each other's snapshots. Case-insensitive; plan-time, so same-config misses.
   other_tf_scanner_clusters = [
     for arn in local.existing_cluster_arns : arn
     if length(regexall("(?i)/[a-z0-9-]*streamsec-ebs-scanner-tf-${local.region}$", arn)) > 0
@@ -105,39 +61,19 @@ locals {
 
   api_url = trimsuffix(data.streamsec_host.this.url, "/")
 
-  # A per-tenant Stream hostname is https://<tenant>.<domain>, so the first DNS
-  # label is the tenant name. That does not hold behind a shared or regional
-  # endpoint (app.streamsec.io), a custom CNAME, or PrivateLink endpoint DNS —
-  # hence the var.tenant_name override.
-  # Getting this wrong is silent: the scanner tags SBOMs with a tenant that does
-  # not exist, ingest drops them, and the console still shows the region healthy.
+  # First DNS label of a per-tenant host is the tenant; untrue behind a shared endpoint.
   derived_tenant_name = split(".", replace(replace(local.api_url, "https://", ""), "http://", ""))[0]
   tenant_name         = var.tenant_name != null ? trimspace(var.tenant_name) : local.derived_tenant_name
 
   stream_scan_url = "${local.api_url}/openapi/vulnerabilities/stream_scan/raw"
 
-  # Trimmed, not just null-checked. A workspace id pasted from the console with a
-  # trailing space or newline is non-empty, so it passes the precondition below
-  # and then ships verbatim as COLLECTOR_CUSTOMER_ID / COLLECTOR_STREAM_SCAN_WORKSPACE.
-  # Ingest drops SBOMs tagged with a workspace that does not exist, and the
-  # console still shows the region healthy — zero findings, no error anywhere.
+  # Trimmed: a value pasted with trailing whitespace passes the precondition and ships verbatim.
   customer_id = var.customer_id == null ? "" : trimspace(var.customer_id)
 
   workload_kind_list = [for kind in split(",", var.workload_kinds) : trimspace(kind) if trimspace(kind) != ""]
   scan_workloads     = length(local.workload_kind_list) > 0
 
-  # Fargate accepts only specific memory values per CPU size. A bad pair is
-  # rejected by RegisterTaskDefinition mid-apply, after the VPC, NAT gateway,
-  # Elastic IP, cluster, secret and four IAM roles already exist — and the NAT
-  # keeps billing until someone destroys it. This is a cross-variable rule, which
-  # a variable validation block cannot express on the Terraform versions this
-  # module supports.
-  #
-  # Expressed as explicit value lists rather than min/max/step, because the
-  # 256-CPU row is irregular: Fargate allows 512, 1024 and 2048 there but NOT
-  # 1536. A step model accepted 1536 and failed at apply — exactly the failure
-  # this check exists to prevent. Every other row is a genuine fixed increment,
-  # so range() generates those.
+  # Fargate allows only specific memory values per CPU size; the 256 row is irregular (no 1536).
   fargate_memory_values = {
     "256"   = [512, 1024, 2048]
     "512"   = range(1024, 4097, 1024)
@@ -160,28 +96,15 @@ locals {
     "streamsec:region"    = local.region
   })
 
-  # local.byo_vpc_id, not var.vpc_id. An earlier pass added the trim but wired it
-  # only into byo_enabled and the wrong-VPC comparison, so every actual consumer
-  # still saw the raw value: an empty vpc_id cleared the friendly precondition and
-  # then died inside a data source, and a pasted value with a trailing newline
-  # reached CreateSecurityGroup and failed mid-apply.
+  # local.byo_vpc_id, not var.vpc_id — every consumer needs the trimmed value.
   scanner_vpc_id     = var.create_scanner_vpc ? aws_vpc.this[0].id : local.byo_vpc_id
   scanner_subnet_ids = var.create_scanner_vpc ? [aws_subnet.private[0].id] : local.byo_subnet_ids
 
-  # Only meaningful when the module owns the VPC — see the note in network.tf for
-  # why bring-your-own-subnet mode deliberately gets no endpoints.
-  # Split: the documented reason to opt out — com.amazonaws.<region>.ebs missing
-  # in a region or partition — applies only to the interface endpoint. The S3
-  # gateway endpoint is free, exists everywhere, and dropping it just puts ECR
-  # layer pulls back on the NAT for no reason.
+  # Only when the module owns the VPC; the ebs opt-out applies to the interface endpoint only.
   create_ebs_endpoint = var.create_scanner_vpc && coalesce(var.create_ebs_vpc_endpoint, true)
   create_s3_endpoint  = var.create_scanner_vpc
 
-  # AZ names map to different physical AZs per account, and an interface endpoint
-  # service is not offered in every AZ of a region. Taking names[0] blindly could
-  # land on an AZ with no EBS endpoint presence, failing CreateVpcEndpoint
-  # mid-apply after the VPC, IGW, EIP and NAT gateway already exist and bill. The
-  # resolver already returns the supported list, so intersect with it.
+  # The endpoint service is not offered in every AZ, so intersect rather than taking names[0].
   available_azs = var.create_scanner_vpc ? data.aws_availability_zones.available[0].names : []
   endpoint_azs  = local.create_ebs_endpoint ? data.aws_vpc_endpoint_service.ebs[0].availability_zones : []
   candidate_azs = local.create_ebs_endpoint ? sort(tolist(setintersection(toset(local.available_azs), toset(local.endpoint_azs)))) : local.available_azs
@@ -193,114 +116,40 @@ locals {
   scanner_public_subnet_cidr  = cidrsubnet(var.scanner_vpc_cidr, 1, 0)
   scanner_private_subnet_cidr = cidrsubnet(var.scanner_vpc_cidr, 1, 1)
 
-  # Every Fargate task in awsvpc mode consumes one private IP, and AWS reserves
-  # five addresses in each subnet. The orchestrator plus max_concurrent_shards
-  # children all run at once, so the subnet has to hold them or the fan-out dies
-  # part-way through with an opaque ENI-provisioning failure.
-  # AWS reserves five addresses per subnet, and the EBS interface endpoint places
-  # one more ENI of its own in this subnet when enabled — miss it and the check
-  # passes at exactly the boundary while the last child task fails to get an ENI.
+  # One private IP per task, five reserved per subnet, plus an ENI for the EBS endpoint.
   scanner_private_subnet_capacity = pow(2, 32 - tonumber(split("/", local.scanner_private_subnet_cidr)[1])) - 5 - (local.create_ebs_endpoint ? 1 : 0)
-  # Orchestrator + children + the dedicated workload child the orchestrator also
-  # launches when workload_kinds is non-empty. Omitting it made both capacity
-  # checks off by one exactly when workload scanning is on, so at the boundary the
-  # workload task fails ENI provisioning and container images are silently never
-  # scanned while the instance pass reports complete.
+  # Orchestrator + children + the workload child launched when workload_kinds is non-empty.
   scanner_peak_task_count = var.max_concurrent_shards + 1 + (local.scan_workloads ? 1 : 0)
 
-  # Family ARN with no revision suffix, so the orchestrator's RunTask always
-  # launches children on the current ACTIVE revision. Referencing the task
-  # definition resource here would make it reference itself through its own
-  # environment block.
+  # Revision-less family ARN: children run the current ACTIVE revision, and no self-reference.
   task_definition_family_arn = "arn:${local.partition}:ecs:${local.region}:${local.account_id}:task-definition/${local.name}"
 
-  # RunTask is authorized against the ARN the caller passes. The orchestrator
-  # passes the revision-less family ARN while EventBridge and the initial-scan
-  # Lambda pass a specific revision, so both forms have to be allowed. Scoping
-  # to "<family>" plus "<family>:*" also keeps the three RunTask policies from
-  # being rewritten on every task-definition revision.
+  # RunTask authorizes on the ARN passed: the orchestrator passes the family ARN, others a revision.
   run_task_resources = [
     local.task_definition_family_arn,
     "${local.task_definition_family_arn}:*",
   ]
 
-  # TWO SEPARATE GATES. Terraform imposes very different rules on them, and
-  # collapsing them into one is the bug this shape exists to prevent.
-  #
-  # byo_enabled answers "did the caller ask for bring-your-own-subnet mode and
-  # supply both inputs". It feeds PRECONDITIONS ONLY, where an unknown value is
-  # harmless — Terraform just defers the check to apply.
-  #
-  # byo_validate decides whether the validation data sources are read at all, so
-  # it feeds count/for_each and MUST be known at plan time in every case. It is
-  # therefore built exclusively from the two bool variables. Never fold vpc_id or
-  # length(subnet_ids) in here:
-  #
-  #   - `var.vpc_id != null` is unknown whenever vpc_id is an attribute of a VPC
-  #     created in the same apply — i.e. the standard `vpc_id = module.vpc.vpc_id`
-  #     wiring — which made the whole key set unknown and failed the plan with
-  #     four "Invalid for_each argument" errors naming an internal local.
-  #   - `length(local.byo_subnet_ids) > 0` is unknown for a list of unknown length, and
-  #     cty's && does not short-circuit on an unknown left operand, so
-  #     `unknown && false` is unknown rather than false. That made
-  #     validate_subnet_egress = false unable to switch anything off — the one
-  #     job the flag exists for.
-  # trimspace(coalesce(...)) rather than != null: an empty or whitespace vpc_id —
-  # easy from an unset variable default or a computed expression — satisfied
-  # != null, so byo_enabled went true, the friendly "both are required"
-  # precondition never fired, and the plan died inside a data source instead.
+  # Two separate gates. byo_enabled feeds preconditions only, where unknown defers the check.
+  # byo_validate feeds count/for_each, so it must be known at plan time: bool variables only.
   byo_vpc_id = var.vpc_id == null ? "" : trimspace(var.vpc_id)
 
-  # Trimmed, for the same reason vpc_id is: an id with surrounding whitespace —
-  # from a heredoc list, or split() of a delimited string — reaches RunTask
-  # verbatim and every task fails to launch after a clean apply.
-  #
-  # NO `if` PREDICATE. A for-expression with a condition is marked wholly unknown
-  # as soon as the condition is unknown for any element, so filtering here made
-  # byo_subnets an unknown map whenever the subnet ids come from resources built
-  # in the same apply — and every BYO validation for_each/count then failed with
-  # "Invalid for_each argument". That is the regression this map-only form exists
-  # to prevent, and it has been introduced twice; the index-keyed design is only
-  # safe while the LENGTH is preserved. Blank elements are rejected by the
-  # variable's own validation instead, which Terraform skips for unknown values.
+  # Trimmed like vpc_id. NO `if` predicate: a for expression with a condition becomes wholly
+  # unknown, breaking every BYO for_each; blank elements are rejected by variable validation.
   byo_subnet_ids = [for id in var.subnet_ids : trimspace(id)]
   byo_enabled    = !var.create_scanner_vpc && local.byo_vpc_id != "" && length(local.byo_subnet_ids) > 0
   byo_validate   = !var.create_scanner_vpc && var.validate_subnet_egress
 
-  # Keyed by list INDEX, not by subnet id: for_each keys must be known at plan
-  # time and `subnet_ids = module.vpc.private_subnets` produces ids that are not.
-  # Indexes are known whenever the list LENGTH is, and unknown values are fine —
-  # they only defer the preconditions to apply.
-  #
-  # An empty subnet_ids yields an empty map, so the "you must supply both inputs"
-  # precondition in network.tf is what the operator sees, not a provider error.
-  #
-  # When even the length is unknown, set validate_subnet_egress = false. That
-  # switches off BOTH supplied-subnet checks, the wrong-VPC one included, because
-  # a for_each over an unknown-length list is rejected whichever check it feeds.
+  # Keyed by list index: for_each keys must be known at plan time and subnet ids often are not.
   byo_subnets = local.byo_validate ? { for index, subnet_id in local.byo_subnet_ids : tostring(index) => subnet_id } : {}
 
-  # Guarded on vpc_id being set: with vpc_id null every subnet would be reported
-  # as "wrong VPC" on top of the real "vpc_id is required" precondition, burying
-  # the message that actually tells the operator what to do.
   byo_wrong_vpc_subnets = [
     for subnet in data.aws_subnet.byo : subnet.id
     if local.byo_vpc_id != "" && subnet.vpc_id != local.byo_vpc_id
   ]
 
-  # Normalized to a "-" sentinel per target field, because an unused target comes
-  # back as "" from some provider versions and null from others: comparing against
-  # "" reports a NULL field as a populated target and waves through a subnet with
-  # no egress, and startswith(null, ...) is a hard error.
-  #
-  # coalesce alone, with no try(): under the ~> 6.0 pin `routes` is a strongly
-  # typed list(object(...)) in which every field including core_network_arn always
-  # exists, so try() could never fire — and it would silently swallow a typo like
-  # route.nat_gatway_id into "-", waving through a subnet with no egress. Failing
-  # loudly on an unknown attribute is the safer default.
+  # "-" sentinel: an unused target is "" or null by provider version, and startswith(null) errors.
   byo_default_routes = {
-    # The explicit-association / main-route-table fallback happens in the data
-    # source itself (see network.tf).
     for key, route_table in data.aws_route_table.byo_explicit :
     key => [
       for route in route_table.routes : {
@@ -315,41 +164,14 @@ locals {
         core_network_arn     = coalesce(route.core_network_arn, "-")
         local_gateway_id     = coalesce(route.local_gateway_id, "-")
       }
-      # ONLY a literal default route counts as a candidate.
-      #
-      # Managed-prefix-list routes were briefly accepted here on the reasoning
-      # that a prefix list might contain 0.0.0.0/0 and we cannot read it. That
-      # was badly wrong: the commonest prefix-list route in any private subnet is
-      # the S3 gateway endpoint, which says nothing about internet access. It let
-      # a completely isolated subnet pass, and — because the IGW-only rejection is
-      # gated on this — let a genuinely public subnet pass too. A prefix list that
-      # really does carry a default route is rare; validate_subnet_egress = false
-      # is the escape hatch for it.
+      # Only a literal default route counts: a prefix-list route is usually the S3 endpoint.
       if coalesce(route.cidr_block, "-") == "0.0.0.0/0"
     ]
   }
 
-  # Accepted egress targets. A Transit Gateway route MIGHT egress to the internet
-  # through a central-egress VPC — not knowable from here, so accept it and let
-  # the task surface a failure if egress is broken upstream. NAT instances and
-  # inspection/firewall appliances (fck-nat, Palo Alto, Fortinet) appear as
-  # network_interface_id / instance_id, and are standard enterprise egress.
-  # Cloud WAN central egress appears as core_network_arn, Outposts as
-  # local_gateway_id, and on-prem egress over Site-to-Site VPN or Direct Connect
-  # appears as a virtual private gateway (gateway_id "vgw-") — all valid default
-  # routes. vgw- in particular is a standard enterprise topology, and rejecting
-  # it forced operators onto validate_subnet_egress = false, which switches off
-  # the wrong-VPC check too.
-  #
-  # vpc_endpoint_id here means a Gateway Load Balancer endpoint — an inspection
-  # appliance that CAN carry a default route. That is not the same thing as a
-  # gateway endpoint for S3 or DynamoDB, which appears as gateway_id "vpce-" and
-  # can never be internet egress; accepting the latter was the regression above.
-  #
-  # KNOWN GAP vs the CloudFormation NetworkPrecheck: that Lambda also skipped
-  # routes whose State is not "active", rejecting a blackholed default route
-  # (e.g. its NAT gateway was deleted). The aws_route_table data source exposes
-  # no state field, so a blackholed route still passes here.
+  # Accepted egress: NAT gateway, transit gateway, NAT instance or appliance ENI, GWLB endpoint
+  # (vpc_endpoint_id — an S3 gateway endpoint is gateway_id "vpce-", never egress), Cloud
+  # WAN, Outposts local gateway, vgw-. No route state is exposed, so a blackholed route passes.
   byo_subnet_has_egress = {
     for key, routes in local.byo_default_routes :
     key => length([
@@ -368,15 +190,11 @@ locals {
   byo_subnet_igw_only = {
     for key, routes in local.byo_default_routes :
     key => !local.byo_subnet_has_egress[key] && length([
-      # No cidr_block re-test: byo_default_routes already filtered to 0.0.0.0/0.
       for route in routes : route if startswith(route.gateway_id, "igw-")
     ]) > 0
   }
 
-  # Wrong-VPC subnets are excluded: their explicit-association lookup filters on
-  # var.vpc_id, matches nothing, and falls back to THAT vpc's main route table —
-  # so the egress verdict would describe a different VPC entirely and stack a
-  # spurious "no 0.0.0.0/0 route" next to the real wrong-VPC diagnosis.
+  # Wrong-VPC subnets excluded: their lookup falls back to the other VPC's main route table.
   byo_bad_subnets = [
     for key, subnet_id in local.byo_subnets :
     format("%s (%s)", subnet_id, local.byo_subnet_igw_only[key]
@@ -386,47 +204,16 @@ locals {
   ]
 }
 
-################################################################################
-# Collection Token
-#
-# The scanner authenticates its SBOM uploads with the account's collection token.
-# It goes through Secrets Manager rather than a task-definition environment
-# variable, matching every other module in this repo. This keeps the token out of
-# the task definition, which anything holding ecs:DescribeTaskDefinition can read
-# — including the scanner task role itself, which needs that action account-wide
-# for workload scanning.
-#
-# It does NOT keep the token out of Terraform state: aws_secretsmanager_secret_version
-# stores secret_string in state in plaintext, exactly as an environment variable
-# would. Treat terraform.tfstate as secret material regardless.
-################################################################################
-
-# Random suffix, matching modules/eks-audit. The CloudFormation template gives
-# the secret no Name at all so CloudFormation auto-generates a unique one; a
-# deterministic name re-introduces exactly what that avoids. With any non-zero
-# secret_recovery_window_days, destroy-then-apply — the ordinary way to move a
-# scanner or change scanner_vpc_cidr — otherwise fails for up to 30 days with
-# "a secret with this name is already scheduled for deletion", after the VPC,
-# NAT gateway and EIP already exist and with no force-delete escape.
+# Random suffix: a deterministic name makes destroy-then-apply fail for the recovery window.
 resource "random_string" "secret_suffix" {
-  # EIGHT, not six. AWS documents that a secret name ending in a hyphen followed
-  # by exactly six characters collides with the suffix Secrets Manager appends
-  # itself, so a partial-ARN lookup can resolve to the wrong secret. The
-  # random-suffix fix had accidentally produced precisely that shape.
+  # Eight, not six: six would collide with the suffix Secrets Manager appends itself.
   length  = 8
   upper   = false
   special = false
 }
 
-# The coexistence gate is repeated here, not only on the VPC and cluster. In the
-# apply-deferred path this secret has no dependency on either, so a refused
-# install would still write the account's Stream collection token into an account
-# the module just declined to install into, and leave it behind.
-#
-# The gate stops at these three — VPC (the NAT downstream of it bills), cluster
-# (an identically named one is silently adopted) and this secret (a credential).
-# The IAM roles and log groups can still be created on a refused apply, but they
-# hold nothing and are recorded in state, so a destroy removes them.
+# Secrets Manager keeps the token out of the task definition; state still holds it in plaintext.
+# The coexistence gate is repeated here: this secret depends on neither the VPC nor the cluster.
 resource "aws_secretsmanager_secret" "collection_token" {
   name                    = "${local.name_prefix}${var.collection_token_secret_name}-${local.region}-${random_string.secret_suffix.result}"
   description             = "Stream Security volume scanner collection token"
@@ -435,10 +222,7 @@ resource "aws_secretsmanager_secret" "collection_token" {
   tags = local.tags
 
   lifecycle {
-    # Renaming collection_token_secret_name is ForceNew. Without this Terraform
-    # deletes the live secret first, and any scanner task that pulls the token
-    # in that window fails; the delete is also a scheduled deletion, so a
-    # rollback cannot recreate the old name until the recovery window expires.
+    # Renaming the secret is ForceNew; without this the live secret is deleted first.
     create_before_destroy = true
 
     precondition {
@@ -456,10 +240,6 @@ resource "aws_secretsmanager_secret_version" "collection_token" {
   secret_id     = aws_secretsmanager_secret.collection_token.id
   secret_string = data.streamsec_aws_account.this.streamsec_collection_token
 }
-
-################################################################################
-# ECS Cluster and Logs
-################################################################################
 
 resource "aws_ecs_cluster" "this" {
   name = local.regional_name
@@ -481,19 +261,9 @@ resource "aws_cloudwatch_log_group" "this" {
   tags = local.tags
 }
 
-################################################################################
-# Task Definition
-#
-# The same task definition serves both roles: COLLECTOR_ROLE is "orchestrator"
-# here and the orchestrator overrides it to "worker" when it launches children.
-################################################################################
-
+# One task definition serves both roles: the orchestrator overrides COLLECTOR_ROLE to "worker".
 resource "aws_ecs_task_definition" "this" {
-  # Every attribute this module sets is ForceNew, so without this Terraform
-  # deregisters the family's only ACTIVE revision before registering the
-  # replacement. A schedule firing in that window fails RunTask on an INACTIVE
-  # revision and, with no DLQ on the target, that day's scan silently does not
-  # happen; an apply landing mid-scan drops shards the same way.
+  # skip_destroy: every attribute is ForceNew, so the only ACTIVE revision would be deregistered.
   skip_destroy = true
 
   family                   = local.name
@@ -523,12 +293,7 @@ resource "aws_ecs_task_definition" "this" {
         { name = "COLLECTOR_SCAN_DATABASES", value = tostring(var.scan_databases) },
         { name = "COLLECTOR_SCAN_AI_WORKLOADS", value = tostring(var.scan_ai_workloads) },
         { name = "COLLECTOR_SCAN_SECRETS", value = tostring(var.scan_secrets) },
-        # Normalized, not raw. The validation accepts "lambda, ecs" and
-        # "ecs,lambda", and IAM is built from the trimmed list — but the container
-        # was getting the raw string, so the scanner's comma split produced
-        # " ecs", which matches no kind. Workload scanning silently did nothing
-        # while the account-wide ECS grants stayed attached. Same class as the
-        # customer_id trim.
+        # Normalized, not raw: the scanner's comma split would otherwise see " ecs".
         { name = "COLLECTOR_WORKLOAD_KINDS", value = join(",", local.workload_kind_list) },
         { name = "COLLECTOR_ROLE", value = "orchestrator" },
         { name = "COLLECTOR_SHARD_SIZE", value = tostring(var.shard_size) },
@@ -560,10 +325,7 @@ resource "aws_ecs_task_definition" "this" {
   depends_on = [aws_secretsmanager_secret_version.collection_token]
 
   lifecycle {
-    # public.ecr.aws has no aws-cn presence, so the default image cannot be pulled
-    # there. The module is otherwise partition-aware and its tests cover the China
-    # paths, so fail at plan with the reason rather than at task start with an
-    # opaque CannotPullContainerError once the NAT gateway is already billing.
+    # public.ecr.aws has no aws-cn presence, so fail at plan rather than at task start.
     precondition {
       condition     = local.partition != "aws-cn" || !startswith(var.scanner_image, "public.ecr.aws/")
       error_message = "scanner_image still points at public.ecr.aws, which is not reachable from the aws-cn partition. Mirror the scanner image into an ECR registry in your China account and set scanner_image to it."
@@ -574,10 +336,7 @@ resource "aws_ecs_task_definition" "this" {
       error_message = "Fargate rejects task_cpu = ${var.task_cpu} with task_memory = ${var.task_memory}. At that CPU size the allowed memory values are ${join(", ", [for m in local.task_memory_allowed : tostring(m)])} MiB. Left unchecked this fails at RegisterTaskDefinition mid-apply, after the NAT gateway and Elastic IP are already billing."
     }
 
-    # The token and whole-disk SBOM contents cross the NAT to this URL. Nothing
-    # else constrains the scheme: derived_tenant_name strips http:// as well as
-    # https://, so a plaintext host is accepted, and a schemeless one leaves the
-    # behaviour entirely to the container's HTTP client.
+    # Nothing else constrains the scheme: derived_tenant_name strips http:// as well.
     precondition {
       condition     = startswith(local.api_url, "https://")
       error_message = "The Stream host resolved to \"${local.api_url}\", which is not https. The scanner posts SBOMs and its collection token to this URL over the NAT gateway; set the streamsec provider host to an https URL."
@@ -595,32 +354,17 @@ resource "aws_ecs_task_definition" "this" {
   }
 }
 
-################################################################################
-# Daily Scan Schedule
-################################################################################
-
 resource "aws_cloudwatch_event_rule" "daily" {
   name                = "${local.regional_name}-daily"
   description         = "Trigger the Stream Security EBS scanner on a schedule"
   schedule_expression = var.schedule_expression
-  # Variable, not a literal. aws_cloudwatch_event_rule.state is Optional and not
-  # Computed, so a literal meant an operator who disabled the rule in the console
-  # — to pause scanning before a destroy or during an incident — had it silently
-  # re-enabled by the next apply, including an unattended drift-correction run.
+  # Variable, not a literal, so a rule disabled in the console survives the next apply.
   state = var.schedule_enabled ? "ENABLED" : "DISABLED"
 
   tags = local.tags
 }
 
-# KNOWN GAP: no dead_letter_config and no retry_policy. If RunTask fails
-# persistently on the scheduled path — the subnet fills up, or the pinned task
-# definition revision is deregistered out of band — EventBridge retries for 24h
-# and then discards the event, writing nothing to any log group this module owns.
-# The initial-scan path at least logs to CloudWatch; this one has no equivalent,
-# and with registration not yet wired the console keeps showing the region as
-# connected. A DLQ would need an SQS queue and its access policy, which the
-# CloudFormation stack this mirrors does not create either; raised here so the
-# absence is a recorded decision rather than an oversight.
+# Known gap: no DLQ and no retry policy, so a persistently failing RunTask is discarded.
 resource "aws_cloudwatch_event_target" "daily" {
   rule      = aws_cloudwatch_event_rule.daily.name
   target_id = "ebs-scanner-daily"
@@ -640,18 +384,12 @@ resource "aws_cloudwatch_event_target" "daily" {
     }
   }
 
-  # The task definition references only the role ARNs, never their policies, so
-  # none of the permissions the task actually needs are implicit dependencies.
-  # The security group carries no ordering of its own either, so the egress path
-  # is pinned here as well.
+  # The task definition references only role ARNs, so no policy or egress path is implicit.
   depends_on = [
     aws_route.private_nat,
     aws_route_table_association.private,
     aws_vpc_security_group_egress_rule.all,
-    # Private DNS on the EBS endpoint makes the API hostname resolve to its ENI
-    # VPC-wide as soon as it exists. Starting a scan before the endpoint's own
-    # security group has its allow rule drops every block read; starting before
-    # the endpoint exists merely sends the first scan's reads over the NAT.
+    # Private DNS points the EBS API at the endpoint ENI; scanning before its ingress rule fails.
     aws_vpc_endpoint.ebs,
     aws_vpc_endpoint.s3,
     aws_vpc_security_group_ingress_rule.endpoints_https,
@@ -663,23 +401,13 @@ resource "aws_cloudwatch_event_target" "daily" {
   ]
 }
 
-################################################################################
-# Initial Scan
-#
-# Kicks off one immediate scan at apply time so the first results do not wait for
-# the next scheduled fire. Errors are swallowed inside the Lambda: the daily
-# schedule is the fallback, and failing here would roll back an otherwise
-# working install.
-################################################################################
-
+# One immediate scan at apply time; errors are swallowed, the daily schedule is the fallback.
 data "archive_file" "initial_scan" {
   count = var.trigger_initial_scan ? 1 : 0
 
   type        = "zip"
   source_file = "${path.module}/lambda/initial_scan.py"
-  # Per instance: with a local module source path.module is the same directory
-  # for every instantiation, so a fixed name has two instances writing and
-  # hashing one file concurrently. examples/complete declares two.
+  # Per instance: path.module is the same directory for every instantiation of a local module.
   output_path = "${path.module}/lambda/initial_scan-${local.regional_name}.zip"
 }
 
@@ -698,13 +426,10 @@ resource "aws_lambda_function" "initial_scan" {
   function_name = "${local.regional_name}-initial-scan"
   role          = aws_iam_role.initial_scan[0].arn
   handler       = "initial_scan.handler"
-  # Matches the CloudFormation template's runtime, so the two deployments share a
-  # deprecation clock and a bundled botocore rather than drifting apart.
+  # Matches the CloudFormation template's runtime.
   runtime = "python3.12"
 
-  # Room for the function's retry ladder (50s of backoff) plus the RunTask calls
-  # themselves. The retries cover IAM eventual consistency: the policies this
-  # task needs were attached seconds earlier by the same apply.
+  # Room for the retry ladder (50s, covering IAM eventual consistency) plus the RunTask calls.
   timeout = 120
 
   filename         = data.archive_file.initial_scan[0].output_path
@@ -730,29 +455,16 @@ resource "aws_lambda_invocation" "initial_scan" {
   function_name = aws_lambda_function.initial_scan[0].function_name
   input         = jsonencode({})
 
-  # Every policy the scan needs has to be attached before the task launches. The
-  # task definition references only aws_iam_role.*.arn, so without these the
-  # graph permits launching before aws_iam_role_policy.task (EC2/EBS discovery),
-  # .orchestrator (RunTask/PassRole for the fan-out), .execution_secrets (the
-  # collection token) or the execution-role attachment (ECR pull + awslogs)
-  # exist. The task would then fail to pull, or start and get AccessDenied — and
-  # initial_scan.py swallows both, and the invocation only re-runs when the
-  # function itself is replaced — so a failure here is not retried.
+  # Every policy must be attached before the task launches; a failure here is never retried.
   depends_on = [
     aws_route.private_nat,
     aws_route_table_association.private,
     aws_vpc_security_group_egress_rule.all,
-    # Private DNS on the EBS endpoint makes the API hostname resolve to its ENI
-    # VPC-wide as soon as it exists. Starting a scan before the endpoint's own
-    # security group has its allow rule drops every block read; starting before
-    # the endpoint exists merely sends the first scan's reads over the NAT.
     aws_vpc_endpoint.ebs,
     aws_vpc_endpoint.s3,
     aws_vpc_security_group_ingress_rule.endpoints_https,
     aws_iam_role_policy.initial_scan,
-    # Without this the invocation can run before the role can write logs. The
-    # function deliberately swallows every failure, so CloudWatch is the ONLY
-    # place a failed first scan is visible — losing it makes the failure total.
+    # The function swallows every failure, so CloudWatch is the only place one is visible.
     aws_iam_role_policy_attachment.initial_scan_basic,
     aws_iam_role_policy.task,
     aws_iam_role_policy.orchestrator,
@@ -761,10 +473,5 @@ resource "aws_lambda_invocation" "initial_scan" {
     aws_cloudwatch_event_target.daily,
   ]
 
-  # Fires once per Lambda, not once per apply. Re-invocation hangs entirely off
-  # function_name, which is ForceNew on this resource: renaming the deployment
-  # replaces the function, which replaces this and starts a fresh scan. Nothing
-  # else re-triggers it, which is why the CloudFormation trigger it replaces —
-  # a Create-only custom resource that no-ops on update — behaves the same way.
-  # To force a scan out of band, run the task from the ECS console.
+  # Fires once per Lambda, not per apply: re-invocation hangs off function_name (ForceNew).
 }
