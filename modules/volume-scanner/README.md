@@ -6,7 +6,7 @@ This is the Terraform equivalent of the CloudFormation stack the console deploys
 
 > **Migrating from the CloudFormation stack: delete it first.** The module refuses to apply while the console's scanner is deployed in the region, and tells you so. Every resource that could collide with the stack's is named `streamsec-ebs-scanner-**tf**-…`, deliberately distinct: `ecs:CreateCluster` is an upsert, so an identically named cluster is *silently adopted* rather than rejected, and a later `terraform destroy` would delete the cluster the live stack depends on. Set `allow_cloudformation_coexistence = true` to run both deliberately — each then scans every volume, and each one's retention sweep deletes snapshots tagged `Purpose=ebs-package-collector` account-wide, including the other's.
 
-> **Registration is not wired up yet.** `streamsec_aws_scanner_ack` does not exist in any published provider release, so it is commented out in `ack.tf`. The region still appears in the console — the scanner's own scan reports create the entry, stamped `deployed`, so the badge reads **Connected**. Two gaps until the provider ships it: `terraform destroy` never reports `uninstalled` and the stack metadata stays blank; and on a region ever touched from the console (including merely generating the template) the entry already exists, so scan reports only merge scan fields onto it and the install-state badge keeps whatever the console last set. On those regions ignore the badge and read the scan-status column.
+> **Registration is not wired up yet.** `streamsec_aws_scanner_ack` does not exist in any published provider release, so this module does not attempt it. The region still appears in the console — the scanner's own scan reports create the entry, stamped `deployed`, so the badge reads **Connected**. Two gaps until the provider ships it: `terraform destroy` never reports `uninstalled` and the stack metadata stays blank; and on a region ever touched from the console (including merely generating the template) the entry already exists, so scan reports only merge scan fields onto it and the install-state badge keeps whatever the console last set. On those regions ignore the badge and read the scan-status column.
 
 > **First-time setup: run `terraform apply` twice.** Your Stream Security account must exist before this module can run.
 > ```bash
@@ -22,6 +22,8 @@ The console template presents exactly eleven parameters. Each maps to one module
 | Console parameter | Module input | Default |
 |---|---|---|
 | `ScannerImage` | `scanner_image` | `public.ecr.aws/stream-security/volume-scanner:latest` |
+
+`:latest` is re-resolved on every task launch, matching the console stack. The task role can snapshot and decrypt any volume in the region, so pin a digest (`...@sha256:...`) if your change control requires it.
 | `ScannerRegion` | *(the `aws` provider's region)* | — |
 | `ScanLanguagePackages` | `scan_language_packages` | `true` |
 | `ScanDatabases` | `scan_databases` | `false` |
@@ -120,7 +122,7 @@ The task role is least-privilege:
 - read-only `ec2:Describe{Instances,Volumes,Snapshots}`
 - `ec2:CreateSnapshot`, with tagging restricted to `Purpose = ebs-package-collector`
 - `ec2:DeleteSnapshot` and EBS-direct block reads **only** on snapshots carrying that tag. The tag scopes access, it does not prove ownership: the value is a constant shared by every Stream deployment, so any principal holding `ec2:CreateTags` on snapshots can apply it to a snapshot you care about and have the next retention sweep delete it. Scope `ec2:CreateTags` accordingly — the scanner image sets the tag itself, so the value is not configurable here
-- read-only Lambda, ECS and ECR access granted per `workload_kinds`: `"ecs"` gets no account-wide `lambda:GetFunction` (which downloads function code), `"lambda"` gets no account-wide ECS read, `""` removes all of them
+- read-only Lambda, ECS and ECR access granted per `workload_kinds`: `"ecs"` gets no account-wide `lambda:GetFunction` (which returns function code **and each function's plaintext environment variables** — often where DB passwords live), `"lambda"` gets no account-wide ECS read, `""` removes all of them
 - `ecs:RunTask` scoped to the scanner's own cluster
 - for **encrypted** volumes, exactly `kms:Decrypt` and `kms:DescribeKey` and only via `kms:ViaService = ec2.<region>`, so the role cannot touch the same CMK when it protects S3, RDS or Secrets Manager. Matches the CloudFormation template exactly
 
@@ -134,7 +136,7 @@ Volumes on a **customer-managed CMK** need that key allowed in the scanner's ide
 
 `terraform destroy` removes everything **provided no scan is running**. Scanner tasks are launched out of band, so Terraform has no dependency on them: a destroy overlapping a scan tears down the IAM policies, task definition, secret and log groups first, then fails on the cluster after 10 minutes and the subnets after 20 — leaving the VPC, NAT gateway and Elastic IP behind, and stripping the running orchestrator of the only permission that can delete the snapshots it created. Set `schedule_enabled = false`, apply, wait for tasks to drain, then destroy.
 
-Nothing reports the region as uninstalled to Stream until the `ack.tf` block is enabled, so the badge stays **Connected**; the scan status is the honest signal once heartbeats stop.
+Nothing reports the region as uninstalled to Stream until the provider ships that resource, so the badge stays **Connected**; the scan status is the honest signal once heartbeats stop.
 
 A failed apply is not rolled back either. One that fails after the NAT gateway exists leaves it and its Elastic IP billing until you `terraform destroy` or fix the input and re-apply.
 

@@ -741,6 +741,47 @@ run "pass_role_stays_scoped_and_confined_to_ecs" {
   }
 }
 
+# These four are deliberate decisions the module documents but nothing asserted:
+# a mutation sweep flipped each one and the suite stayed green.
+run "deliberate_decisions_stay_put" {
+  command = plan
+
+  variables {
+    schedule_enabled = false
+  }
+
+  assert {
+    condition     = aws_cloudwatch_event_rule.daily.state == "DISABLED"
+    error_message = "schedule_enabled = false must disable the rule."
+  }
+}
+
+run "schedule_is_enabled_by_default" {
+  command = plan
+
+  assert {
+    condition     = aws_cloudwatch_event_rule.daily.state == "ENABLED"
+    error_message = "The daily rule must be ENABLED by default."
+  }
+
+  assert {
+    condition     = aws_ecs_task_definition.this.skip_destroy == true
+    error_message = "skip_destroy must stay true — every task-definition attribute is ForceNew, so without it an apply deregisters the family's only ACTIVE revision."
+  }
+
+  assert {
+    condition     = length(aws_lambda_function.initial_scan[0].environment[0].variables) == 4
+    error_message = "The initial-scan Lambda's four env vars are its whole contract with initial_scan.py; a missing one is a KeyError that silently skips the first scan."
+  }
+
+  assert {
+    condition = toset(keys(aws_lambda_function.initial_scan[0].environment[0].variables)) == toset([
+      "CLUSTER_ARN", "TASK_DEF_ARN", "SUBNET_IDS", "SECURITY_GROUP_ID"
+    ])
+    error_message = "initial_scan.py reads exactly these four env vars by name."
+  }
+}
+
 run "kms_grants_are_present_by_default" {
   command = plan
 

@@ -132,6 +132,24 @@ run "module_owned_private_subnet_actually_routes_to_the_nat" {
   }
 }
 
+run "documented_network_divergences_stay_put" {
+  command = plan
+
+  # Deliberately false where CloudFormation sets true: nothing launches in the
+  # public subnet (the NAT uses an EIP), and true trips CIS.
+  assert {
+    condition     = aws_subnet.public[0].map_public_ip_on_launch == false
+    error_message = "The public subnet must not auto-assign public IPs."
+  }
+
+  # All-protocols on purpose: SG egress also governs DNS to the VPC resolver, so
+  # narrowing to tcp/443 breaks name resolution for every scan.
+  assert {
+    condition     = aws_vpc_security_group_egress_rule.all.ip_protocol == "-1"
+    error_message = "Scanner egress must stay all-protocols; tcp/443 would break DNS."
+  }
+}
+
 run "default_provisions_the_scanner_vpc" {
   command = plan
 
@@ -190,12 +208,16 @@ run "concurrency_within_the_subnet_capacity_is_accepted" {
 
 # The EBS interface endpoint puts an ENI of its own in the private subnet; miss
 # it and the last child task fails with an opaque ResourceInitializationError.
+# 9 shards, not 10: at 10 the peak (12) exceeds capacity both with the endpoint
+# ENI counted (10) and without it (11), so the run passed either way and the term
+# it is named after was untested. At 9, peak 11 fails against capacity 10 and
+# passes against 11, so dropping the term turns this red.
 run "endpoint_eni_is_counted_against_subnet_capacity" {
   command = plan
 
   variables {
     scanner_vpc_cidr      = "10.255.0.0/27"
-    max_concurrent_shards = 10
+    max_concurrent_shards = 9
   }
 
   expect_failures = [aws_subnet.private]

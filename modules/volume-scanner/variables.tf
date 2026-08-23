@@ -156,6 +156,11 @@ variable "ephemeral_storage_size_gib" {
     condition     = var.ephemeral_storage_size_gib >= 21 && var.ephemeral_storage_size_gib <= 200
     error_message = "ephemeral_storage_size_gib must be between 21 and 200 (Fargate limits)."
   }
+
+  validation {
+    condition     = floor(var.ephemeral_storage_size_gib) == var.ephemeral_storage_size_gib
+    error_message = "ephemeral_storage_size_gib must be a whole number of GiB."
+  }
 }
 
 variable "scanner_vpc_cidr" {
@@ -230,6 +235,11 @@ variable "log_retention_days" {
     )
     error_message = "log_retention_days must be one of CloudWatch's retention values: 0 (forever), 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288 or 3653."
   }
+
+  validation {
+    condition     = floor(var.log_retention_days) == var.log_retention_days
+    error_message = "log_retention_days must be a whole number of days."
+  }
 }
 
 variable "collection_token_secret_name" {
@@ -256,6 +266,11 @@ variable "secret_recovery_window_days" {
   validation {
     condition     = var.secret_recovery_window_days == 0 || (var.secret_recovery_window_days >= 7 && var.secret_recovery_window_days <= 30)
     error_message = "secret_recovery_window_days must be 0 (delete immediately) or between 7 and 30."
+  }
+
+  validation {
+    condition     = floor(var.secret_recovery_window_days) == var.secret_recovery_window_days
+    error_message = "secret_recovery_window_days must be a whole number of days."
   }
 }
 

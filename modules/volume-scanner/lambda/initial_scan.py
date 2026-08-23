@@ -8,8 +8,10 @@ fallback, and the error shows in this function's CloudWatch logs.
 
 import os
 import time
+import uuid
 
 import boto3
+from botocore.config import Config
 
 # aws_lambda_invocation only re-invokes when the Lambda is replaced, so a failure
 # here is never retried. Retry the codes that clear on their own — usually IAM
@@ -17,6 +19,16 @@ import boto3
 # is listed for the same transient reason (subnet/SG not yet visible to ECS); a
 # genuinely bad config burns the full ~50s ladder before failing.
 RETRY_DELAYS_SECONDS = (5, 10, 15, 20)
+
+# Bounded so the ladder cannot outrun the Lambda timeout. Without this the client
+# inherits 60s connect + 60s read and legacy retries, and a timeout is not a
+# catchable exception — it would fail the invocation and, through
+# aws_lambda_invocation's FunctionError handling, the apply itself.
+CLIENT_CONFIG = Config(
+    connect_timeout=5,
+    read_timeout=10,
+    retries={"max_attempts": 2, "mode": "standard"},
+)
 
 RETRYABLE_ERROR_CODES = frozenset(
     {
@@ -42,7 +54,26 @@ def _error_code(exc):
 
 
 def handler(event, context):
-    ecs = boto3.client("ecs")
+    try:
+        return _run(context)
+    except Exception as exc:  # noqa: BLE001
+        # The module promises in three places that this never fails an apply.
+        # boto3.client() construction and anything else outside the inner blocks
+        # lands here rather than surfacing as a FunctionError.
+        print(f"initial scan aborted: {exc}")
+        return {"task_arn": "", "error": str(exc)[:256]}
+
+
+def _run(context):
+    ecs = boto3.client("ecs", config=CLIENT_CONFIG)
+
+    # One token for the whole ladder. botocore auto-fills clientToken, but it does
+    # so per API call, so each retry below would otherwise mint a fresh one — and
+    # a RunTask that reached ECS and created the task before the response was lost
+    # would be re-issued as a second orchestrator. Two orchestrators double
+    # snapshot and Fargate spend and each retention sweep deletes the other's
+    # snapshots.
+    client_token = str(uuid.uuid4())
 
     # The daily rule and this one-shot each launch an orchestrator that snapshots
     # every volume in the region and fans out children, so an apply overlapping a
@@ -64,6 +95,11 @@ def handler(event, context):
     for attempt in range(attempts):
         if attempt:
             delay = RETRY_DELAYS_SECONDS[attempt - 1]
+            # A sleep that outlives the invocation is an uncatchable timeout.
+            remaining = context.get_remaining_time_in_millis() / 1000 if context else 999
+            if remaining < delay + 15:
+                print(f"initial scan out of time ({remaining:.0f}s left); the daily schedule will pick it up")
+                break
             print(f"initial scan retry {attempt}/{attempts - 1} in {delay}s")
             time.sleep(delay)
 
@@ -71,6 +107,7 @@ def handler(event, context):
             response = ecs.run_task(
                 cluster=os.environ["CLUSTER_ARN"],
                 taskDefinition=os.environ["TASK_DEF_ARN"],
+                clientToken=client_token,
                 launchType="FARGATE",
                 count=1,
                 networkConfiguration={
