@@ -38,3 +38,25 @@ override.tf.json
 # Ignore CLI configuration files
 .terraformrc
 terraform.rc
+
+# Local test harnesses and credentials — never commit. Stream Security provider
+# credentials belong in the environment (STREAMSEC_HOST / STREAMSEC_WORKSPACE_ID
+# / STREAMSEC_API_TOKEN), never in a file. `local-tests/` is already covered
+# above; `*.env` covers `.env` too.
+*.env
+env.sh
+# Plan files hold the collection token in plaintext. `tfplan` with no extension
+# is the name the usage docs tell people to type, and it matched none of the
+# patterns below.
+# archive_file writes the Lambda zip into the module directory, and Python leaves
+# __pycache__ next to the source. A .pyc was committed on this branch before
+# these were added.
+__pycache__/
+*.py[cod]
+modules/*/lambda/*.zip
+
+tfplan
+tfplan.*
+*.tfplan
+*.tfplan.*
+scanner-test/
