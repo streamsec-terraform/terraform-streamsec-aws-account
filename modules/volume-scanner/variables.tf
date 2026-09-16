@@ -243,7 +243,7 @@ variable "log_retention_days" {
 }
 
 variable "collection_token_secret_name" {
-  description = "Base name for the Secrets Manager secret holding the collection token. Region and a random suffix are appended."
+  description = "Prefix for the Secrets Manager secret holding the collection token. Region and a unique suffix are appended."
   type        = string
   default     = "streamsec-scanner-collection-token"
   nullable    = false

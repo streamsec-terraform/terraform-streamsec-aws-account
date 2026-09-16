@@ -49,6 +49,6 @@ output "collection_token_secret_arn" {
 }
 
 output "collection_token_secret_name" {
-  description = "Name of the Secrets Manager secret holding the scanner's collection token. Carries a random suffix, so read it from here rather than reconstructing it."
+  description = "Name of the Secrets Manager secret holding the scanner's collection token. Carries a generated suffix, so read it from here rather than reconstructing it."
   value       = aws_secretsmanager_secret.collection_token.name
 }

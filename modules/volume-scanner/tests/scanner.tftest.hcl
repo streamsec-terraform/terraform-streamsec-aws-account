@@ -225,21 +225,15 @@ run "resource_prefix_is_applied" {
     error_message = "Resource names must carry resource_prefix and the region."
   }
 
-  # startswith, not equality: the name carries a random suffix so that
-  # destroy-then-apply works with a non-zero secret_recovery_window_days.
+  # name_prefix is the configured argument, so it is known here; .name is
+  # provider-generated and under mock_provider is a random token, so nothing
+  # about it can be asserted in this suite.
   assert {
-    condition     = startswith(aws_secretsmanager_secret.collection_token.name, "acme-streamsec-scanner-collection-token-us-east-1-")
-    error_message = "The secret name must carry resource_prefix and the region."
-  }
-
-  assert {
-    condition     = length(aws_secretsmanager_secret.collection_token.name) > length("acme-streamsec-scanner-collection-token-us-east-1-")
-    error_message = "The secret name must end in a random suffix."
+    condition     = aws_secretsmanager_secret.collection_token.name_prefix == "acme-streamsec-scanner-collection-token-us-east-1-"
+    error_message = "The secret prefix must carry resource_prefix and the region."
   }
 }
 
-# The module must refuse to sit alongside the console's CloudFormation scanner:
-# each one's retention sweep deletes the other's Purpose-tagged snapshots.
 run "refuses_to_deploy_alongside_the_cloudformation_scanner" {
   command = plan
 
@@ -695,15 +689,22 @@ run "whitespace_only_workload_kinds_is_rejected" {
   expect_failures = [var.workload_kinds]
 }
 
-run "secret_suffix_avoids_the_shape_aws_warns_about" {
+run "secret_name_is_generated_not_fixed" {
   command = apply
 
-  # AWS documents that a name ending in a hyphen plus SIX characters collides
-  # with the suffix Secrets Manager appends itself, so a partial-ARN lookup can
-  # resolve to the wrong secret.
+  # A fixed name is the bug: identical on both sides of a create_before_destroy
+  # replacement, so the new secret fails with ResourceExistsException. The
+  # module must hand the provider a prefix and let it generate the rest.
+  # Reproduced and fixed against real Secrets Manager on 2026-09-16.
   assert {
-    condition     = length(regexall("-[a-z0-9]{6}$", aws_secretsmanager_secret.collection_token.name)) == 0
-    error_message = "The secret name must not end in a hyphen plus six characters."
+    condition     = aws_secretsmanager_secret.collection_token.name_prefix == "streamsec-scanner-collection-token-us-east-1-"
+    error_message = "The secret must be created with name_prefix, not a fixed name."
+  }
+
+  # Trailing hyphen keeps the generated suffix cleanly separated from the prefix.
+  assert {
+    condition     = endswith(aws_secretsmanager_secret.collection_token.name_prefix, "-")
+    error_message = "The secret prefix must end in a hyphen."
   }
 }
 

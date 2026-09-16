@@ -202,25 +202,24 @@ locals {
   ]
 }
 
-# Random suffix: a deterministic name makes destroy-then-apply fail for the recovery window.
-resource "random_string" "secret_suffix" {
-  # Eight, not six: six would collide with the suffix Secrets Manager appends itself.
-  length  = 8
-  upper   = false
-  special = false
-}
-
 # Secrets Manager keeps the token out of the task definition; state still holds it in plaintext.
 # The coexistence gate is repeated here: this secret depends on neither the VPC nor the cluster.
 resource "aws_secretsmanager_secret" "collection_token" {
-  name                    = "${local.name_prefix}${var.collection_token_secret_name}-${local.region}-${random_string.secret_suffix.result}"
+  # name_prefix, not name: the provider appends a unique suffix on every create,
+  # which is what makes create_before_destroy below safe. A fixed name — even
+  # with a random suffix held in state — is identical on both sides of a
+  # replacement, so the new secret collided with the old one
+  # (ResourceExistsException). This also matches the CloudFormation template,
+  # whose secret has no Name and takes a generated one.
+  name_prefix             = "${local.name_prefix}${var.collection_token_secret_name}-${local.region}-"
   description             = "Stream Security volume scanner collection token"
   recovery_window_in_days = var.secret_recovery_window_days
 
   tags = local.tags
 
   lifecycle {
-    # Renaming the secret is ForceNew; without this the live secret is deleted first.
+    # Replacement is ForceNew; without this the live secret is deleted first and
+    # its name stays reserved for the recovery window.
     create_before_destroy = true
 
     precondition {

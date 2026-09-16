@@ -115,7 +115,7 @@ Override `schedule_expression` with a cron expression only. An EventBridge `rate
 
 ## Permissions granted
 
-The collection token is injected through the task definition's `secrets` block from Secrets Manager, never as a plaintext environment variable — anything with `ecs:DescribeTaskDefinition`, including the scanner task role, can read that. It is **not** kept out of Terraform state: `aws_secretsmanager_secret_version` stores it in plaintext, so treat state as secret material. The secret name carries a random suffix, which is what makes destroy-then-apply work with a non-zero `secret_recovery_window_days`, so read it from the `collection_token_secret_name` / `collection_token_secret_arn` outputs.
+The collection token is injected through the task definition's `secrets` block from Secrets Manager, never as a plaintext environment variable — anything with `ecs:DescribeTaskDefinition`, including the scanner task role, can read that. It is **not** kept out of Terraform state: `aws_secretsmanager_secret_version` stores it in plaintext, so treat state as secret material. The secret name carries a generated suffix (`name_prefix`), so a replacement never collides with the secret it replaces and destroy-then-apply works with a non-zero `secret_recovery_window_days`; read it from the `collection_token_secret_name` / `collection_token_secret_arn` outputs.
 
 The task role is least-privilege:
 
@@ -148,7 +148,6 @@ A failed apply is not rolled back either. One that fails after the NAT gateway e
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.3 |
 | <a name="requirement_archive"></a> [archive](#requirement\_archive) | >= 2.0 |
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | ~> 6.0 |
-| <a name="requirement_random"></a> [random](#requirement\_random) | >= 3.0 |
 | <a name="requirement_streamsec"></a> [streamsec](#requirement\_streamsec) | >= 1.7 |
 
 ## Providers
@@ -157,7 +156,6 @@ A failed apply is not rolled back either. One that fails after the NAT gateway e
 | ---- | ------- |
 | <a name="provider_archive"></a> [archive](#provider\_archive) | >= 2.0 |
 | <a name="provider_aws"></a> [aws](#provider\_aws) | ~> 6.0 |
-| <a name="provider_random"></a> [random](#provider\_random) | >= 3.0 |
 | <a name="provider_streamsec"></a> [streamsec](#provider\_streamsec) | >= 1.7 |
 
 ## Modules
@@ -207,7 +205,6 @@ No modules.
 | [aws_vpc_endpoint.s3](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_endpoint) | resource |
 | [aws_vpc_security_group_egress_rule.all](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_security_group_egress_rule) | resource |
 | [aws_vpc_security_group_ingress_rule.endpoints_https](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_security_group_ingress_rule) | resource |
-| [random_string.secret_suffix](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/string) | resource |
 | [archive_file.initial_scan](https://registry.terraform.io/providers/hashicorp/archive/latest/docs/data-sources/file) | data source |
 | [aws_availability_zones.available](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/availability_zones) | data source |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
@@ -229,7 +226,7 @@ No modules.
 | Name | Description | Type | Default | Required |
 | ---- | ----------- | ---- | ------- | :------: |
 | <a name="input_allow_cloudformation_coexistence"></a> [allow\_cloudformation\_coexistence](#input\_allow\_cloudformation\_coexistence) | Allow deploying alongside another scanner in the same region. Off by default: two scanners scan every volume twice and delete each other's snapshots. | `bool` | `false` | no |
-| <a name="input_collection_token_secret_name"></a> [collection\_token\_secret\_name](#input\_collection\_token\_secret\_name) | Base name for the Secrets Manager secret holding the collection token. Region and a random suffix are appended. | `string` | `"streamsec-scanner-collection-token"` | no |
+| <a name="input_collection_token_secret_name"></a> [collection\_token\_secret\_name](#input\_collection\_token\_secret\_name) | Prefix for the Secrets Manager secret holding the collection token. Region and a unique suffix are appended. | `string` | `"streamsec-scanner-collection-token"` | no |
 | <a name="input_create_ebs_vpc_endpoint"></a> [create\_ebs\_vpc\_endpoint](#input\_create\_ebs\_vpc\_endpoint) | Create the EBS Direct API interface endpoint so snapshot block reads bypass the NAT Gateway, which is the bulk of the scanner's egress. On by default when the module creates the VPC. Leave unset otherwise. | `bool` | `null` | no |
 | <a name="input_create_scanner_vpc"></a> [create\_scanner\_vpc](#input\_create\_scanner\_vpc) | Create a dedicated VPC, subnets, Internet Gateway and NAT Gateway for the scanner. False to use your own private subnets. | `bool` | `true` | no |
 | <a name="input_customer_id"></a> [customer\_id](#input\_customer\_id) | Stream Security workspace id — the same value as the provider's workspace\_id. A wrong value is silent: SBOMs are dropped by ingest and the region still looks healthy. | `string` | `null` | no |
@@ -265,7 +262,7 @@ No modules.
 | ---- | ----------- |
 | <a name="output_cluster_arn"></a> [cluster\_arn](#output\_cluster\_arn) | ARN of the ECS cluster running the scanner tasks |
 | <a name="output_collection_token_secret_arn"></a> [collection\_token\_secret\_arn](#output\_collection\_token\_secret\_arn) | ARN of the Secrets Manager secret holding the scanner's collection token |
-| <a name="output_collection_token_secret_name"></a> [collection\_token\_secret\_name](#output\_collection\_token\_secret\_name) | Name of the Secrets Manager secret holding the scanner's collection token. Carries a random suffix, so read it from here rather than reconstructing it. |
+| <a name="output_collection_token_secret_name"></a> [collection\_token\_secret\_name](#output\_collection\_token\_secret\_name) | Name of the Secrets Manager secret holding the scanner's collection token. Carries a generated suffix, so read it from here rather than reconstructing it. |
 | <a name="output_log_group_name"></a> [log\_group\_name](#output\_log\_group\_name) | CloudWatch log group receiving the scanner container logs |
 | <a name="output_nat_gateway_public_ip"></a> [nat\_gateway\_public\_ip](#output\_nat\_gateway\_public\_ip) | Stable egress IP of the scanner's NAT Gateway, for allowlisting in upstream firewalls. Null when create\_scanner\_vpc is false, since egress is then through infrastructure this module does not own. |
 | <a name="output_scanner_subnet_ids"></a> [scanner\_subnet\_ids](#output\_scanner\_subnet\_ids) | Subnets the scanner Fargate tasks run in |
