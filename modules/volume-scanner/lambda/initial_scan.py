@@ -96,8 +96,10 @@ def _run(context):
         if attempt:
             delay = RETRY_DELAYS_SECONDS[attempt - 1]
             # A sleep that outlives the invocation is an uncatchable timeout.
+            # One run_task can take ~30s worst case under CLIENT_CONFIG (two
+            # attempts of 5s connect + 10s read, plus backoff), so budget for it.
             remaining = context.get_remaining_time_in_millis() / 1000 if context else 999
-            if remaining < delay + 15:
+            if remaining < delay + 35:
                 print(f"initial scan out of time ({remaining:.0f}s left); the daily schedule will pick it up")
                 break
             print(f"initial scan retry {attempt}/{attempts - 1} in {delay}s")
@@ -135,7 +137,10 @@ def _run(context):
             return {"task_arn": task_arn, "failures": [str(f) for f in failures]}
 
         # RunTask can answer 200 with no task and a `failures` entry instead of
-        # raising — capacity, a still-propagating role, a bad subnet. Retry it too.
+        # raising — capacity, a still-propagating role, a bad subnet. Retry it too,
+        # under a fresh token: nothing was created, and reusing the token would
+        # have ECS replay this same cached failure.
+        client_token = str(uuid.uuid4())
         last_error = str(failures)[:256]
         print(f"initial scan run_task failures: {failures}")
 

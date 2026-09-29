@@ -345,7 +345,11 @@ resource "aws_iam_role" "initial_scan" {
         Action    = "sts:AssumeRole"
         Condition = {
           StringEquals = { "aws:SourceAccount" = local.account_id }
-          ArnLike      = { "aws:SourceArn" = "arn:${local.partition}:lambda:${local.region}:${local.account_id}:function:*" }
+          # This function only (a known string, so no cycle), qualified or not.
+          ArnLike = { "aws:SourceArn" = [
+            "arn:${local.partition}:lambda:${local.region}:${local.account_id}:function:${local.regional_name}-initial-scan",
+            "arn:${local.partition}:lambda:${local.region}:${local.account_id}:function:${local.regional_name}-initial-scan:*",
+          ] }
         }
       }
     ]

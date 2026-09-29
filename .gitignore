@@ -45,16 +45,14 @@ terraform.rc
 # above; `*.env` covers `.env` too.
 *.env
 env.sh
-# Plan files hold the collection token in plaintext. `tfplan` with no extension
-# is the name the usage docs tell people to type, and it matched none of the
-# patterns below.
-# archive_file writes the Lambda zip into the module directory, and Python leaves
-# __pycache__ next to the source. A .pyc was committed on this branch before
-# these were added.
+# Python leaves __pycache__ next to the Lambda source (the zip archive_file writes
+# there is already covered by *.zip above). A .pyc was committed on this branch
+# before these were added.
 __pycache__/
 *.py[cod]
-modules/*/lambda/*.zip
 
+# Plan files hold the collection token in plaintext. `tfplan` with no extension
+# is the name the usage docs tell people to type, and no earlier pattern matched it.
 tfplan
 tfplan.*
 *.tfplan

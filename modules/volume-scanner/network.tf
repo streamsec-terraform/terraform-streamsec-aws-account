@@ -332,7 +332,7 @@ resource "aws_security_group" "this" {
       condition     = length(local.byo_bad_subnets) == 0
       error_message = <<-EOT
         Scanner subnet check failed: ${join("; ", local.byo_bad_subnets)}.
-        Provide a private subnet whose default route targets a NAT Gateway, a NAT instance or appliance ENI, a VPC Endpoint, a Transit Gateway, a Cloud WAN core network, or an Outposts local gateway.
+        Provide a private subnet whose default route targets a NAT Gateway, a NAT instance or appliance ENI, a VPC Endpoint, a Transit Gateway, a virtual private gateway, a Cloud WAN core network, or an Outposts local gateway.
       EOT
     }
 
