@@ -261,9 +261,6 @@ resource "aws_cloudwatch_log_group" "this" {
 
 # One task definition serves both roles: the orchestrator overrides COLLECTOR_ROLE to "worker".
 resource "aws_ecs_task_definition" "this" {
-  # skip_destroy: every attribute is ForceNew, so the only ACTIVE revision would be deregistered.
-  skip_destroy = true
-
   family                   = local.name
   cpu                      = var.task_cpu
   memory                   = var.task_memory
@@ -325,6 +322,10 @@ resource "aws_ecs_task_definition" "this" {
   depends_on = [aws_secretsmanager_secret_version.collection_token]
 
   lifecycle {
+    # Every attribute is ForceNew: register the replacement before deregistering the
+    # old revision, so the family always has an ACTIVE one; destroy still deregisters.
+    create_before_destroy = true
+
     # public.ecr.aws has no aws-cn presence, so fail at plan rather than at task start.
     precondition {
       condition     = local.partition != "aws-cn" || !startswith(var.scanner_image, "public.ecr.aws/")

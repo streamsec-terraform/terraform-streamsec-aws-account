@@ -192,10 +192,11 @@ variable "scanner_vpc_cidr" {
   nullable    = false
 
   # Both bounds fail mid-apply if unchecked: AWS rejects a VPC CIDR larger than /16,
-  # and the block is halved, so anything below /28 is an invalid subnet.
+  # and the block is halved, so anything below /28 is an invalid subnet. cidrnetmask is
+  # IPv4-only: cidrsubnet alone accepts an IPv6 prefix.
   validation {
     # Every operand is total (try) — Terraform only short-circuits && / || from v1.12.
-    condition     = can(cidrsubnet(var.scanner_vpc_cidr, 1, 1)) && try(tonumber(split("/", var.scanner_vpc_cidr)[1]), 0) <= 27 && try(tonumber(split("/", var.scanner_vpc_cidr)[1]), 0) >= 16
+    condition     = can(cidrnetmask(var.scanner_vpc_cidr)) && can(cidrsubnet(var.scanner_vpc_cidr, 1, 1)) && try(tonumber(split("/", var.scanner_vpc_cidr)[1]), 0) <= 27 && try(tonumber(split("/", var.scanner_vpc_cidr)[1]), 0) >= 16
     error_message = "scanner_vpc_cidr must be a valid IPv4 CIDR block between /16 and /27: AWS rejects anything larger, and the block is split into two subnets."
   }
 }

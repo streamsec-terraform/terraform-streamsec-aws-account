@@ -837,8 +837,10 @@ run "schedule_is_enabled_by_default" {
   }
 
   assert {
-    condition     = aws_ecs_task_definition.this.skip_destroy == true
-    error_message = "skip_destroy must stay true — every task-definition attribute is ForceNew, so without it an apply deregisters the family's only ACTIVE revision."
+    # Revision continuity on replace comes from create_before_destroy, which a test
+    # cannot read. skip_destroy would leave an ACTIVE revision behind after destroy.
+    condition     = aws_ecs_task_definition.this.skip_destroy != true
+    error_message = "skip_destroy must stay unset, or terraform destroy leaves the task-definition revision ACTIVE."
   }
 
   assert {
@@ -1029,6 +1031,16 @@ run "too_small_a_vpc_cidr_is_rejected" {
 
   variables {
     scanner_vpc_cidr = "10.255.0.0/28"
+  }
+
+  expect_failures = [var.scanner_vpc_cidr]
+}
+
+run "ipv6_vpc_cidr_is_rejected" {
+  command = plan
+
+  variables {
+    scanner_vpc_cidr = "2001:db8::/16"
   }
 
   expect_failures = [var.scanner_vpc_cidr]
