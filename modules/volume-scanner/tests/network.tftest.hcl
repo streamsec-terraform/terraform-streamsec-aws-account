@@ -192,6 +192,18 @@ run "concurrency_beyond_the_subnet_capacity_is_rejected" {
   expect_failures = [aws_subnet.private]
 }
 
+# The same config that is rejected above fits once workload-only mode launches no
+# instance shards: the peak is the orchestrator and the workload child.
+run "workload_only_does_not_reserve_shard_capacity" {
+  command = plan
+
+  variables {
+    scanner_vpc_cidr      = "10.255.0.0/27"
+    max_concurrent_shards = 20
+    scan_workload_only    = true
+  }
+}
+
 run "concurrency_within_the_subnet_capacity_is_accepted" {
   command = plan
 

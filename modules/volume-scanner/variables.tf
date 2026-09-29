@@ -61,6 +61,28 @@ variable "workload_kinds" {
   }
 }
 
+variable "scan_workload_only" {
+  description = "Scan only the workloads in workload_kinds and skip EC2 instance disks: no snapshots, no volume reads. Containers on EC2-launch-type ECS are then not scanned. Requires a non-empty workload_kinds."
+  type        = bool
+  default     = false
+  nullable    = false
+}
+
+variable "schedule_expression" {
+  description = "EventBridge schedule for the scan, daily by default. Must be a six-field cron expression; rate(...) is rejected."
+  type        = string
+  default     = "cron(0 3 * * ? *)"
+  nullable    = false
+
+  # EventBridge cron takes SIX fields, not Unix cron's five, and must be closed.
+  validation {
+    condition = startswith(var.schedule_expression, "cron(") && endswith(var.schedule_expression, ")") && length(
+      compact(split(" ", trimspace(replace(replace(var.schedule_expression, "cron(", ""), ")", ""))))
+    ) == 6
+    error_message = "schedule_expression must be a closed six-field cron(...) expression: a rate(...) rule fires once at creation as well as on its interval, duplicating the first scan."
+  }
+}
+
 # The orchestrator launches one child Fargate task per shard; the defaults scan 1000 per wave.
 variable "shard_size" {
   description = "Instances per child task. Lower means more parallelism; higher means fewer, longer-running children."
@@ -192,21 +214,6 @@ variable "validate_subnet_egress" {
   type        = bool
   default     = true
   nullable    = false
-}
-
-variable "schedule_expression" {
-  description = "EventBridge schedule for the daily scan. Must be a six-field cron expression; rate(...) is rejected."
-  type        = string
-  default     = "cron(0 3 * * ? *)"
-  nullable    = false
-
-  # EventBridge cron takes SIX fields, not Unix cron's five, and must be closed.
-  validation {
-    condition = startswith(var.schedule_expression, "cron(") && endswith(var.schedule_expression, ")") && length(
-      compact(split(" ", trimspace(replace(replace(var.schedule_expression, "cron(", ""), ")", ""))))
-    ) == 6
-    error_message = "schedule_expression must be a closed six-field cron(...) expression: a rate(...) rule fires once at creation as well as on its interval, duplicating the first scan."
-  }
 }
 
 variable "schedule_enabled" {

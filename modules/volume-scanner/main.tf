@@ -117,7 +117,8 @@ locals {
   # One private IP per task, five reserved per subnet, plus an ENI for the EBS endpoint.
   scanner_private_subnet_capacity = pow(2, 32 - tonumber(split("/", local.scanner_private_subnet_cidr)[1])) - 5 - (local.create_ebs_endpoint ? 1 : 0)
   # Orchestrator + children + the workload child launched when workload_kinds is non-empty.
-  scanner_peak_task_count = var.max_concurrent_shards + 1 + (local.scan_workloads ? 1 : 0)
+  # Workload-only launches no instance shards, so only the orchestrator and workload child.
+  scanner_peak_task_count = (var.scan_workload_only ? 0 : var.max_concurrent_shards) + 1 + (local.scan_workloads ? 1 : 0)
 
   # Revision-less family ARN: children run the current ACTIVE revision, and no self-reference.
   task_definition_family_arn = "arn:${local.partition}:ecs:${local.region}:${local.account_id}:task-definition/${local.name}"
@@ -292,6 +293,8 @@ resource "aws_ecs_task_definition" "this" {
         { name = "COLLECTOR_SCAN_SECRETS", value = tostring(var.scan_secrets) },
         # Normalized, not raw: the scanner's comma split would otherwise see " ecs".
         { name = "COLLECTOR_WORKLOAD_KINDS", value = join(",", local.workload_kind_list) },
+        # Instance shards get false on RunTask; this governs the orchestrator and workload child.
+        { name = "COLLECTOR_WORKLOAD_ONLY", value = tostring(var.scan_workload_only) },
         { name = "COLLECTOR_ROLE", value = "orchestrator" },
         { name = "COLLECTOR_SHARD_SIZE", value = tostring(var.shard_size) },
         { name = "COLLECTOR_MAX_CONCURRENT_SHARDS", value = tostring(var.max_concurrent_shards) },
@@ -342,6 +345,12 @@ resource "aws_ecs_task_definition" "this" {
     precondition {
       condition     = local.tenant_name != ""
       error_message = "tenant_name resolved to an empty string, which tags every SBOM with a tenant that does not exist. Leave it unset to derive the tenant from the provider host, or set your tenant name."
+    }
+
+    # A precondition, not a validation: cross-variable validation needs Terraform 1.9.
+    precondition {
+      condition     = !var.scan_workload_only || local.scan_workloads
+      error_message = "scan_workload_only = true with an empty workload_kinds would scan nothing at all. Set workload_kinds to \"lambda\", \"ecs\" or \"lambda,ecs\", or set scan_workload_only = false to scan EC2 instance disks."
     }
 
     precondition {

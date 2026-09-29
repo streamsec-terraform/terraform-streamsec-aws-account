@@ -63,6 +63,7 @@ run "container_environment_matches_the_cloudformation_defaults" {
         "COLLECTOR_SCAN_AI_WORKLOADS=false",
         "COLLECTOR_SCAN_SECRETS=false",
         "COLLECTOR_WORKLOAD_KINDS=lambda,ecs",
+        "COLLECTOR_WORKLOAD_ONLY=false",
         "COLLECTOR_ROLE=orchestrator",
         "COLLECTOR_SHARD_SIZE=100",
       "COLLECTOR_MAX_CONCURRENT_SHARDS=10"] :
@@ -687,6 +688,32 @@ run "whitespace_only_workload_kinds_is_rejected" {
   }
 
   expect_failures = [var.workload_kinds]
+}
+
+run "workload_only_reaches_the_container" {
+  command = apply
+
+  variables {
+    scan_workload_only = true
+    workload_kinds     = "lambda"
+  }
+
+  assert {
+    condition     = contains([for e in jsondecode(aws_ecs_task_definition.this.container_definitions)[0].environment : "${e.name}=${e.value}"], "COLLECTOR_WORKLOAD_ONLY=true")
+    error_message = "scan_workload_only must reach the container as COLLECTOR_WORKLOAD_ONLY."
+  }
+}
+
+# Mirrors the template's WorkloadOnlyNeedsWorkloadKinds rule: it would scan nothing.
+run "workload_only_without_workload_kinds_is_rejected" {
+  command = plan
+
+  variables {
+    scan_workload_only = true
+    workload_kinds     = ""
+  }
+
+  expect_failures = [aws_ecs_task_definition.this]
 }
 
 run "secret_name_is_generated_not_fixed" {
