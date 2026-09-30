@@ -2,9 +2,9 @@
 ## Requirements
 
 | Name | Version |
-|------|---------|
-| <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.0 |
-| <a name="requirement_aws"></a> [aws](#requirement\_aws) | >= 3.0 |
+| ---- | ------- |
+| <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.3 |
+| <a name="requirement_aws"></a> [aws](#requirement\_aws) | >= 6.0 |
 | <a name="requirement_streamsec"></a> [streamsec](#requirement\_streamsec) | >= 1.12 |
 
 ## Providers
@@ -14,14 +14,18 @@ No providers.
 ## Modules
 
 | Name | Source | Version |
-|------|--------|---------|
+| ---- | ------ | ------- |
 | <a name="module_account"></a> [account](#module\_account) | ../../ | n/a |
 | <a name="module_cost"></a> [cost](#module\_cost) | ../../modules/cost | n/a |
+| <a name="module_eks_audit_us_east_1"></a> [eks\_audit\_us\_east\_1](#module\_eks\_audit\_us\_east\_1) | ../../modules/eks-audit | n/a |
+| <a name="module_eks_audit_us_east_2"></a> [eks\_audit\_us\_east\_2](#module\_eks\_audit\_us\_east\_2) | ../../modules/eks-audit | n/a |
 | <a name="module_flow_logs"></a> [flow\_logs](#module\_flow\_logs) | ../../modules/flow-logs | n/a |
 | <a name="module_iam_activity"></a> [iam\_activity](#module\_iam\_activity) | ../../modules/iam-activity | n/a |
 | <a name="module_real_time_us_east_1"></a> [real\_time\_us\_east\_1](#module\_real\_time\_us\_east\_1) | ../../modules/real-time-events | n/a |
 | <a name="module_real_time_us_east_2"></a> [real\_time\_us\_east\_2](#module\_real\_time\_us\_east\_2) | ../../modules/real-time-events | n/a |
 | <a name="module_response"></a> [response](#module\_response) | ../../modules/response | n/a |
+| <a name="module_volume_scanner_us_east_1"></a> [volume\_scanner\_us\_east\_1](#module\_volume\_scanner\_us\_east\_1) | ../../modules/volume-scanner | n/a |
+| <a name="module_volume_scanner_us_east_2"></a> [volume\_scanner\_us\_east\_2](#module\_volume\_scanner\_us\_east\_2) | ../../modules/volume-scanner | n/a |
 
 ## Resources
 

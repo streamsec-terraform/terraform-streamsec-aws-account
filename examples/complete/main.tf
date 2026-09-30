@@ -126,3 +126,36 @@ module "eks_audit_us_east_2" {
   }
   depends_on = [module.account]
 }
+
+# Agentless vulnerability scanning — one instance per region you want scanned.
+# customer_id is the provider's workspace_id. Delete the console's CloudFormation
+# scanner stack for the region first; the module refuses to apply alongside one.
+module "volume_scanner_us_east_1" {
+  source      = "../../modules/volume-scanner"
+  customer_id = "xxxxxxxxxxxx"
+  providers = {
+    aws = aws.aws-east-1
+  }
+  depends_on = [module.account]
+}
+
+# Bring your own private subnets instead of a dedicated VPC. Each needs a
+# 0.0.0.0/0 route to real egress (NAT gateway, Transit Gateway, VPN, appliance).
+# No VPC endpoints are created here, so block reads cross your NAT.
+module "volume_scanner_us_east_2" {
+  source             = "../../modules/volume-scanner"
+  customer_id        = "xxxxxxxxxxxx"
+  create_scanner_vpc = false
+  vpc_id             = "vpc-xxxxxxxxxxxxx"
+  subnet_ids         = ["subnet-xxxxxxxxxxxxx"]
+
+  # Optional scanners — all off by default except language packages.
+  # scan_secrets      = true
+  # scan_ai_workloads = true
+  # scan_databases    = true
+
+  providers = {
+    aws = aws.aws-east-2
+  }
+  depends_on = [module.account]
+}
