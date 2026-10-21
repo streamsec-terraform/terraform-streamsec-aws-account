@@ -8,7 +8,7 @@ terraform {
   required_providers {
     streamsec = {
       source  = "streamsec-terraform/streamsec"
-      version = ">= 1.12"
+      version = ">= 1.14.0" # modules/volume-scanner
     }
     aws = {
       source  = "hashicorp/aws"

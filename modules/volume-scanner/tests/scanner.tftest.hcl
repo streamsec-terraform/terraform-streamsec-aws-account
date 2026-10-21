@@ -91,8 +91,8 @@ run "container_environment_matches_the_cloudformation_defaults" {
   }
 
   assert {
-    condition     = contains([for e in jsondecode(aws_ecs_task_definition.this.container_definitions)[0].environment : "${e.name}=${e.value}"], "COLLECTOR_ECS_TASK_DEF_ARN=arn:aws:ecs:us-east-1:111111111111:task-definition/streamsec-ebs-scanner-tf")
-    error_message = "COLLECTOR_ECS_TASK_DEF_ARN must be the revision-less family ARN."
+    condition     = contains([for e in jsondecode(aws_ecs_task_definition.this.container_definitions)[0].environment : "${e.name}=${e.value}"], "COLLECTOR_ECS_TASK_DEF_ARN=arn:aws:ecs:us-east-1:111111111111:task-definition/streamsec-ebs-scanner-tf-worker")
+    error_message = "The orchestrator's COLLECTOR_ECS_TASK_DEF_ARN must be the revision-less worker family ARN."
   }
 
   # The three values the orchestrator launches children WITH; nothing else asserts
@@ -157,13 +157,18 @@ run "task_sizing_matches_the_cloudformation_template" {
   command = plan
 
   assert {
-    condition     = aws_ecs_task_definition.this.cpu == "4096" && aws_ecs_task_definition.this.memory == "16384"
-    error_message = "Default task sizing must stay 4096 CPU / 16384 memory."
+    condition     = aws_ecs_task_definition.worker.cpu == "4096" && aws_ecs_task_definition.worker.memory == "16384"
+    error_message = "Default worker sizing must stay 4096 CPU / 16384 memory."
   }
 
   assert {
-    condition     = aws_ecs_task_definition.this.ephemeral_storage[0].size_in_gib == 50
-    error_message = "Ephemeral storage must default to 50 GiB."
+    condition     = aws_ecs_task_definition.this.cpu == "512" && aws_ecs_task_definition.this.memory == "1024"
+    error_message = "The orchestrator must run at the CloudFormation stack's 512 CPU / 1024 memory."
+  }
+
+  assert {
+    condition     = aws_ecs_task_definition.worker.ephemeral_storage[0].size_in_gib == 50
+    error_message = "Worker ephemeral storage must default to 50 GiB."
   }
 
   assert {
@@ -345,9 +350,10 @@ run "names_cannot_collide_with_the_cloudformation_stack" {
     condition = alltrue([
       aws_ecs_cluster.this.name != "streamsec-ebs-scanner-us-east-1",
       aws_ecs_task_definition.this.family != "streamsec-ebs-scanner",
+      aws_ecs_task_definition.worker.family != "streamsec-ebs-scanner-worker",
       aws_cloudwatch_log_group.this.name != "/ecs/streamsec-ebs-scanner-us-east-1",
     ])
-    error_message = "Cluster, task family and log group must differ from the CloudFormation names."
+    error_message = "Cluster, task families and log group must differ from the CloudFormation names."
   }
 }
 
@@ -376,7 +382,19 @@ run "customer_id_is_required" {
     customer_id = null
   }
 
-  expect_failures = [aws_ecs_task_definition.this]
+  # On the worker, the first task definition registered; the orchestrator waits for it.
+  expect_failures = [aws_ecs_task_definition.worker]
+}
+
+run "a_non_https_stream_host_is_refused" {
+  command = plan
+
+  override_data {
+    target = data.streamsec_host.this
+    values = { url = "http://acme.streamsec.io" }
+  }
+
+  expect_failures = [aws_ecs_task_definition.worker]
 }
 
 run "collection_token_is_injected_from_secrets_manager" {
@@ -548,16 +566,26 @@ run "initial_scan_role_can_check_for_a_running_scan" {
     error_message = "The EventBridge role must not hold ecs:ListTasks."
   }
 
-  # The scanner task role DOES hold account-wide ecs:ListTasks for workload
-  # discovery, so it is asserted as expected rather than absent.
+  # The scanner task role DOES hold ecs:ListTasks twice: account-wide for
+  # workload discovery, and cluster-scoped for the reaper (DEV-24069).
   assert {
     condition = length([
       for s in concat(
         jsondecode(aws_iam_role_policy.task.policy).Statement,
         jsondecode(aws_iam_role_policy.orchestrator.policy).Statement,
-      ) : s if contains(flatten([s.Action]), "ecs:ListTasks")
+      ) : s if contains(flatten([s.Action]), "ecs:ListTasks") && try(s.Condition, null) == null
     ]) == 1
     error_message = "The task role must hold exactly one account-wide ecs:ListTasks."
+  }
+
+  assert {
+    condition = length([
+      for s in concat(
+        jsondecode(aws_iam_role_policy.task.policy).Statement,
+        jsondecode(aws_iam_role_policy.orchestrator.policy).Statement,
+      ) : s if contains(flatten([s.Action]), "ecs:ListTasks") && try(s.Condition.ArnEquals["ecs:cluster"], "") == aws_ecs_cluster.this.arn
+    ]) == 1
+    error_message = "The task role must hold exactly one cluster-scoped ecs:ListTasks, the reaper's."
   }
 }
 
@@ -601,10 +629,10 @@ run "run_task_resources_keep_their_deliberate_split" {
       for s in jsondecode(aws_iam_role_policy.orchestrator.policy).Statement :
       flatten([s.Resource]) if try(s.Sid, "") == "RunScannerTask"
       ])) == toset([
-      local.task_definition_family_arn,
-      "${local.task_definition_family_arn}:*",
+      local.worker_task_definition_family_arn,
+      "${local.worker_task_definition_family_arn}:*",
     ])
-    error_message = "The orchestrator's RunTask grant must stay on the family ARN and family ARN:*."
+    error_message = "The orchestrator's RunTask grant must stay on the worker family ARN and worker family ARN:*."
   }
 
   assert {
@@ -677,7 +705,7 @@ run "china_partition_rejects_the_public_ecr_default_image" {
     values = { region = "cn-north-1" }
   }
 
-  expect_failures = [aws_ecs_task_definition.this]
+  expect_failures = [aws_ecs_task_definition.worker]
 }
 
 run "whitespace_only_workload_kinds_is_rejected" {
@@ -713,7 +741,7 @@ run "workload_only_without_workload_kinds_is_rejected" {
     workload_kinds     = ""
   }
 
-  expect_failures = [aws_ecs_task_definition.this]
+  expect_failures = [aws_ecs_task_definition.worker]
 }
 
 run "secret_name_is_generated_not_fixed" {
@@ -976,7 +1004,8 @@ run "irregular_fargate_256_row_rejects_1536" {
     task_memory = "1536"
   }
 
-  expect_failures = [aws_ecs_task_definition.this]
+  # The sizing inputs size the worker, so the worker carries the check.
+  expect_failures = [aws_ecs_task_definition.worker]
 }
 
 run "valid_fargate_256_pair_is_accepted" {
@@ -988,7 +1017,7 @@ run "valid_fargate_256_pair_is_accepted" {
   }
 
   assert {
-    condition     = aws_ecs_task_definition.this.memory == "2048"
+    condition     = aws_ecs_task_definition.worker.memory == "2048"
     error_message = "256/2048 is a valid Fargate pair and must be accepted."
   }
 }

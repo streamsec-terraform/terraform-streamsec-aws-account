@@ -14,6 +14,9 @@ data "streamsec_aws_account" "this" {
 }
 
 locals {
+  # Reported to Stream by the install acknowledgement. Bump it with each release tag.
+  module_version = "1.16.0"
+
   region     = data.aws_region.current.region
   account_id = data.aws_caller_identity.current.account_id
   partition  = data.aws_partition.current.partition
@@ -120,14 +123,27 @@ locals {
   # Workload-only launches no instance shards, so only the orchestrator and workload child.
   scanner_peak_task_count = (var.scan_workload_only ? 0 : var.max_concurrent_shards) + 1 + (local.scan_workloads ? 1 : 0)
 
-  # Revision-less family ARN: children run the current ACTIVE revision, and no self-reference.
-  task_definition_family_arn = "arn:${local.partition}:ecs:${local.region}:${local.account_id}:task-definition/${local.name}"
+  # Revision-less family ARNs: a launch runs the current ACTIVE revision, and no self-reference.
+  task_definition_family_arn        = "arn:${local.partition}:ecs:${local.region}:${local.account_id}:task-definition/${local.name}"
+  worker_name                       = "${local.name}-worker"
+  worker_task_definition_family_arn = "arn:${local.partition}:ecs:${local.region}:${local.account_id}:task-definition/${local.worker_name}"
 
-  # RunTask authorizes on the ARN passed: the orchestrator passes the family ARN, others a revision.
-  run_task_resources = [
-    local.task_definition_family_arn,
-    "${local.task_definition_family_arn}:*",
+  # The orchestrator names the worker family without a revision; ECS resolves it to the newest.
+  orchestrator_run_task_resources = [
+    local.worker_task_definition_family_arn,
+    "${local.worker_task_definition_family_arn}:*",
   ]
+
+  # DEV-23899: the CloudFormation stack's ScannerTaskSizes. The orchestrator only discovers
+  # instances and waits on workers; task_cpu / task_memory size the workers.
+  orchestrator_cpu    = "512"
+  orchestrator_memory = "1024"
+
+  # A worker's retry runs on-demand at this size: the stack's Retry (4096 / 16384), or the
+  # worker's own when larger, so a shard that ran out of memory is never retried on less.
+  retry_uses_worker_size = tonumber(var.task_cpu) >= 4096 && local.task_memory_number >= 16384
+  retry_cpu              = local.retry_uses_worker_size ? var.task_cpu : "4096"
+  retry_memory           = local.retry_uses_worker_size ? var.task_memory : "16384"
 
   # Two separate gates. byo_enabled feeds preconditions only, where unknown defers the check.
   # byo_validate feeds count/for_each, so it must be known at plan time: bool variables only.
@@ -252,6 +268,13 @@ resource "aws_ecs_cluster" "this" {
   }
 }
 
+# DEV-23899: a worker's first attempt runs on Fargate Spot, its retries on Fargate. Every
+# launch names its capacity, so no default strategy, as in the CloudFormation stack.
+resource "aws_ecs_cluster_capacity_providers" "this" {
+  cluster_name       = aws_ecs_cluster.this.name
+  capacity_providers = ["FARGATE", "FARGATE_SPOT"]
+}
+
 resource "aws_cloudwatch_log_group" "this" {
   name              = "/ecs/${local.regional_name}"
   retention_in_days = var.log_retention_days
@@ -259,9 +282,70 @@ resource "aws_cloudwatch_log_group" "this" {
   tags = local.tags
 }
 
-# One task definition serves both roles: the orchestrator overrides COLLECTOR_ROLE to "worker".
-resource "aws_ecs_task_definition" "this" {
-  family                   = local.name
+# DEV-23899: one container definition for both task definitions, so a setting cannot reach
+# one and miss the other. Only the role and the task definition it names differ: the
+# orchestrator launches workers from the worker family, and a worker's
+# COLLECTOR_ECS_TASK_DEF_ARN is the ECS workload discoverer's self-skip prefix. The
+# orchestrator family's ARN prefixes both families, so the scanner never scans its own tasks.
+locals {
+  scanner_task_def_arn_env = {
+    orchestrator = local.worker_task_definition_family_arn
+    worker       = local.task_definition_family_arn
+  }
+
+  scanner_environment = {
+    for role, task_def_arn in local.scanner_task_def_arn_env : role => [
+      { name = "COLLECTOR_TENANT_NAME", value = local.tenant_name },
+      { name = "COLLECTOR_CUSTOMER_ID", value = local.customer_id },
+      { name = "COLLECTOR_REGION", value = local.region },
+      { name = "COLLECTOR_STREAM_SCAN_URL", value = local.stream_scan_url },
+      { name = "COLLECTOR_STREAM_SCAN_WORKSPACE", value = local.customer_id },
+      { name = "COLLECTOR_SCAN_LANGUAGE_PACKAGES", value = tostring(var.scan_language_packages) },
+      { name = "COLLECTOR_SCAN_DATABASES", value = tostring(var.scan_databases) },
+      { name = "COLLECTOR_SCAN_AI_WORKLOADS", value = tostring(var.scan_ai_workloads) },
+      { name = "COLLECTOR_SCAN_SECRETS", value = tostring(var.scan_secrets) },
+      # Normalized, not raw: the scanner's comma split would otherwise see " ecs".
+      { name = "COLLECTOR_WORKLOAD_KINDS", value = join(",", local.workload_kind_list) },
+      # Instance shards get false on RunTask; this governs the orchestrator and workload child.
+      { name = "COLLECTOR_WORKLOAD_ONLY", value = tostring(var.scan_workload_only) },
+      { name = "COLLECTOR_ROLE", value = role },
+      { name = "COLLECTOR_SHARD_SIZE", value = tostring(var.shard_size) },
+      { name = "COLLECTOR_MAX_CONCURRENT_SHARDS", value = tostring(var.max_concurrent_shards) },
+      { name = "COLLECTOR_ECS_CLUSTER_ARN", value = aws_ecs_cluster.this.arn },
+      { name = "COLLECTOR_ECS_TASK_DEF_ARN", value = task_def_arn },
+      { name = "COLLECTOR_ECS_SUBNET_IDS", value = join(",", local.scanner_subnet_ids) },
+      { name = "COLLECTOR_ECS_SECURITY_GROUP_ID", value = aws_security_group.this.id },
+      # The scanner uses Spot only when this is set, since older clusters lack FARGATE_SPOT.
+      { name = "COLLECTOR_ECS_CAPACITY_PROVIDER", value = "FARGATE_SPOT" },
+      { name = "COLLECTOR_ECS_RETRY_CPU", value = local.retry_cpu },
+      { name = "COLLECTOR_ECS_RETRY_MEMORY", value = local.retry_memory },
+    ]
+  }
+
+  scanner_container = {
+    name      = "scanner"
+    image     = var.scanner_image
+    essential = true
+    secrets = [
+      {
+        name      = "COLLECTOR_STREAM_SCAN_TOKEN"
+        valueFrom = aws_secretsmanager_secret.collection_token.arn
+      },
+    ]
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        "awslogs-group"         = aws_cloudwatch_log_group.this.name
+        "awslogs-region"        = local.region
+        "awslogs-stream-prefix" = "scanner"
+      }
+    }
+  }
+}
+
+# The workers: instance shards and the workload child.
+resource "aws_ecs_task_definition" "worker" {
+  family                   = local.worker_name
   cpu                      = var.task_cpu
   memory                   = var.task_memory
   network_mode             = "awsvpc"
@@ -273,49 +357,11 @@ resource "aws_ecs_task_definition" "this" {
     size_in_gib = var.ephemeral_storage_size_gib
   }
 
-  container_definitions = jsonencode([
-    {
-      name      = "scanner"
-      image     = var.scanner_image
-      essential = true
-      environment = [
-        { name = "COLLECTOR_TENANT_NAME", value = local.tenant_name },
-        { name = "COLLECTOR_CUSTOMER_ID", value = local.customer_id },
-        { name = "COLLECTOR_REGION", value = local.region },
-        { name = "COLLECTOR_STREAM_SCAN_URL", value = local.stream_scan_url },
-        { name = "COLLECTOR_STREAM_SCAN_WORKSPACE", value = local.customer_id },
-        { name = "COLLECTOR_SCAN_LANGUAGE_PACKAGES", value = tostring(var.scan_language_packages) },
-        { name = "COLLECTOR_SCAN_DATABASES", value = tostring(var.scan_databases) },
-        { name = "COLLECTOR_SCAN_AI_WORKLOADS", value = tostring(var.scan_ai_workloads) },
-        { name = "COLLECTOR_SCAN_SECRETS", value = tostring(var.scan_secrets) },
-        # Normalized, not raw: the scanner's comma split would otherwise see " ecs".
-        { name = "COLLECTOR_WORKLOAD_KINDS", value = join(",", local.workload_kind_list) },
-        # Instance shards get false on RunTask; this governs the orchestrator and workload child.
-        { name = "COLLECTOR_WORKLOAD_ONLY", value = tostring(var.scan_workload_only) },
-        { name = "COLLECTOR_ROLE", value = "orchestrator" },
-        { name = "COLLECTOR_SHARD_SIZE", value = tostring(var.shard_size) },
-        { name = "COLLECTOR_MAX_CONCURRENT_SHARDS", value = tostring(var.max_concurrent_shards) },
-        { name = "COLLECTOR_ECS_CLUSTER_ARN", value = aws_ecs_cluster.this.arn },
-        { name = "COLLECTOR_ECS_TASK_DEF_ARN", value = local.task_definition_family_arn },
-        { name = "COLLECTOR_ECS_SUBNET_IDS", value = join(",", local.scanner_subnet_ids) },
-        { name = "COLLECTOR_ECS_SECURITY_GROUP_ID", value = aws_security_group.this.id },
-      ]
-      secrets = [
-        {
-          name      = "COLLECTOR_STREAM_SCAN_TOKEN"
-          valueFrom = aws_secretsmanager_secret.collection_token.arn
-        },
-      ]
-      logConfiguration = {
-        logDriver = "awslogs"
-        options = {
-          "awslogs-group"         = aws_cloudwatch_log_group.this.name
-          "awslogs-region"        = local.region
-          "awslogs-stream-prefix" = "scanner"
-        }
-      }
-    }
-  ])
+  # A Spot interruption sends SIGTERM two minutes before the stop: time for the failed report.
+  container_definitions = jsonencode([merge(local.scanner_container, {
+    environment = local.scanner_environment["worker"]
+    stopTimeout = 120
+  })])
 
   tags = local.tags
 
@@ -326,15 +372,19 @@ resource "aws_ecs_task_definition" "this" {
     # old revision, so the family always has an ACTIVE one; destroy still deregisters.
     create_before_destroy = true
 
+    precondition {
+      condition     = local.task_sizing_is_valid
+      error_message = "Fargate rejects task_cpu = ${var.task_cpu} with task_memory = ${var.task_memory}. At that CPU size the allowed memory values are ${join(", ", [for m in local.task_memory_allowed : tostring(m)])} MiB."
+    }
+
+    # The configuration checks live on the worker, the first task definition registered:
+    # the orchestrator depends on it, so neither is registered with a bad value, even when
+    # the values are only known at apply.
+
     # public.ecr.aws has no aws-cn presence, so fail at plan rather than at task start.
     precondition {
       condition     = local.partition != "aws-cn" || !startswith(var.scanner_image, "public.ecr.aws/")
       error_message = "scanner_image points at public.ecr.aws, which the aws-cn partition cannot reach. Mirror the image into an ECR registry in your China account and set scanner_image to it."
-    }
-
-    precondition {
-      condition     = local.task_sizing_is_valid
-      error_message = "Fargate rejects task_cpu = ${var.task_cpu} with task_memory = ${var.task_memory}. At that CPU size the allowed memory values are ${join(", ", [for m in local.task_memory_allowed : tostring(m)])} MiB."
     }
 
     # Nothing else constrains the scheme: derived_tenant_name strips http:// as well.
@@ -358,6 +408,36 @@ resource "aws_ecs_task_definition" "this" {
       condition     = local.customer_id != ""
       error_message = "customer_id is required and must not be blank: set it to the same workspace_id configured on the streamsec provider."
     }
+  }
+}
+
+# The orchestrator: the schedule and the initial scan start this one. It launches workers
+# from the worker family, which must exist first.
+resource "aws_ecs_task_definition" "this" {
+  family                   = local.name
+  cpu                      = local.orchestrator_cpu
+  memory                   = local.orchestrator_memory
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  execution_role_arn       = aws_iam_role.execution.arn
+  task_role_arn            = aws_iam_role.task.arn
+
+  container_definitions = jsonencode([merge(local.scanner_container, {
+    environment = local.scanner_environment["orchestrator"]
+  })])
+
+  tags = local.tags
+
+  # Also what makes the worker's configuration checks guard this one. And on an upgrade,
+  # a worker that fails to register leaves the orchestrator, and so the schedule's
+  # revision-pinned role, on the old revision.
+  depends_on = [
+    aws_secretsmanager_secret_version.collection_token,
+    aws_ecs_task_definition.worker,
+  ]
+
+  lifecycle {
+    create_before_destroy = true
   }
 }
 
@@ -392,6 +472,10 @@ resource "aws_cloudwatch_event_target" "daily" {
   }
 
   # The task definition references only role ARNs, so no policy or egress path is implicit.
+  # Not the capacity providers: the events role is pinned to the new revision as soon as it
+  # exists, so a failed PutClusterCapacityProviders holding this target on the old revision
+  # would deny every scheduled scan. The orchestrator runs on FARGATE, and workers fall back
+  # from Spot.
   depends_on = [
     aws_route.private_nat,
     aws_route_table_association.private,
@@ -481,4 +565,18 @@ resource "aws_lambda_invocation" "initial_scan" {
   ]
 
   # Fires once per Lambda, not per apply: re-invocation hangs off function_name (ForceNew).
+}
+
+# Tells Stream the scanner is installed in this region and can scan other accounts, and on
+# destroy that it is gone. After the whole scanner (the schedule depends on all of it), so it
+# is created last and destroyed first.
+resource "streamsec_aws_volume_scanner_ack" "this" {
+  account_id     = data.streamsec_aws_account.this.id
+  region         = local.region
+  module_version = local.module_version
+
+  depends_on = [
+    aws_cloudwatch_event_target.daily,
+    aws_ecs_cluster_capacity_providers.this,
+  ]
 }
