@@ -356,19 +356,24 @@ run "orchestrator_and_worker_environments_are_wired_to_each_other" {
   }
 
   # The worker's COLLECTOR_ECS_TASK_DEF_ARN is the ECS workload discoverer's
-  # self-skip PREFIX: it must prefix both families, or the workload child scans
-  # the scanner's own tasks.
+  # self-skip PREFIX: it must prefix a revision ARN of both families the module
+  # registers, or the workload child scans the scanner's own tasks.
   assert {
     condition = alltrue([
-      for family_arn in [
-        aws_ecs_task_definition.this.arn,
-        aws_ecs_task_definition.worker.arn,
-      ] :
-      startswith(family_arn, one([
+      for family in [aws_ecs_task_definition.this.family, aws_ecs_task_definition.worker.family] :
+      startswith("arn:aws:ecs:us-east-1:111111111111:task-definition/${family}:1", one([
         for e in jsondecode(aws_ecs_task_definition.worker.container_definitions)[0].environment : e.value if e.name == "COLLECTOR_ECS_TASK_DEF_ARN"
       ]))
     ])
-    error_message = "The worker's self-skip prefix must cover both the orchestrator and worker families."
+    error_message = "The worker's self-skip prefix must cover both families the module registers."
+  }
+
+  # And the orchestrator launches the family the module actually registers.
+  assert {
+    condition = one([
+      for e in jsondecode(aws_ecs_task_definition.this.container_definitions)[0].environment : e.value if e.name == "COLLECTOR_ECS_TASK_DEF_ARN"
+    ]) == "arn:aws:ecs:us-east-1:111111111111:task-definition/${aws_ecs_task_definition.worker.family}"
+    error_message = "The orchestrator must launch workers from the worker task definition's own family."
   }
 
   assert {
@@ -547,14 +552,14 @@ run "install_is_acknowledged_with_the_module_version" {
     condition = alltrue([
       streamsec_aws_volume_scanner_ack.this.account_id == "stream-account-1",
       streamsec_aws_volume_scanner_ack.this.region == "us-east-1",
-      streamsec_aws_volume_scanner_ack.this.module_version == local.module_version,
     ])
-    error_message = "The acknowledgement must name this account's Stream id, the scanned region and the module version."
+    error_message = "The acknowledgement must name this account's Stream id and the scanned region."
   }
 
-  # ms_accounts rejects anything but a semver-like string of at most 64 chars.
+  # The release this module is tagged as, with no leading v. Bump it here and in
+  # local.module_version together.
   assert {
-    condition     = length(regexall("^[0-9]+\\.[0-9]+\\.[0-9]+$", local.module_version)) == 1
-    error_message = "local.module_version must be the release version, MAJOR.MINOR.PATCH with no leading v."
+    condition     = streamsec_aws_volume_scanner_ack.this.module_version == "1.16.0"
+    error_message = "The acknowledgement must report the module's release version, 1.16.0."
   }
 }
