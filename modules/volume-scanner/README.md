@@ -51,6 +51,9 @@ Optional scans for secrets, AI/ML frameworks and databases are off by default. T
 - **Encrypted volumes.** Volumes encrypted with your own KMS keys are scanned by default. To limit which keys the scanner can use, set `kms_key_arns`.
 - **Serverless only.** Set `scan_workload_only = true` to scan only Lambda functions and Fargate task images, without snapshotting EC2 volumes.
 - **Uninstalling.** Set `schedule_enabled = false` and apply, wait for any running scan to finish, then run `terraform destroy`. The destroy tells Stream Security the region is uninstalled. If the account scans other accounts, turn that off first (see below).
+- **One acknowledgement per account and region.** Stream Security keeps one install record for each account and region, and the module's apply and destroy write it. Two cases follow:
+  - With `allow_cloudformation_coexistence = true` and the console's stack in the same region, whichever installed last owns the record. The module's apply clears the stack's fields from it, so the console shows the region as installed outside Stream Security. Destroying the owner marks the region uninstalled while the other one keeps scanning; destroying the other changes nothing.
+  - To rename the module block, add a `moved` block. Without one, Terraform creates the new instance's acknowledgement and destroys the old one's in the same apply, in no fixed order, so the region can end up marked uninstalled.
 
 ## Scanning other accounts (hub and spoke)
 
@@ -84,6 +87,11 @@ Version 1.16.0 makes the module match the console's scanner stack: a hub grant, 
 - **Outputs:** `task_definition_arn` is now the orchestrator's; `task_definition_family_arn` keeps its value. `worker_task_definition_arn` and `worker_task_definition_family_arn` are new.
 
 Apply outside the scan window (03:00 UTC by default). An orchestrator that started before the apply launches workers from its own family, which it is no longer allowed to run, so the rest of that scan waits for the next one. If you pin `scanner_image`, move it to a current release in the same change.
+
+Two things the apply needs that it did not before:
+
+- **An API token that can write.** The acknowledgement is a write to Stream Security, which refuses a read-only token with 403. Until now the module only read from Stream Security.
+- **`ecs:PutClusterCapacityProviders`** for the role that runs Terraform, to add FARGATE_SPOT to the cluster. If it is missing, the apply fails at that step, the scanner keeps running and scanning, and its workers run on regular Fargate until a later apply succeeds.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
@@ -220,6 +228,7 @@ No modules.
 | <a name="output_task_definition_arn"></a> [task\_definition\_arn](#output\_task\_definition\_arn) | ARN of the orchestrator task definition (current revision) — the one the schedule and the initial scan start |
 | <a name="output_task_definition_family_arn"></a> [task\_definition\_family\_arn](#output\_task\_definition\_family\_arn) | Revision-less family ARN of the orchestrator task definition |
 | <a name="output_task_role_arn"></a> [task\_role\_arn](#output\_task\_role\_arn) | ARN of the IAM role the scanner task assumes |
+| <a name="output_task_role_name"></a> [task\_role\_name](#output\_task\_role\_name) | Name of the IAM role the scanner task assumes. Accounts this scanner scans trust it by this name |
 | <a name="output_worker_task_definition_arn"></a> [worker\_task\_definition\_arn](#output\_worker\_task\_definition\_arn) | ARN of the worker task definition (current revision), which runs the instance shards and the workload scan |
 | <a name="output_worker_task_definition_family_arn"></a> [worker\_task\_definition\_family\_arn](#output\_worker\_task\_definition\_family\_arn) | Revision-less family ARN of the worker task definition — what the orchestrator uses to launch workers on the current ACTIVE revision |
 <!-- END_TF_DOCS -->
