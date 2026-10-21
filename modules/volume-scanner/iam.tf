@@ -270,6 +270,11 @@ resource "aws_iam_role_policy" "orchestrator" {
       },
     ])
   })
+
+  # Its RunTask names the worker family from locals, so on an upgrade it would take the
+  # old family away before either new revision registers. Waiting keeps a failed
+  # registration on the old orchestrator, still allowed to launch its workers.
+  depends_on = [aws_ecs_task_definition.this]
 }
 
 ################################################################################
