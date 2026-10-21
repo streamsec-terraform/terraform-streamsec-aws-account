@@ -376,33 +376,10 @@ resource "aws_ecs_task_definition" "worker" {
       condition     = local.task_sizing_is_valid
       error_message = "Fargate rejects task_cpu = ${var.task_cpu} with task_memory = ${var.task_memory}. At that CPU size the allowed memory values are ${join(", ", [for m in local.task_memory_allowed : tostring(m)])} MiB."
     }
-  }
-}
 
-# The orchestrator: the schedule and the initial scan start this one. It launches workers
-# from the worker family, which must exist first.
-resource "aws_ecs_task_definition" "this" {
-  family                   = local.name
-  cpu                      = local.orchestrator_cpu
-  memory                   = local.orchestrator_memory
-  network_mode             = "awsvpc"
-  requires_compatibilities = ["FARGATE"]
-  execution_role_arn       = aws_iam_role.execution.arn
-  task_role_arn            = aws_iam_role.task.arn
-
-  container_definitions = jsonencode([merge(local.scanner_container, {
-    environment = local.scanner_environment["orchestrator"]
-  })])
-
-  tags = local.tags
-
-  depends_on = [
-    aws_secretsmanager_secret_version.collection_token,
-    aws_ecs_task_definition.worker,
-  ]
-
-  lifecycle {
-    create_before_destroy = true
+    # The configuration checks live on the worker, the first task definition registered:
+    # the orchestrator depends on it, so neither is registered with a bad value, even when
+    # the values are only known at apply.
 
     # public.ecr.aws has no aws-cn presence, so fail at plan rather than at task start.
     precondition {
@@ -431,6 +408,36 @@ resource "aws_ecs_task_definition" "this" {
       condition     = local.customer_id != ""
       error_message = "customer_id is required and must not be blank: set it to the same workspace_id configured on the streamsec provider."
     }
+  }
+}
+
+# The orchestrator: the schedule and the initial scan start this one. It launches workers
+# from the worker family, which must exist first.
+resource "aws_ecs_task_definition" "this" {
+  family                   = local.name
+  cpu                      = local.orchestrator_cpu
+  memory                   = local.orchestrator_memory
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  execution_role_arn       = aws_iam_role.execution.arn
+  task_role_arn            = aws_iam_role.task.arn
+
+  container_definitions = jsonencode([merge(local.scanner_container, {
+    environment = local.scanner_environment["orchestrator"]
+  })])
+
+  tags = local.tags
+
+  # Also what makes the worker's configuration checks guard this one. And on an upgrade,
+  # a worker that fails to register leaves the orchestrator, and so the schedule's
+  # revision-pinned role, on the old revision.
+  depends_on = [
+    aws_secretsmanager_secret_version.collection_token,
+    aws_ecs_task_definition.worker,
+  ]
+
+  lifecycle {
+    create_before_destroy = true
   }
 }
 
@@ -465,6 +472,10 @@ resource "aws_cloudwatch_event_target" "daily" {
   }
 
   # The task definition references only role ARNs, so no policy or egress path is implicit.
+  # Not the capacity providers: the events role is pinned to the new revision as soon as it
+  # exists, so a failed PutClusterCapacityProviders holding this target on the old revision
+  # would deny every scheduled scan. The orchestrator runs on FARGATE, and workers fall back
+  # from Spot.
   depends_on = [
     aws_route.private_nat,
     aws_route_table_association.private,
@@ -478,7 +489,6 @@ resource "aws_cloudwatch_event_target" "daily" {
     aws_iam_role_policy.orchestrator,
     aws_iam_role_policy.execution_secrets,
     aws_iam_role_policy_attachment.execution,
-    aws_ecs_cluster_capacity_providers.this,
   ]
 }
 
@@ -551,7 +561,6 @@ resource "aws_lambda_invocation" "initial_scan" {
     aws_iam_role_policy.orchestrator,
     aws_iam_role_policy.execution_secrets,
     aws_iam_role_policy_attachment.execution,
-    aws_ecs_cluster_capacity_providers.this,
     aws_cloudwatch_event_target.daily,
   ]
 

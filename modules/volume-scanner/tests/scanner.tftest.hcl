@@ -382,7 +382,19 @@ run "customer_id_is_required" {
     customer_id = null
   }
 
-  expect_failures = [aws_ecs_task_definition.this]
+  # On the worker, the first task definition registered; the orchestrator waits for it.
+  expect_failures = [aws_ecs_task_definition.worker]
+}
+
+run "a_non_https_stream_host_is_refused" {
+  command = plan
+
+  override_data {
+    target = data.streamsec_host.this
+    values = { url = "http://acme.streamsec.io" }
+  }
+
+  expect_failures = [aws_ecs_task_definition.worker]
 }
 
 run "collection_token_is_injected_from_secrets_manager" {
@@ -693,7 +705,7 @@ run "china_partition_rejects_the_public_ecr_default_image" {
     values = { region = "cn-north-1" }
   }
 
-  expect_failures = [aws_ecs_task_definition.this]
+  expect_failures = [aws_ecs_task_definition.worker]
 }
 
 run "whitespace_only_workload_kinds_is_rejected" {
@@ -729,7 +741,7 @@ run "workload_only_without_workload_kinds_is_rejected" {
     workload_kinds     = ""
   }
 
-  expect_failures = [aws_ecs_task_definition.this]
+  expect_failures = [aws_ecs_task_definition.worker]
 }
 
 run "secret_name_is_generated_not_fixed" {
