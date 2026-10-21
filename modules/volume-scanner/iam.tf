@@ -95,8 +95,8 @@ locals {
     },
   ]
 
-  # EventBridge and the initial-scan Lambda are each configured with one exact
-  # revision ARN and launch nothing else.
+  # EventBridge and the initial-scan Lambda each start the orchestrator by one
+  # exact revision ARN and launch nothing else.
   run_pinned_task_statement = [
     {
       Sid       = "RunScannerTask"
@@ -107,15 +107,30 @@ locals {
     },
   ]
 
-  # The orchestrator is authorized for the revision-LESS family ARN because that
-  # is the form main.tf hands it and the form it passes to RunTask.
+  # The orchestrator launches workers only (DEV-23899): the revision-LESS worker
+  # family ARN, the form main.tf hands it, and every revision of it, never its own
+  # family. An orchestrator started before an upgrade names its own family and is
+  # denied until the next cycle, rather than launching workers at its small size.
   run_family_task_statement = [
     {
       Sid       = "RunScannerTask"
       Effect    = "Allow"
       Action    = "ecs:RunTask"
-      Resource  = local.run_task_resources
+      Resource  = local.orchestrator_run_task_resources
       Condition = { ArnEquals = { "ecs:cluster" = aws_ecs_cluster.this.arn } }
+    },
+  ]
+
+  # DEV-23499: scan the accounts this hub covers through the role their access
+  # stack or volume-scanner-access module creates. That role's trust also requires
+  # this account, a role name matching *streamsec-ebs-scanner-tf-* and the hub's
+  # external id. Always granted, as in the CloudFormation stack.
+  spoke_access_statements = [
+    {
+      Sid      = "AssumeSpokeAccessRoles"
+      Effect   = "Allow"
+      Action   = "sts:AssumeRole"
+      Resource = "arn:${local.partition}:iam::*:role/StreamScannerSpokeRole"
     },
   ]
 
@@ -133,6 +148,8 @@ locals {
 ################################################################################
 
 resource "aws_iam_role" "task" {
+  # Spoke roles trust this name by pattern (*streamsec-ebs-scanner-tf-*): a rename,
+  # or a role path, locks the hub out of every account it scans.
   name = "${local.regional_name}-task-role"
 
   assume_role_policy = jsonencode({
@@ -219,6 +236,7 @@ resource "aws_iam_role_policy" "task" {
       # Per-kind workload scanning; workload_kinds = "" detaches it entirely.
       local.workload_statements,
       [for statement in local.kms_statements : statement if var.scan_encrypted_volumes],
+      local.spoke_access_statements,
     )
   })
 }
@@ -237,6 +255,16 @@ resource "aws_iam_role_policy" "orchestrator" {
         Sid       = "OrchestratorDescribeTasks"
         Effect    = "Allow"
         Action    = "ecs:DescribeTasks"
+        Resource  = "*"
+        Condition = { ArnEquals = { "ecs:cluster" = aws_ecs_cluster.this.arn } }
+      },
+      # DEV-24069: ECS has no task timeout. The orchestrator stops a child past its
+      # deadline, and at cycle start the tasks an earlier cycle left running. Only
+      # in its own cluster, as in the CloudFormation stack.
+      {
+        Sid       = "OrchestratorStopStuckTasks"
+        Effect    = "Allow"
+        Action    = ["ecs:ListTasks", "ecs:StopTask"]
         Resource  = "*"
         Condition = { ArnEquals = { "ecs:cluster" = aws_ecs_cluster.this.arn } }
       },

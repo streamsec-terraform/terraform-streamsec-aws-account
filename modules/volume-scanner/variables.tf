@@ -143,7 +143,7 @@ variable "subnet_ids" {
 ################################################################################
 
 variable "task_cpu" {
-  description = "Fargate task CPU units. One of 256, 512, 1024, 2048, 4096, 8192, 16384."
+  description = "Fargate CPU units of a worker task (instance shards and the workload scan). One of 256, 512, 1024, 2048, 4096, 8192, 16384. The orchestrator is fixed at 512."
   type        = string
   default     = "4096"
   nullable    = false
@@ -155,7 +155,7 @@ variable "task_cpu" {
 }
 
 variable "task_memory" {
-  description = "Fargate task memory in MiB. Raise before raising max_concurrent_shards. Must be valid for the chosen task_cpu."
+  description = "Fargate memory in MiB of a worker task. Must be valid for the chosen task_cpu. The orchestrator is fixed at 1024; a worker's retry runs at the larger of this size and 4096 CPU / 16384 MiB."
   type        = string
   default     = "16384"
   nullable    = false
@@ -169,7 +169,7 @@ variable "task_memory" {
 }
 
 variable "ephemeral_storage_size_gib" {
-  description = "Task ephemeral storage in GiB for the scanner's disk cache. Minimum 21."
+  description = "Ephemeral storage in GiB of a worker task, for the scanner's disk cache. Minimum 21."
   type        = number
   default     = 50
   nullable    = false
