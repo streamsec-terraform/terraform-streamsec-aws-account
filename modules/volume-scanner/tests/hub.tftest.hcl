@@ -414,7 +414,27 @@ run "retry_size_grows_with_a_larger_worker" {
   }
 }
 
+# Smaller than the floor on both CPU and memory, so each floor is exercised.
 run "retry_size_keeps_the_cloudformation_floor_for_a_smaller_worker" {
+  command = apply
+
+  variables {
+    task_cpu    = "2048"
+    task_memory = "8192"
+  }
+
+  assert {
+    condition = alltrue([
+      for pair in ["COLLECTOR_ECS_RETRY_CPU=4096", "COLLECTOR_ECS_RETRY_MEMORY=16384"] :
+      contains([for e in jsondecode(aws_ecs_task_definition.worker.container_definitions)[0].environment : "${e.name}=${e.value}"], pair)
+    ])
+    error_message = "A worker smaller than 4096/16384 must be retried at the CloudFormation Retry size."
+  }
+}
+
+# Full CPU but less memory: the worker is not at least the floor on both, so the
+# retry takes the floor rather than the worker's 8192 MiB.
+run "retry_size_takes_the_floor_when_only_memory_is_smaller" {
   command = apply
 
   variables {
@@ -427,7 +447,7 @@ run "retry_size_keeps_the_cloudformation_floor_for_a_smaller_worker" {
       for pair in ["COLLECTOR_ECS_RETRY_CPU=4096", "COLLECTOR_ECS_RETRY_MEMORY=16384"] :
       contains([for e in jsondecode(aws_ecs_task_definition.worker.container_definitions)[0].environment : "${e.name}=${e.value}"], pair)
     ])
-    error_message = "A worker smaller than 4096/16384 must be retried at the CloudFormation Retry size."
+    error_message = "A worker with less than 16384 MiB must be retried at 4096 / 16384."
   }
 }
 
