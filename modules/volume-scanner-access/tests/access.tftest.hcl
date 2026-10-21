@@ -15,6 +15,22 @@ mock_provider "aws" {
   mock_data "aws_caller_identity" {
     defaults = { account_id = "444455556666" }
   }
+  # The rest serve the runs of ../volume-scanner, the hub this role trusts.
+  mock_data "aws_region" {
+    defaults = { region = "eu-west-1" }
+  }
+  mock_data "aws_ecs_clusters" {
+    defaults = { cluster_arns = [] }
+  }
+  mock_data "aws_vpc_endpoint_service" {
+    defaults = {
+      service_name       = "com.amazonaws.eu-west-1.resolved"
+      availability_zones = ["eu-west-1a"]
+    }
+  }
+  mock_data "aws_availability_zones" {
+    defaults = { names = ["eu-west-1a"] }
+  }
 }
 
 mock_provider "streamsec" {
@@ -26,7 +42,19 @@ mock_provider "streamsec" {
       trusted_role_name_patterns = ["streamsec-scanner-*", "*streamsec-ebs-scanner-tf-*"]
     }
   }
+  mock_data "streamsec_host" {
+    defaults = { url = "https://acme.streamsec.io" }
+  }
+  mock_data "streamsec_aws_account" {
+    defaults = {
+      id                         = "stream-hub-1"
+      cloud_account_id           = "111122223333"
+      streamsec_collection_token = "collection-token"
+    }
+  }
 }
+
+mock_provider "archive" {}
 
 variables {
   hub_account_id = "stream-hub-1"
@@ -81,6 +109,78 @@ run "trust_admits_only_the_hubs_scanner" {
       ]
     })
     error_message = "The trust must be the hub account's root, the hub's external id, and one aws:PrincipalArn per trusted role name pattern."
+  }
+}
+
+# The hub role names the trust must admit, taken from the volume-scanner module
+# itself, with and without a resource_prefix.
+run "terraform_hub_role_name" {
+  command = plan
+
+  module {
+    source = "../volume-scanner"
+  }
+
+  variables {
+    customer_id = "customer-abc"
+  }
+}
+
+run "prefixed_terraform_hub_role_name" {
+  command = plan
+
+  module {
+    source = "../volume-scanner"
+  }
+
+  variables {
+    customer_id     = "customer-abc"
+    resource_prefix = "acme-prd"
+  }
+}
+
+# The rendered patterns, read as IAM StringLike globs, admit the real hub role
+# names: both of the volume-scanner module's and the console stack's
+# streamsec-scanner-<region> (a literal: the CloudFormation template is not
+# reachable from here). And not just any role in the hub account.
+run "trust_admits_the_real_hub_role_names" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for name in [
+        run.terraform_hub_role_name.task_role_name,
+        run.prefixed_terraform_hub_role_name.task_role_name,
+        "streamsec-scanner-eu-west-1",
+        ] : anytrue([
+          for arn in jsondecode(aws_iam_role.this.assume_role_policy).Statement[0].Condition.StringLike["aws:PrincipalArn"] :
+          length(regexall(
+            "^${replace(replace(replace(trimprefix(arn, "arn:aws:iam::111122223333:role/"), ".", "\\."), "*", ".*"), "?", ".")}$",
+            name,
+          )) > 0
+      ])
+    ])
+    error_message = "Every real hub scanner role name must match one of the trust's aws:PrincipalArn patterns."
+  }
+
+  assert {
+    condition = !anytrue([
+      for arn in jsondecode(aws_iam_role.this.assume_role_policy).Statement[0].Condition.StringLike["aws:PrincipalArn"] :
+      length(regexall(
+        "^${replace(replace(replace(trimprefix(arn, "arn:aws:iam::111122223333:role/"), ".", "\\."), "*", ".*"), "?", ".")}$",
+        "OrganizationAccountAccessRole",
+      )) > 0
+    ])
+    error_message = "The trust must not admit an unrelated role of the hub account."
+  }
+
+  # So the names above are the module's real ones, not an empty or unprefixed stand-in.
+  assert {
+    condition = alltrue([
+      endswith(run.terraform_hub_role_name.task_role_name, "-eu-west-1-task-role"),
+      startswith(run.prefixed_terraform_hub_role_name.task_role_name, "acme-prd-"),
+    ])
+    error_message = "The hub role names read from ../volume-scanner must be its regional task role names."
   }
 }
 

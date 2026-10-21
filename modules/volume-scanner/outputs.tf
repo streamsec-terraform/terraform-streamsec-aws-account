@@ -38,6 +38,11 @@ output "task_role_arn" {
   value       = aws_iam_role.task.arn
 }
 
+output "task_role_name" {
+  description = "Name of the IAM role the scanner task assumes. Accounts this scanner scans trust it by this name"
+  value       = aws_iam_role.task.name
+}
+
 output "scanner_vpc_id" {
   description = "ID of the VPC the scanner runs in — the one this module created, or the vpc_id that was supplied"
   value       = local.scanner_vpc_id
