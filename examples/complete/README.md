@@ -2,10 +2,10 @@
 ## Requirements
 
 | Name | Version |
-| ---- | ------- |
+|------|---------|
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.3 |
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | >= 6.0 |
-| <a name="requirement_streamsec"></a> [streamsec](#requirement\_streamsec) | >= 1.12 |
+| <a name="requirement_streamsec"></a> [streamsec](#requirement\_streamsec) | >= 1.14.0 |
 
 ## Providers
 
@@ -14,7 +14,7 @@ No providers.
 ## Modules
 
 | Name | Source | Version |
-| ---- | ------ | ------- |
+|------|--------|---------|
 | <a name="module_account"></a> [account](#module\_account) | ../../ | n/a |
 | <a name="module_cost"></a> [cost](#module\_cost) | ../../modules/cost | n/a |
 | <a name="module_eks_audit_us_east_1"></a> [eks\_audit\_us\_east\_1](#module\_eks\_audit\_us\_east\_1) | ../../modules/eks-audit | n/a |
