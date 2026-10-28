@@ -53,8 +53,10 @@ module "hub_scanner" {
   }
 }
 
-# Which accounts the hub scans: here the spoke. coverage = "all" scans every
-# integrated AWS account instead; each one still needs the access role.
+# Which accounts the hub scans: here the spoke. coverage = "all" instead scans
+# every other integrated AWS account that has no scanner of its own in the region
+# and no other hub; leave out account_ids then. Only one hub may cover "all", and
+# each account still needs the access role.
 resource "streamsec_aws_scanner_hub" "this" {
   account_id  = data.streamsec_aws_account.hub.id
   coverage    = "selected"
