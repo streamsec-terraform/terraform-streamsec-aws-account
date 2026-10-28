@@ -134,7 +134,7 @@ locals {
     "${local.worker_task_definition_family_arn}:*",
   ]
 
-  # DEV-23899: the CloudFormation stack's ScannerTaskSizes. The orchestrator only discovers
+  # The CloudFormation stack's ScannerTaskSizes. The orchestrator only discovers
   # instances and waits on workers; task_cpu / task_memory size the workers.
   orchestrator_cpu    = "512"
   orchestrator_memory = "1024"
@@ -268,7 +268,7 @@ resource "aws_ecs_cluster" "this" {
   }
 }
 
-# DEV-23899: a worker's first attempt runs on Fargate Spot, its retries on Fargate. Every
+# A worker's first attempt runs on Fargate Spot, its retries on Fargate. Every
 # launch names its capacity, so no default strategy, as in the CloudFormation stack.
 resource "aws_ecs_cluster_capacity_providers" "this" {
   cluster_name       = aws_ecs_cluster.this.name
@@ -282,7 +282,7 @@ resource "aws_cloudwatch_log_group" "this" {
   tags = local.tags
 }
 
-# DEV-23899: one container definition for both task definitions, so a setting cannot reach
+# One container definition for both task definitions, so a setting cannot reach
 # one and miss the other. Only the role and the task definition it names differ: the
 # orchestrator launches workers from the worker family, and a worker's
 # COLLECTOR_ECS_TASK_DEF_ARN is the ECS workload discoverer's self-skip prefix. The

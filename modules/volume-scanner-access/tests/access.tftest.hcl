@@ -2,8 +2,7 @@
 # stricter than the module's own required_version. Plan/apply is unaffected.
 
 # The expected documents below are transcribed from the console's CloudFormation
-# access stack, lightlytics ms_accounts/cft/scanner-access.yaml.jinja2
-# (StreamScannerSpokeRole). A change there is a change here.
+# access stack (StreamScannerSpokeRole). A change there is a change here.
 
 mock_provider "aws" {
   mock_resource "aws_iam_role" {

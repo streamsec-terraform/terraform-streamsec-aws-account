@@ -1,10 +1,8 @@
 # NOTE: `terraform test` on this file needs Terraform >= 1.7 (mock_provider),
 # stricter than the module's own required_version. Plan/apply is unaffected.
 
-# Parity with the console's CloudFormation scanner stack
-# (lightlytics ms_accounts/cft/ebs-scanner.yaml.jinja2): the hub grant
-# (DEV-23499), the reaper (DEV-24069), Spot workers with a small orchestrator
-# (DEV-23899), and the install acknowledgement.
+# Parity with the console's CloudFormation scanner stack: the hub grant, the
+# reaper, Spot workers with a small orchestrator, and the install acknowledgement.
 
 mock_provider "aws" {
   mock_resource "aws_ecs_cluster" {
@@ -77,7 +75,7 @@ variables {
 }
 
 ################################################################################
-# DEV-23499: the hub grant
+# The hub grant
 ################################################################################
 
 run "task_role_can_assume_every_spoke_access_role" {
@@ -180,7 +178,7 @@ run "prefixed_task_role_name_still_matches_the_spoke_trust_pattern" {
 }
 
 ################################################################################
-# DEV-24069: the reaper
+# The reaper
 ################################################################################
 
 run "reaper_lists_and_stops_tasks_in_its_own_cluster_only" {
@@ -224,7 +222,7 @@ run "reaper_lists_and_stops_tasks_in_its_own_cluster_only" {
 }
 
 ################################################################################
-# DEV-23899: a small orchestrator, full-size workers on Spot
+# A small orchestrator, full-size workers on Spot
 ################################################################################
 
 run "task_definitions_have_the_cloudformation_sizes" {

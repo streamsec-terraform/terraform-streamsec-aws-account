@@ -62,8 +62,7 @@ resource "aws_iam_role" "this" {
 }
 
 # KEEP IN SYNC with StreamScannerSpokeRole's StreamScannerAccess policy in the console's
-# CloudFormation access stack (lightlytics ms_accounts/cft/scanner-access.yaml.jinja2),
-# statement for statement. It is the hub task role's scan grant, widened to every region
+# CloudFormation access stack, statement for statement. It is the hub task role's scan grant, widened to every region
 # and account; tests/access.tftest.hcl holds the expected copy. The one difference: the
 # KMS ViaService suffix follows the partition here.
 resource "aws_iam_role_policy" "this" {

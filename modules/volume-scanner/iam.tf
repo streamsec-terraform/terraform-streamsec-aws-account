@@ -107,7 +107,7 @@ locals {
     },
   ]
 
-  # The orchestrator launches workers only (DEV-23899): the revision-LESS worker
+  # The orchestrator launches workers only: the revision-LESS worker
   # family ARN, the form main.tf hands it, and every revision of it, never its own
   # family. An orchestrator started before an upgrade names its own family and is
   # denied until the next cycle, rather than launching workers at its small size.
@@ -121,7 +121,7 @@ locals {
     },
   ]
 
-  # DEV-23499: scan the accounts this hub covers through the role their access
+  # Scan the accounts this hub covers through the role their access
   # stack or volume-scanner-access module creates. That role's trust also requires
   # this account, a role name matching *streamsec-ebs-scanner-tf-* and the hub's
   # external id. Always granted, as in the CloudFormation stack.
@@ -258,7 +258,7 @@ resource "aws_iam_role_policy" "orchestrator" {
         Resource  = "*"
         Condition = { ArnEquals = { "ecs:cluster" = aws_ecs_cluster.this.arn } }
       },
-      # DEV-24069: ECS has no task timeout. The orchestrator stops a child past its
+      # ECS has no task timeout. The orchestrator stops a child past its
       # deadline, and at cycle start the tasks an earlier cycle left running. Only
       # in its own cluster, as in the CloudFormation stack.
       {

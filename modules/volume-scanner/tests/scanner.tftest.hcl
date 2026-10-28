@@ -567,7 +567,7 @@ run "initial_scan_role_can_check_for_a_running_scan" {
   }
 
   # The scanner task role DOES hold ecs:ListTasks twice: account-wide for
-  # workload discovery, and cluster-scoped for the reaper (DEV-24069).
+  # workload discovery, and cluster-scoped for the reaper.
   assert {
     condition = length([
       for s in concat(
