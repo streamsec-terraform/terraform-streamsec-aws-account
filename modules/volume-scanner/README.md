@@ -150,7 +150,9 @@ module "scanner_access_444455556666" {
 
 **Removing an account.** The access StackSet removes the role when an account leaves its OUs. In Terraform, do it in three applies, in the order the [access module](../volume-scanner-access/README.md#good-to-know) gives:
 
-1. Take the account out of `account_ids` and apply.
+1. Stop the hub covering the account, and apply.
+   - With `coverage = "selected"`, take the account out of `account_ids`.
+   - With `coverage = "all"`, the hub covers every integrated account, so switch to `coverage = "selected"` and list the accounts to keep, or remove the account from Stream Security.
 2. Delete its access block and apply.
 3. Delete its provider block and apply.
 
