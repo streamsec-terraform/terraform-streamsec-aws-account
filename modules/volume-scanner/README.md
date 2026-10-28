@@ -82,6 +82,7 @@ Version 1.16.0 makes the module match the console's scanner stack: a hub grant, 
 - **`aws_ecs_task_definition.this` replaced.** It is now the orchestrator, at 512 CPU / 1024 MiB with Fargate's default storage, in the same family (`streamsec-ebs-scanner-tf`). The new revision is registered before the old one is deregistered.
 - **`aws_ecs_task_definition.worker` created**, in the new family `streamsec-ebs-scanner-tf-worker`. `task_cpu`, `task_memory` and `ephemeral_storage_size_gib` now size the workers, with the same defaults as before. A worker's retry runs at the larger of its own size and 4096 CPU / 16384 MiB.
 - **`aws_ecs_cluster_capacity_providers.this` created.** The cluster gains FARGATE and FARGATE_SPOT; it is not replaced.
+- **`time_sleep.ecs_service_linked_role` created.** A 30-second wait before the capacity providers, once per cluster, so a first install in an account that never used ECS doesn't fail while the ECS service-linked role takes effect.
 - **`streamsec_aws_volume_scanner_ack.this` created.** Stream Security records the region as installed outside the console and the account as able to scan others.
 - **Updated in place:** the task role's policies (`AssumeSpokeAccessRoles`; the orchestrator's `RunTask` moves to the worker family; `OrchestratorStopStuckTasks`), the schedule's target and the initial-scan Lambda, which now start the new orchestrator revision. The initial scan does not run again.
 - **Outputs:** `task_definition_arn` is now the orchestrator's; `task_definition_family_arn` keeps its value. `worker_task_definition_arn` and `worker_task_definition_family_arn` are new.
@@ -102,6 +103,7 @@ Two things the apply needs that it did not before:
 | <a name="requirement_archive"></a> [archive](#requirement\_archive) | >= 2.0 |
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | ~> 6.0 |
 | <a name="requirement_streamsec"></a> [streamsec](#requirement\_streamsec) | >= 1.14.0 |
+| <a name="requirement_time"></a> [time](#requirement\_time) | >= 0.11 |
 
 ## Providers
 
@@ -110,6 +112,7 @@ Two things the apply needs that it did not before:
 | <a name="provider_archive"></a> [archive](#provider\_archive) | >= 2.0 |
 | <a name="provider_aws"></a> [aws](#provider\_aws) | ~> 6.0 |
 | <a name="provider_streamsec"></a> [streamsec](#provider\_streamsec) | >= 1.14.0 |
+| <a name="provider_time"></a> [time](#provider\_time) | >= 0.11 |
 
 ## Modules
 
@@ -161,6 +164,7 @@ No modules.
 | [aws_vpc_security_group_egress_rule.all](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_security_group_egress_rule) | resource |
 | [aws_vpc_security_group_ingress_rule.endpoints_https](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_security_group_ingress_rule) | resource |
 | [streamsec_aws_volume_scanner_ack.this](https://registry.terraform.io/providers/streamsec-terraform/streamsec/latest/docs/resources/aws_volume_scanner_ack) | resource |
+| [time_sleep.ecs_service_linked_role](https://registry.terraform.io/providers/hashicorp/time/latest/docs/resources/sleep) | resource |
 | [archive_file.initial_scan](https://registry.terraform.io/providers/hashicorp/archive/latest/docs/data-sources/file) | data source |
 | [aws_availability_zones.available](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/availability_zones) | data source |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |

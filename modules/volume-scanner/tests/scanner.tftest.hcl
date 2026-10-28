@@ -49,6 +49,9 @@ mock_provider "streamsec" {
 
 mock_provider "archive" {}
 
+# time_sleep would really wait in the apply runs.
+mock_provider "time" {}
+
 variables {
   customer_id = "customer-abc"
 }

@@ -270,9 +270,23 @@ resource "aws_ecs_cluster" "this" {
 
 # A worker's first attempt runs on Fargate Spot, its retries on Fargate. Every
 # launch names its capacity, so no default strategy, as in the CloudFormation stack.
+# In an account that never used ECS, CreateCluster also creates the ECS service-linked role,
+# which takes a moment to work: attaching capacity providers before then fails with "Unable
+# to assume the service linked role". The provider retries that only for the cluster itself,
+# so wait once per cluster, as the CloudFormation stack waits for the role.
+resource "time_sleep" "ecs_service_linked_role" {
+  create_duration = "30s"
+
+  triggers = {
+    cluster_arn = aws_ecs_cluster.this.arn
+  }
+}
+
 resource "aws_ecs_cluster_capacity_providers" "this" {
   cluster_name       = aws_ecs_cluster.this.name
   capacity_providers = ["FARGATE", "FARGATE_SPOT"]
+
+  depends_on = [time_sleep.ecs_service_linked_role]
 }
 
 resource "aws_cloudwatch_log_group" "this" {
