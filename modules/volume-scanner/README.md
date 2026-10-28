@@ -141,7 +141,7 @@ module "scanner_access_444455556666" {
 
 `module.volume_scanner_us_east_1` is the hub's scanner, as in [Usage](#usage), and `data.streamsec_aws_account.hub` is its account, as in [`examples/volume-scanner-hub`](../../examples/volume-scanner-hub). Every spoke must already be integrated with Stream Security.
 
-**Changing the hub.** Each access block depends on the hub. So whenever the hub has changes, for example an account added to `account_ids`, Terraform reads the access modules' data sources at apply time. The plan then shows every spoke's role and policy as changing, and its `streamsec_aws_scanner_access_ack` as replaced. The roles end up unchanged. Stream Security briefly records each spoke's access as removed, then as created again.
+**Changing the hub.** Each access block depends on the hub. So whenever the hub has changes, for example an account added to `account_ids`, Terraform reads the access modules' data sources at apply time. The plan then shows every spoke's role and policy as changing; they end up unchanged. With provider 1.14.1 or later, each spoke's `streamsec_aws_scanner_access_ack` plans no change. Older providers replace it, and Stream Security briefly records the spoke's access as removed, then as created again.
 
 **Accounts that join later.** Unlike the access StackSet, Terraform doesn't follow an OU. Add a provider and an access block for the new account and apply, for example from the pipeline that creates your accounts.
 
