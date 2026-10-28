@@ -4,7 +4,7 @@ terraform {
   required_providers {
     streamsec = {
       source  = "streamsec-terraform/streamsec"
-      version = ">= 1.7" # streamsec_host + streamsec_aws_account
+      version = ">= 1.14.0" # streamsec_aws_volume_scanner_ack
     }
     aws = {
       source  = "hashicorp/aws"
@@ -13,6 +13,10 @@ terraform {
     archive = {
       source  = "hashicorp/archive"
       version = ">= 2.0"
+    }
+    time = {
+      source  = "hashicorp/time"
+      version = ">= 0.11"
     }
   }
 }

@@ -2,7 +2,7 @@
 
 Terraform module for the Stream Agentless Scanner. It scans your EC2 instances, Lambda functions and Fargate task images for vulnerabilities, with no agents on your instances and no credentials given to Stream Security.
 
-A Fargate task runs on a schedule (daily by default), snapshots your EBS volumes, reads the installed packages and sends them to Stream Security. Old snapshots are cleaned up automatically. Deploy one module instance per region you want scanned.
+A small Fargate task, the orchestrator, runs on a schedule (daily by default) and starts worker tasks, which snapshot your EBS volumes, read the installed packages and send them to Stream Security. Workers start on Fargate Spot and are retried on regular Fargate. Old snapshots are cleaned up automatically. Deploy one module instance per region you want scanned. The scanner can also scan other AWS accounts: see [Scanning other accounts](#scanning-other-accounts-hub-and-spoke).
 
 This is the Terraform alternative to the CloudFormation stack in the console (**Integrations → Vulnerability Scanners → Stream Agentless Scanner**). Use one or the other in a region, not both. If the console stack is already deployed in a region, delete it first; the module stops with an error until you do.
 
@@ -50,25 +50,69 @@ Optional scans for secrets, AI/ML frameworks and databases are off by default. T
 - **Egress IP.** The `nat_gateway_public_ip` output is the scanner's fixed outbound IP, if you need to allowlist it.
 - **Encrypted volumes.** Volumes encrypted with your own KMS keys are scanned by default. To limit which keys the scanner can use, set `kms_key_arns`.
 - **Serverless only.** Set `scan_workload_only = true` to scan only Lambda functions and Fargate task images, without snapshotting EC2 volumes.
-- **Uninstalling.** Set `schedule_enabled = false` and apply, wait for any running scan to finish, then run `terraform destroy`. The region may still show as connected in the console afterwards.
+- **Uninstalling.** Set `schedule_enabled = false` and apply, wait for any running scan to finish, then run `terraform destroy`. The destroy tells Stream Security the region is uninstalled. If the account scans other accounts, turn that off first (see below).
+- **One acknowledgement per account and region.** Stream Security keeps one install record for each account and region, and the module's apply and destroy write it. Two cases follow:
+  - With `allow_cloudformation_coexistence = true` and the console's stack in the same region, whichever installed last owns the record. The module's apply clears the stack's fields from it, so the console shows the region as installed outside Stream Security. Destroying the owner marks the region uninstalled while the other one keeps scanning; destroying the other changes nothing.
+  - To rename the module block, add a `moved` block. Without one, Terraform creates the new instance's acknowledgement and destroys the old one's in the same apply, in no fixed order, so the region can end up marked uninstalled.
+
+## Scanning other accounts (hub and spoke)
+
+The scanner in one account, the **hub**, can also scan other AWS accounts integrated with Stream Security, its **spokes**. It works in each spoke through an IAM role there, `StreamScannerSpokeRole`, and covers a spoke in the regions where the hub has a scanner: deploy this module in the hub for each region to scan. Every scanner deployed by this module from version 1.16.0 can be a hub.
+
+Three pieces, each of which you can manage in Terraform or in the console:
+
+| Piece | Terraform | Console |
+| ----- | --------- | ------- |
+| The hub's scanner, per region | this module | the CloudFormation scanner stack |
+| Which accounts the hub scans | the `streamsec_aws_scanner_hub` resource | the console |
+| Access in each spoke (IAM is global: once per account) | [`modules/volume-scanner-access`](../volume-scanner-access) | the CloudFormation access stack or StackSet |
+
+They mix freely, with three rules:
+
+- **One access role per spoke.** The access module and the console's access stack both create `StreamScannerSpokeRole`, so use one or the other in an account. The role trusts both kinds of hub: the console scanner's role names (`streamsec-scanner-*`) and this module's (`*streamsec-ebs-scanner-tf-*`). An access stack created before Terraform hubs were supported trusts only the console's scanner; update it from the console before a Terraform hub scans that account.
+- **Choose a hub's accounts in one place.** `streamsec_aws_scanner_hub` puts its own list back at the next apply, undoing a change made in the console.
+- **Make the hub before granting access.** Stream Security gives a hub its external id when it becomes one, and the access role is built from it. So deploy the hub's scanner, then set what it scans, then create the access in the spokes. To stop, go the other way: remove the access, turn the hub's coverage off, then destroy the scanner.
+
+[`examples/volume-scanner-hub`](../../examples/volume-scanner-hub) does all three in Terraform for a hub and one spoke.
+
+## Upgrading to 1.16.0
+
+Version 1.16.0 makes the module match the console's scanner stack: a hub grant, Spot workers with a small orchestrator, and a stop for tasks that run past their deadline. It needs the `streamsec` provider 1.14.0 or later: run `terraform init -upgrade`. No input is added or removed. The plan shows:
+
+- **`aws_ecs_task_definition.this` replaced.** It is now the orchestrator, at 512 CPU / 1024 MiB with Fargate's default storage, in the same family (`streamsec-ebs-scanner-tf`). The new revision is registered before the old one is deregistered.
+- **`aws_ecs_task_definition.worker` created**, in the new family `streamsec-ebs-scanner-tf-worker`. `task_cpu`, `task_memory` and `ephemeral_storage_size_gib` now size the workers, with the same defaults as before. A worker's retry runs at the larger of its own size and 4096 CPU / 16384 MiB.
+- **`aws_ecs_cluster_capacity_providers.this` created.** The cluster gains FARGATE and FARGATE_SPOT; it is not replaced.
+- **`time_sleep.ecs_service_linked_role` created.** A 30-second wait before the capacity providers, once per cluster, so a first install in an account that never used ECS doesn't fail while the ECS service-linked role takes effect.
+- **`streamsec_aws_volume_scanner_ack.this` created.** Stream Security records the region as installed outside the console and the account as able to scan others.
+- **Updated in place:** the task role's policies (`AssumeSpokeAccessRoles`; the orchestrator's `RunTask` moves to the worker family; `OrchestratorStopStuckTasks`), the schedule's target and the initial-scan Lambda, which now start the new orchestrator revision. The initial scan does not run again.
+- **Outputs:** `task_definition_arn` is now the orchestrator's; `task_definition_family_arn` keeps its value. `worker_task_definition_arn`, `worker_task_definition_family_arn` and `task_role_name` are new.
+
+Apply outside the scan window (03:00 UTC by default). An orchestrator that started before the apply launches workers from its own family, which it is no longer allowed to run, so the rest of that scan waits for the next one. If you pin `scanner_image`, move it to a current release in the same change.
+
+Two things the apply needs that it did not before:
+
+- **An API token that can write.** The acknowledgement is a write to Stream Security, which refuses a read-only token with 403. Until now the module only read from Stream Security.
+- **`ecs:PutClusterCapacityProviders`** for the role that runs Terraform, to add FARGATE_SPOT to the cluster. If it is missing, the apply fails at that step, the scanner keeps running and scanning, and its workers run on regular Fargate until a later apply succeeds.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
 
 | Name | Version |
-| ---- | ------- |
+|------|---------|
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.3 |
 | <a name="requirement_archive"></a> [archive](#requirement\_archive) | >= 2.0 |
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | ~> 6.0 |
-| <a name="requirement_streamsec"></a> [streamsec](#requirement\_streamsec) | >= 1.7 |
+| <a name="requirement_streamsec"></a> [streamsec](#requirement\_streamsec) | >= 1.14.0 |
+| <a name="requirement_time"></a> [time](#requirement\_time) | >= 0.11 |
 
 ## Providers
 
 | Name | Version |
-| ---- | ------- |
+|------|---------|
 | <a name="provider_archive"></a> [archive](#provider\_archive) | >= 2.0 |
 | <a name="provider_aws"></a> [aws](#provider\_aws) | ~> 6.0 |
-| <a name="provider_streamsec"></a> [streamsec](#provider\_streamsec) | >= 1.7 |
+| <a name="provider_streamsec"></a> [streamsec](#provider\_streamsec) | >= 1.14.0 |
+| <a name="provider_time"></a> [time](#provider\_time) | >= 0.11 |
 
 ## Modules
 
@@ -77,13 +121,15 @@ No modules.
 ## Resources
 
 | Name | Type |
-| ---- | ---- |
+|------|------|
 | [aws_cloudwatch_event_rule.daily](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_event_rule) | resource |
 | [aws_cloudwatch_event_target.daily](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_event_target) | resource |
 | [aws_cloudwatch_log_group.initial_scan](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_log_group) | resource |
 | [aws_cloudwatch_log_group.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_log_group) | resource |
 | [aws_ecs_cluster.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ecs_cluster) | resource |
+| [aws_ecs_cluster_capacity_providers.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ecs_cluster_capacity_providers) | resource |
 | [aws_ecs_task_definition.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ecs_task_definition) | resource |
+| [aws_ecs_task_definition.worker](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ecs_task_definition) | resource |
 | [aws_eip.nat](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eip) | resource |
 | [aws_iam_role.events](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
 | [aws_iam_role.execution](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
@@ -117,6 +163,8 @@ No modules.
 | [aws_vpc_endpoint.s3](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_endpoint) | resource |
 | [aws_vpc_security_group_egress_rule.all](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_security_group_egress_rule) | resource |
 | [aws_vpc_security_group_ingress_rule.endpoints_https](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_security_group_ingress_rule) | resource |
+| [streamsec_aws_volume_scanner_ack.this](https://registry.terraform.io/providers/streamsec-terraform/streamsec/latest/docs/resources/aws_volume_scanner_ack) | resource |
+| [time_sleep.ecs_service_linked_role](https://registry.terraform.io/providers/hashicorp/time/latest/docs/resources/sleep) | resource |
 | [archive_file.initial_scan](https://registry.terraform.io/providers/hashicorp/archive/latest/docs/data-sources/file) | data source |
 | [aws_availability_zones.available](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/availability_zones) | data source |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
@@ -136,14 +184,14 @@ No modules.
 ## Inputs
 
 | Name | Description | Type | Default | Required |
-| ---- | ----------- | ---- | ------- | :------: |
+|------|-------------|------|---------|:--------:|
 | <a name="input_allow_cloudformation_coexistence"></a> [allow\_cloudformation\_coexistence](#input\_allow\_cloudformation\_coexistence) | Allow deploying alongside another scanner in the same region. Off by default: two scanners scan every volume twice and delete each other's snapshots. | `bool` | `false` | no |
 | <a name="input_collection_token_secret_name"></a> [collection\_token\_secret\_name](#input\_collection\_token\_secret\_name) | Prefix for the Secrets Manager secret holding the collection token. Region and a unique suffix are appended. | `string` | `"streamsec-scanner-collection-token"` | no |
 | <a name="input_create_ebs_vpc_endpoint"></a> [create\_ebs\_vpc\_endpoint](#input\_create\_ebs\_vpc\_endpoint) | Create the EBS Direct API interface endpoint so snapshot block reads bypass the NAT Gateway, which is the bulk of the scanner's egress. On by default when the module creates the VPC. Leave unset otherwise. | `bool` | `null` | no |
 | <a name="input_create_scanner_vpc"></a> [create\_scanner\_vpc](#input\_create\_scanner\_vpc) | Create a dedicated VPC, subnets, Internet Gateway and NAT Gateway for the scanner. False to use your own private subnets. | `bool` | `true` | no |
 | <a name="input_customer_id"></a> [customer\_id](#input\_customer\_id) | Stream Security workspace id — the same value as the provider's workspace\_id. A wrong value is silent: SBOMs are dropped by ingest and the region still looks healthy. | `string` | `null` | no |
-| <a name="input_ephemeral_storage_size_gib"></a> [ephemeral\_storage\_size\_gib](#input\_ephemeral\_storage\_size\_gib) | Task ephemeral storage in GiB for the scanner's disk cache. Minimum 21. | `number` | `50` | no |
-| <a name="input_kms_key_arns"></a> [kms\_key\_arns](#input\_kms\_key\_arns) | KMS keys the scanner may use for encrypted volumes. Narrow from ["*"] if you can enumerate your EBS keys. | `list(string)` | <pre>[<br/>  "*"<br/>]</pre> | no |
+| <a name="input_ephemeral_storage_size_gib"></a> [ephemeral\_storage\_size\_gib](#input\_ephemeral\_storage\_size\_gib) | Ephemeral storage in GiB of a worker task, for the scanner's disk cache. Minimum 21. | `number` | `50` | no |
+| <a name="input_kms_key_arns"></a> [kms\_key\_arns](#input\_kms\_key\_arns) | KMS keys the scanner may use for encrypted volumes. Narrow from ["*"] if you can enumerate your EBS keys. | `list(string)` | <pre>[<br>  "*"<br>]</pre> | no |
 | <a name="input_log_retention_days"></a> [log\_retention\_days](#input\_log\_retention\_days) | Retention in days for the scanner log groups. Must be a CloudWatch retention value, or 0 to keep forever. | `number` | `30` | no |
 | <a name="input_max_concurrent_shards"></a> [max\_concurrent\_shards](#input\_max\_concurrent\_shards) | Maximum child scanner tasks in flight at once. Each consumes one subnet IP address. | `number` | `10` | no |
 | <a name="input_resource_prefix"></a> [resource\_prefix](#input\_resource\_prefix) | Prefix for all created resource names. Max 9 characters, letters/digits/hyphens — IAM role names consume the rest of the 64-char limit. | `string` | `""` | no |
@@ -161,8 +209,8 @@ No modules.
 | <a name="input_shard_size"></a> [shard\_size](#input\_shard\_size) | Instances per child task. Lower means more parallelism; higher means fewer, longer-running children. | `number` | `100` | no |
 | <a name="input_subnet_ids"></a> [subnet\_ids](#input\_subnet\_ids) | Existing private subnets for the scanner tasks, required when create\_scanner\_vpc is false. Add an EBS Direct API interface endpoint to your VPC to keep block reads off the NAT Gateway. | `list(string)` | `[]` | no |
 | <a name="input_tags"></a> [tags](#input\_tags) | A map of global tags to add to all created resources | `map(string)` | `{}` | no |
-| <a name="input_task_cpu"></a> [task\_cpu](#input\_task\_cpu) | Fargate task CPU units. One of 256, 512, 1024, 2048, 4096, 8192, 16384. | `string` | `"4096"` | no |
-| <a name="input_task_memory"></a> [task\_memory](#input\_task\_memory) | Fargate task memory in MiB. Raise before raising max\_concurrent\_shards. Must be valid for the chosen task\_cpu. | `string` | `"16384"` | no |
+| <a name="input_task_cpu"></a> [task\_cpu](#input\_task\_cpu) | Fargate CPU units of a worker task (instance shards and the workload scan). One of 256, 512, 1024, 2048, 4096, 8192, 16384. The orchestrator is fixed at 512. | `string` | `"4096"` | no |
+| <a name="input_task_memory"></a> [task\_memory](#input\_task\_memory) | Fargate memory in MiB of a worker task. Must be valid for the chosen task\_cpu. The orchestrator is fixed at 1024; a worker's retry runs at the larger of this size and 4096 CPU / 16384 MiB. | `string` | `"16384"` | no |
 | <a name="input_tenant_name"></a> [tenant\_name](#input\_tenant\_name) | Stream Security tenant name. Defaults to the first DNS label of the provider host; set it explicitly behind a shared endpoint, custom CNAME or PrivateLink DNS. | `string` | `null` | no |
 | <a name="input_trigger_initial_scan"></a> [trigger\_initial\_scan](#input\_trigger\_initial\_scan) | Run one immediate scan at apply time. Failures are swallowed; the daily schedule is the fallback. | `bool` | `true` | no |
 | <a name="input_validate_subnet_egress"></a> [validate\_subnet\_egress](#input\_validate\_subnet\_egress) | Check supplied subnets for egress, VPC membership, zone and capacity. Set false when the subnet list length is unknown at plan; that disables all of those checks. | `bool` | `true` | no |
@@ -172,7 +220,7 @@ No modules.
 ## Outputs
 
 | Name | Description |
-| ---- | ----------- |
+|------|-------------|
 | <a name="output_cluster_arn"></a> [cluster\_arn](#output\_cluster\_arn) | ARN of the ECS cluster running the scanner tasks |
 | <a name="output_collection_token_secret_arn"></a> [collection\_token\_secret\_arn](#output\_collection\_token\_secret\_arn) | ARN of the Secrets Manager secret holding the scanner's collection token |
 | <a name="output_collection_token_secret_name"></a> [collection\_token\_secret\_name](#output\_collection\_token\_secret\_name) | Name of the Secrets Manager secret holding the scanner's collection token. Carries a generated suffix, so read it from here rather than reconstructing it. |
@@ -181,7 +229,10 @@ No modules.
 | <a name="output_scanner_subnet_ids"></a> [scanner\_subnet\_ids](#output\_scanner\_subnet\_ids) | Subnets the scanner Fargate tasks run in |
 | <a name="output_scanner_vpc_id"></a> [scanner\_vpc\_id](#output\_scanner\_vpc\_id) | ID of the VPC the scanner runs in — the one this module created, or the vpc\_id that was supplied |
 | <a name="output_security_group_id"></a> [security\_group\_id](#output\_security\_group\_id) | ID of the scanner's egress-only security group |
-| <a name="output_task_definition_arn"></a> [task\_definition\_arn](#output\_task\_definition\_arn) | ARN of the scanner task definition (current revision) |
-| <a name="output_task_definition_family_arn"></a> [task\_definition\_family\_arn](#output\_task\_definition\_family\_arn) | Revision-less family ARN of the scanner task definition — what the orchestrator uses to launch child tasks on the current ACTIVE revision |
+| <a name="output_task_definition_arn"></a> [task\_definition\_arn](#output\_task\_definition\_arn) | ARN of the orchestrator task definition (current revision) — the one the schedule and the initial scan start |
+| <a name="output_task_definition_family_arn"></a> [task\_definition\_family\_arn](#output\_task\_definition\_family\_arn) | Revision-less family ARN of the orchestrator task definition |
 | <a name="output_task_role_arn"></a> [task\_role\_arn](#output\_task\_role\_arn) | ARN of the IAM role the scanner task assumes |
+| <a name="output_task_role_name"></a> [task\_role\_name](#output\_task\_role\_name) | Name of the IAM role the scanner task assumes. Accounts this scanner scans trust it by this name |
+| <a name="output_worker_task_definition_arn"></a> [worker\_task\_definition\_arn](#output\_worker\_task\_definition\_arn) | ARN of the worker task definition (current revision), which runs the instance shards and the workload scan |
+| <a name="output_worker_task_definition_family_arn"></a> [worker\_task\_definition\_family\_arn](#output\_worker\_task\_definition\_family\_arn) | Revision-less family ARN of the worker task definition — what the orchestrator uses to launch workers on the current ACTIVE revision |
 <!-- END_TF_DOCS -->

@@ -4,13 +4,23 @@ output "cluster_arn" {
 }
 
 output "task_definition_arn" {
-  description = "ARN of the scanner task definition (current revision)"
+  description = "ARN of the orchestrator task definition (current revision) — the one the schedule and the initial scan start"
   value       = aws_ecs_task_definition.this.arn
 }
 
 output "task_definition_family_arn" {
-  description = "Revision-less family ARN of the scanner task definition — what the orchestrator uses to launch child tasks on the current ACTIVE revision"
+  description = "Revision-less family ARN of the orchestrator task definition"
   value       = local.task_definition_family_arn
+}
+
+output "worker_task_definition_arn" {
+  description = "ARN of the worker task definition (current revision), which runs the instance shards and the workload scan"
+  value       = aws_ecs_task_definition.worker.arn
+}
+
+output "worker_task_definition_family_arn" {
+  description = "Revision-less family ARN of the worker task definition — what the orchestrator uses to launch workers on the current ACTIVE revision"
+  value       = local.worker_task_definition_family_arn
 }
 
 output "log_group_name" {
@@ -26,6 +36,11 @@ output "security_group_id" {
 output "task_role_arn" {
   description = "ARN of the IAM role the scanner task assumes"
   value       = aws_iam_role.task.arn
+}
+
+output "task_role_name" {
+  description = "Name of the IAM role the scanner task assumes. Accounts this scanner scans trust it by this name"
+  value       = aws_iam_role.task.name
 }
 
 output "scanner_vpc_id" {
