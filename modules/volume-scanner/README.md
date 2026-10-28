@@ -86,7 +86,7 @@ The modules have no StackSet of their own. Instead, write one block per region f
 
 **Several regions.** Add an `aws` provider alias and a module block for each region, as in [Usage](#usage). Terraform can't give each `for_each` instance of a module its own provider, so the regions can't share one block. A hub covers its spokes only in the regions where it has a scanner.
 
-**Several spokes.** IAM is global, so each spoke account gets one [`modules/volume-scanner-access`](../volume-scanner-access) block, with an `aws` provider that can create IAM roles in that account. In an organization, that can be the management account assuming `OrganizationAccountAccessRole`, which AWS Organizations creates in the accounts it creates:
+**Several spokes.** IAM is global, so each spoke account gets one [`modules/volume-scanner-access`](../volume-scanner-access) block, with an `aws` provider that can manage IAM roles in that account. The snippet uses `OrganizationAccountAccessRole`, which the management account can assume. AWS Organizations creates that role in the accounts it creates, but not in invited accounts. It has full administrator access, so for routine runs prefer a role in each spoke that can manage only `role/StreamScannerSpokeRole` and its inline policy. Assume it from an automation account rather than the management account.
 
 ```hcl
 provider "aws" {
@@ -116,6 +116,7 @@ resource "streamsec_aws_scanner_hub" "this" {
   coverage    = "selected"
   account_ids = [for a in data.streamsec_aws_account.spoke : a.id]
 
+  # List every region's scanner block, so a destroy turns the hub off first.
   depends_on = [module.volume_scanner_us_east_1]
 }
 
@@ -138,14 +139,27 @@ module "scanner_access_444455556666" {
 }
 ```
 
-`data.streamsec_aws_account.hub` and `module.volume_scanner_us_east_1` are the hub's account and scanner, as in [`examples/volume-scanner-hub`](../../examples/volume-scanner-hub). Every spoke must already be integrated with Stream Security.
+`module.volume_scanner_us_east_1` is the hub's scanner, as in [Usage](#usage), and `data.streamsec_aws_account.hub` is its account, as in [`examples/volume-scanner-hub`](../../examples/volume-scanner-hub). Every spoke must already be integrated with Stream Security.
 
-**Accounts that join later.** Unlike the access StackSet, Terraform doesn't follow an OU. Add a provider and an access block for the new account and apply, for example from the pipeline that creates your accounts. With `coverage = "selected"`, also add the account to `account_ids`. With `coverage = "all"`, the hub covers a newly integrated account right away but can't scan it until the role exists, and until then Stream Security shows the account as having no access.
+**Changing the hub.** Each access block depends on the hub. So whenever the hub has changes, for example an account added to `account_ids`, Terraform reads the access modules' data sources at apply time. The plan then shows every spoke's role and policy as changing, and its `streamsec_aws_scanner_access_ack` as replaced. The roles end up unchanged. Stream Security briefly records each spoke's access as removed, then as created again.
+
+**Accounts that join later.** Unlike the access StackSet, Terraform doesn't follow an OU. Add a provider and an access block for the new account and apply, for example from the pipeline that creates your accounts.
+
+- With `coverage = "selected"`, also add the account to `account_ids`.
+- With `coverage = "all"`, the hub covers a newly integrated account right away, unless the account has its own scanner in the region or another hub scans it. Until the role exists, though, the hub can't scan the account, and Stream Security shows it as having no access.
+
+**Removing an account.** The access StackSet removes the role when an account leaves its OUs. In Terraform, do it in three applies, in the order the [access module](../volume-scanner-access/README.md#good-to-know) gives:
+
+1. Take the account out of `account_ids` and apply.
+2. Delete its access block and apply.
+3. Delete its provider block and apply.
+
+Terraform needs the provider to destroy the role, so the provider block can't go in the same apply as the access block.
 
 **Many accounts.** A provider block per account works for tens of accounts. Beyond that, you have two options:
 
 - Run the access module from a separate configuration per account, with that account's credentials, for example one workspace per account.
-- Keep the scanner and the hub in Terraform, and create the spokes' access with the console's access StackSet. The pieces mix freely, with [the rules above](#scanning-other-accounts-hub-and-spoke): each account gets only one access role.
+- Keep the scanner and the hub in Terraform, and create the spokes' access with the console's access StackSet. The pieces mix freely, with [the rules above](#scanning-other-accounts-hub-and-spoke): each account gets only one access role. With `coverage = "selected"`, update the StackSet's stack from the console after each change to `account_ids`.
 
 ## Upgrading to 1.16.0
 
