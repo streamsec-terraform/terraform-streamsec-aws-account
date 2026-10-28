@@ -75,6 +75,78 @@ They mix freely, with three rules:
 
 [`examples/volume-scanner-hub`](../../examples/volume-scanner-hub) does all three in Terraform for a hub and one spoke.
 
+## Many regions and accounts
+
+From an organization's management account, or a delegated StackSets administrator, the console offers two StackSets:
+
+- **The scanner StackSet** deploys the scanner stack to several regions of one account.
+- **The access StackSet** creates the access role in the accounts the hub scans. For a hub that scans all accounts, that is every account in the OUs you give, including accounts that join them later.
+
+The modules have no StackSet of their own. Instead, write one block per region for the scanner and one block per account for the access.
+
+**Several regions.** Add an `aws` provider alias and a module block for each region, as in [Usage](#usage). Terraform can't give each `for_each` instance of a module its own provider, so the regions can't share one block. A hub covers its spokes only in the regions where it has a scanner.
+
+**Several spokes.** IAM is global, so each spoke account gets one [`modules/volume-scanner-access`](../volume-scanner-access) block, with an `aws` provider that can create IAM roles in that account. In an organization, that can be the management account assuming `OrganizationAccountAccessRole`, which AWS Organizations creates in the accounts it creates:
+
+```hcl
+provider "aws" {
+  alias  = "spoke_111122223333"
+  region = "us-east-1"
+  assume_role {
+    role_arn = "arn:aws:iam::111122223333:role/OrganizationAccountAccessRole"
+  }
+}
+
+provider "aws" {
+  alias  = "spoke_444455556666"
+  region = "us-east-1"
+  assume_role {
+    role_arn = "arn:aws:iam::444455556666:role/OrganizationAccountAccessRole"
+  }
+}
+
+data "streamsec_aws_account" "spoke" {
+  for_each         = toset(["111122223333", "444455556666"])
+  cloud_account_id = each.key
+}
+
+# The hub scans the selected accounts. With coverage = "all", leave out account_ids.
+resource "streamsec_aws_scanner_hub" "this" {
+  account_id  = data.streamsec_aws_account.hub.id
+  coverage    = "selected"
+  account_ids = [for a in data.streamsec_aws_account.spoke : a.id]
+
+  depends_on = [module.volume_scanner_us_east_1]
+}
+
+module "scanner_access_111122223333" {
+  source         = "streamsec-terraform/aws-account/streamsec//modules/volume-scanner-access"
+  hub_account_id = streamsec_aws_scanner_hub.this.account_id
+  providers = {
+    aws = aws.spoke_111122223333
+  }
+  depends_on = [streamsec_aws_scanner_hub.this]
+}
+
+module "scanner_access_444455556666" {
+  source         = "streamsec-terraform/aws-account/streamsec//modules/volume-scanner-access"
+  hub_account_id = streamsec_aws_scanner_hub.this.account_id
+  providers = {
+    aws = aws.spoke_444455556666
+  }
+  depends_on = [streamsec_aws_scanner_hub.this]
+}
+```
+
+`data.streamsec_aws_account.hub` and `module.volume_scanner_us_east_1` are the hub's account and scanner, as in [`examples/volume-scanner-hub`](../../examples/volume-scanner-hub). Every spoke must already be integrated with Stream Security.
+
+**Accounts that join later.** Unlike the access StackSet, Terraform doesn't follow an OU. Add a provider and an access block for the new account and apply, for example from the pipeline that creates your accounts. With `coverage = "selected"`, also add the account to `account_ids`. With `coverage = "all"`, the hub covers a newly integrated account right away but can't scan it until the role exists, and until then Stream Security shows the account as having no access.
+
+**Many accounts.** A provider block per account works for tens of accounts. Beyond that, you have two options:
+
+- Run the access module from a separate configuration per account, with that account's credentials, for example one workspace per account.
+- Keep the scanner and the hub in Terraform, and create the spokes' access with the console's access StackSet. The pieces mix freely, with [the rules above](#scanning-other-accounts-hub-and-spoke): each account gets only one access role.
+
 ## Upgrading to 1.16.0
 
 Version 1.16.0 makes the module match the console's scanner stack: a hub grant, Spot workers with a small orchestrator, and a stop for tasks that run past their deadline. It needs the `streamsec` provider 1.14.0 or later: run `terraform init -upgrade`. No input is added or removed. The plan shows:

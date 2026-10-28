@@ -24,7 +24,7 @@ module "scanner_access" {
 }
 ```
 
-`hub_account_id` is the hub's Stream Security id, the `id` of its `streamsec_aws_account`, not its 12-digit AWS account id. The `aws` provider must point at the account to be scanned. [`examples/volume-scanner-hub`](../../examples/volume-scanner-hub) deploys a hub and a spoke together.
+`hub_account_id` is the hub's Stream Security id, the `id` of its `streamsec_aws_account`, not its 12-digit AWS account id. The `aws` provider must point at the account to be scanned. [`examples/volume-scanner-hub`](../../examples/volume-scanner-hub) deploys a hub and a spoke together. For many accounts, in place of the console's access StackSet, see [Many regions and accounts](../volume-scanner/README.md#many-regions-and-accounts).
 
 ## What it creates
 
