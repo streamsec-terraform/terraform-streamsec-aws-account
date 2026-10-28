@@ -163,7 +163,7 @@ run "task_role_name_matches_the_spoke_trust_pattern" {
 
   assert {
     condition     = aws_iam_role.task.path == "/" || aws_iam_role.task.path == null
-    error_message = "A role path becomes part of the principal ARN; the spoke trust pattern assumes none."
+    error_message = "The task role has no path, as in the CloudFormation stack."
   }
 }
 

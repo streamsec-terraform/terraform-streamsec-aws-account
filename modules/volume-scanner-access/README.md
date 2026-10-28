@@ -1,6 +1,6 @@
 # terraform-streamsec-aws-account/volume-scanner-access
 
-Lets the Stream Agentless Scanner in another AWS account, the **hub**, scan this account. It creates one IAM role, `StreamScannerSpokeRole`, which only the hub's scanner can assume, and tells Stream Security when the role is created or removed. IAM is global, so deploy it once per account, not per region. The hub covers this account in the regions where the hub's scanner runs.
+Lets the Stream Agentless Scanner in another AWS account, the **hub**, scan this account. It creates one IAM role, `StreamScannerSpokeRole`, which only the hub account's scanner roles can assume (matched by name, with the hub's external id), and tells Stream Security when the role is created or removed. IAM is global, so deploy it once per account, not per region. The hub covers this account in the regions where the hub's scanner runs.
 
 This is the Terraform twin of the CloudFormation access stack (or StackSet) the console offers for a hub. **Both create a role named `StreamScannerSpokeRole`, so use one or the other in an account**: the second fails with `EntityAlreadyExists`. To move an account from the stack to this module, delete the stack first; the hub can't scan the account until the module is applied.
 

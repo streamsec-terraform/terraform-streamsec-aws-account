@@ -85,7 +85,7 @@ Version 1.16.0 makes the module match the console's scanner stack: a hub grant, 
 - **`time_sleep.ecs_service_linked_role` created.** A 30-second wait before the capacity providers, once per cluster, so a first install in an account that never used ECS doesn't fail while the ECS service-linked role takes effect.
 - **`streamsec_aws_volume_scanner_ack.this` created.** Stream Security records the region as installed outside the console and the account as able to scan others.
 - **Updated in place:** the task role's policies (`AssumeSpokeAccessRoles`; the orchestrator's `RunTask` moves to the worker family; `OrchestratorStopStuckTasks`), the schedule's target and the initial-scan Lambda, which now start the new orchestrator revision. The initial scan does not run again.
-- **Outputs:** `task_definition_arn` is now the orchestrator's; `task_definition_family_arn` keeps its value. `worker_task_definition_arn` and `worker_task_definition_family_arn` are new.
+- **Outputs:** `task_definition_arn` is now the orchestrator's; `task_definition_family_arn` keeps its value. `worker_task_definition_arn`, `worker_task_definition_family_arn` and `task_role_name` are new.
 
 Apply outside the scan window (03:00 UTC by default). An orchestrator that started before the apply launches workers from its own family, which it is no longer allowed to run, so the rest of that scan waits for the next one. If you pin `scanner_image`, move it to a current release in the same change.
 

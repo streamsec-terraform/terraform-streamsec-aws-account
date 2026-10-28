@@ -569,6 +569,8 @@ resource "aws_lambda_invocation" "initial_scan" {
     aws_vpc_endpoint.s3,
     aws_vpc_security_group_ingress_rule.endpoints_https,
     aws_iam_role_policy.initial_scan,
+    # The first scan's workers start on Spot, so FARGATE_SPOT must be on the cluster.
+    aws_ecs_cluster_capacity_providers.this,
     # The function swallows every failure, so CloudWatch is the only place one is visible.
     aws_iam_role_policy_attachment.initial_scan_basic,
     aws_iam_role_policy.task,

@@ -148,8 +148,8 @@ locals {
 ################################################################################
 
 resource "aws_iam_role" "task" {
-  # Spoke roles trust this name by pattern (*streamsec-ebs-scanner-tf-*): a rename,
-  # or a role path, locks the hub out of every account it scans.
+  # Spoke roles trust this name by pattern (*streamsec-ebs-scanner-tf-*): renaming it
+  # locks the hub out of every account it scans.
   name = "${local.regional_name}-task-role"
 
   assume_role_policy = jsonencode({
