@@ -15,7 +15,7 @@ data "streamsec_aws_account" "this" {
 
 locals {
   # Reported to Stream by the install acknowledgement. Bump it with each release tag.
-  module_version = "1.16.0"
+  module_version = "1.16.1"
 
   region     = data.aws_region.current.region
   account_id = data.aws_caller_identity.current.account_id

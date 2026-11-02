@@ -560,7 +560,7 @@ run "install_is_acknowledged_with_the_module_version" {
   # The release this module is tagged as, with no leading v. Bump it here and in
   # local.module_version together.
   assert {
-    condition     = streamsec_aws_volume_scanner_ack.this.module_version == "1.16.0"
-    error_message = "The acknowledgement must report the module's release version, 1.16.0."
+    condition     = streamsec_aws_volume_scanner_ack.this.module_version == "1.16.1"
+    error_message = "The acknowledgement must report the module's release version, 1.16.1."
   }
 }
