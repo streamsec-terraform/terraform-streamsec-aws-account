@@ -75,6 +75,94 @@ They mix freely, with three rules:
 
 [`examples/volume-scanner-hub`](../../examples/volume-scanner-hub) does all three in Terraform for a hub and one spoke.
 
+## Many regions and accounts
+
+From an organization's management account, or a delegated StackSets administrator, the console offers two StackSets:
+
+- **The scanner StackSet** deploys the scanner stack to several regions of one account.
+- **The access StackSet** creates the access role in the accounts the hub scans. For a hub that scans all accounts, that is every account in the OUs you give, including accounts that join them later.
+
+The modules have no StackSet of their own. Instead, write one block per region for the scanner and one block per account for the access.
+
+**Several regions.** Add an `aws` provider alias and a module block for each region, as in [Usage](#usage). Terraform can't give each `for_each` instance of a module its own provider, so the regions can't share one block. A hub covers its spokes only in the regions where it has a scanner.
+
+**Several spokes.** IAM is global, so each spoke account gets one [`modules/volume-scanner-access`](../volume-scanner-access) block, with an `aws` provider that can manage IAM roles in that account. The snippet uses `OrganizationAccountAccessRole`, which the management account can assume. AWS Organizations creates that role in the accounts it creates, but not in invited accounts. It has full administrator access, so for routine runs prefer a role in each spoke that can manage only `role/StreamScannerSpokeRole` and its inline policy. Assume it from an automation account rather than the management account.
+
+```hcl
+provider "aws" {
+  alias  = "spoke_111122223333"
+  region = "us-east-1"
+  assume_role {
+    role_arn = "arn:aws:iam::111122223333:role/OrganizationAccountAccessRole"
+  }
+}
+
+provider "aws" {
+  alias  = "spoke_444455556666"
+  region = "us-east-1"
+  assume_role {
+    role_arn = "arn:aws:iam::444455556666:role/OrganizationAccountAccessRole"
+  }
+}
+
+data "streamsec_aws_account" "spoke" {
+  for_each         = toset(["111122223333", "444455556666"])
+  cloud_account_id = each.key
+}
+
+# The hub scans the selected accounts. With coverage = "all", leave out account_ids.
+resource "streamsec_aws_scanner_hub" "this" {
+  account_id  = data.streamsec_aws_account.hub.id
+  coverage    = "selected"
+  account_ids = [for a in data.streamsec_aws_account.spoke : a.id]
+
+  # List every region's scanner block, so a destroy turns the hub off first.
+  depends_on = [module.volume_scanner_us_east_1]
+}
+
+module "scanner_access_111122223333" {
+  source         = "streamsec-terraform/aws-account/streamsec//modules/volume-scanner-access"
+  hub_account_id = streamsec_aws_scanner_hub.this.account_id
+  providers = {
+    aws = aws.spoke_111122223333
+  }
+  depends_on = [streamsec_aws_scanner_hub.this]
+}
+
+module "scanner_access_444455556666" {
+  source         = "streamsec-terraform/aws-account/streamsec//modules/volume-scanner-access"
+  hub_account_id = streamsec_aws_scanner_hub.this.account_id
+  providers = {
+    aws = aws.spoke_444455556666
+  }
+  depends_on = [streamsec_aws_scanner_hub.this]
+}
+```
+
+`module.volume_scanner_us_east_1` is the hub's scanner, as in [Usage](#usage), and `data.streamsec_aws_account.hub` is its account, as in [`examples/volume-scanner-hub`](../../examples/volume-scanner-hub). Every spoke must already be integrated with Stream Security.
+
+**Changing the hub.** Each access block depends on the hub. So whenever the hub has changes, for example an account added to `account_ids`, Terraform reads the access modules' data sources at apply time. The plan then shows every spoke's role and policy as changing; they end up unchanged. With provider 1.14.1 or later, each spoke's `streamsec_aws_scanner_access_ack` plans no change. Older providers replace it, and Stream Security briefly records the spoke's access as removed, then as created again.
+
+**Accounts that join later.** Unlike the access StackSet, Terraform doesn't follow an OU. Add a provider and an access block for the new account and apply, for example from the pipeline that creates your accounts.
+
+- With `coverage = "selected"`, also add the account to `account_ids`.
+- With `coverage = "all"`, the hub covers a newly integrated account right away, unless the account has its own scanner in the region or another hub scans it. Until the role exists, though, the hub can't scan the account, and Stream Security shows it as having no access.
+
+**Removing an account.** The access StackSet removes the role when an account leaves its OUs. In Terraform, do it in three applies, in the order the [access module](../volume-scanner-access/README.md#good-to-know) gives:
+
+1. Stop the hub covering the account, and apply.
+   - With `coverage = "selected"`, take the account out of `account_ids`.
+   - With `coverage = "all"`, the hub covers every integrated account, so switch to `coverage = "selected"` and list the accounts to keep, or remove the account from Stream Security.
+2. Delete its access block and apply.
+3. Delete its provider block and apply.
+
+Terraform needs the provider to destroy the role, so the provider block can't go in the same apply as the access block.
+
+**Many accounts.** A provider block per account works for tens of accounts. Beyond that, you have two options:
+
+- Run the access module from a separate configuration per account, with that account's credentials, for example one workspace per account.
+- Keep the scanner and the hub in Terraform, and create the spokes' access with the console's access StackSet. The pieces mix freely, with [the rules above](#scanning-other-accounts-hub-and-spoke): each account gets only one access role. With `coverage = "selected"`, update the StackSet's stack from the console after each change to `account_ids`.
+
 ## Upgrading to 1.16.0
 
 Version 1.16.0 makes the module match the console's scanner stack: a hub grant, Spot workers with a small orchestrator, and a stop for tasks that run past their deadline. It needs the `streamsec` provider 1.14.0 or later: run `terraform init -upgrade`. No input is added or removed. The plan shows:

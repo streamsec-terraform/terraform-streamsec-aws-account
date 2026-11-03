@@ -24,7 +24,7 @@ module "scanner_access" {
 }
 ```
 
-`hub_account_id` is the hub's Stream Security id, the `id` of its `streamsec_aws_account`, not its 12-digit AWS account id. The `aws` provider must point at the account to be scanned. [`examples/volume-scanner-hub`](../../examples/volume-scanner-hub) deploys a hub and a spoke together.
+`hub_account_id` is the hub's Stream Security id, the `id` of its `streamsec_aws_account`, not its 12-digit AWS account id. The `aws` provider must point at the account to be scanned. [`examples/volume-scanner-hub`](../../examples/volume-scanner-hub) deploys a hub and a spoke together. For many accounts, in place of the console's access StackSet, see [Many regions and accounts](../volume-scanner/README.md#many-regions-and-accounts).
 
 ## What it creates
 
@@ -44,14 +44,14 @@ module "scanner_access" {
 |------|---------|
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.3 |
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | >= 6.0 |
-| <a name="requirement_streamsec"></a> [streamsec](#requirement\_streamsec) | >= 1.14.0 |
+| <a name="requirement_streamsec"></a> [streamsec](#requirement\_streamsec) | >= 1.14.1 |
 
 ## Providers
 
 | Name | Version |
 |------|---------|
 | <a name="provider_aws"></a> [aws](#provider\_aws) | >= 6.0 |
-| <a name="provider_streamsec"></a> [streamsec](#provider\_streamsec) | >= 1.14.0 |
+| <a name="provider_streamsec"></a> [streamsec](#provider\_streamsec) | >= 1.14.1 |
 
 ## Modules
 

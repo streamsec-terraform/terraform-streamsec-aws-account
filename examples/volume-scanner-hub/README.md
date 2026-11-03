@@ -6,7 +6,7 @@ One AWS account, the hub, runs the Stream Agentless Scanner in `us-east-1` and a
 2. `streamsec_aws_scanner_hub.this` makes the hub scan the spoke. Stream Security gives the hub its external id here.
 3. `module.spoke_access` creates `StreamScannerSpokeRole` in the spoke ([`modules/volume-scanner-access`](../../modules/volume-scanner-access)), trusting the hub's scanner with that external id.
 
-Both accounts must already be integrated with Stream Security. Each spoke needs its own `aws` provider alias and access module block; for many accounts, the console's access StackSet may be simpler. See [Scanning other accounts](../../modules/volume-scanner/README.md#scanning-other-accounts-hub-and-spoke).
+Both accounts must already be integrated with Stream Security. Each spoke needs its own `aws` provider alias and access module block. For more regions, more spokes, and how this replaces the console's StackSets, see [Many regions and accounts](../../modules/volume-scanner/README.md#many-regions-and-accounts). For how the pieces fit together, see [Scanning other accounts](../../modules/volume-scanner/README.md#scanning-other-accounts-hub-and-spoke).
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
