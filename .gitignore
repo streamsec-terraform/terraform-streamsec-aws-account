@@ -46,8 +46,7 @@ terraform.rc
 *.env
 env.sh
 # Python leaves __pycache__ next to the Lambda source (the zip archive_file writes
-# there is already covered by *.zip above). A .pyc was committed on this branch
-# before these were added.
+# there is already covered by *.zip above).
 __pycache__/
 *.py[cod]
 
