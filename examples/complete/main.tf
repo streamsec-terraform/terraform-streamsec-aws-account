@@ -34,8 +34,8 @@ module "real_time_us_east_1" {
   # central_vpc_flow_logs_log_groups = ["/aws/vpc/flowlogs/my-vpc"]
   # central_vpc_flow_logs_fields     = "version account-id action bytes dstaddr end interface-id log-status packets pkt-dstaddr pkt-srcaddr protocol srcaddr srcport dstport start vpc-id subnet-id instance-id tcp-flags region"
   # central_eks_audit_log_groups     = ["/aws/eks/my-cluster/cluster"]
-  # central_route53_log_groups       = ["/staging/route53dnslogs/cw-test"]
-  # central_bedrock_log_groups       = ["/staging/awsbedrocklogs/cw-test"]
+  # central_route53_log_groups       = ["/aws/route53/my-hosted-zone"]
+  # central_bedrock_log_groups       = ["/aws/bedrock/my-invocation-logs"]
   # central_kinesis_stream_arns      = ["arn:aws:kinesis:us-east-1:123456789012:stream/my-stream"]
 
   # API Gateway access logs via CloudWatch Logs (or via the Kinesis stream above).

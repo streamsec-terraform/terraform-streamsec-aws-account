@@ -753,7 +753,7 @@ run "secret_name_is_generated_not_fixed" {
   # A fixed name is the bug: identical on both sides of a create_before_destroy
   # replacement, so the new secret fails with ResourceExistsException. The
   # module must hand the provider a prefix and let it generate the rest.
-  # Reproduced and fixed against real Secrets Manager on 2026-09-16.
+  # Verified against real Secrets Manager.
   assert {
     condition     = aws_secretsmanager_secret.collection_token.name_prefix == "streamsec-scanner-collection-token-us-east-1-"
     error_message = "The secret must be created with name_prefix, not a fixed name."
