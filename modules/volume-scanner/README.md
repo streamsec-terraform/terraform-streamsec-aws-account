@@ -44,7 +44,7 @@ module "volume_scanner_us_east_2" {
 
 Optional scans for secrets, AI/ML frameworks and databases are off by default. Turn them on with `scan_secrets`, `scan_ai_workloads` and `scan_databases`.
 
-Data volumes attached to each instance are scanned along with its root volume, as in the console's deploy. Set `scan_data_volumes = false` to scan root volumes only. Volumes behind EKS persistent volumes are skipped unless `scan_kubernetes_volumes = true`.
+Data volumes attached to each instance are scanned along with its root volume, as in the console's deploy. An install from an earlier version scanned root volumes only; set `scan_data_volumes = false` to keep that. Volumes behind EKS persistent volumes are skipped unless `scan_kubernetes_volumes = true`.
 
 ## Good to know
 
