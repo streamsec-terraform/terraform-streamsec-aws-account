@@ -318,6 +318,10 @@ locals {
       { name = "COLLECTOR_SCAN_DATABASES", value = tostring(var.scan_databases) },
       { name = "COLLECTOR_SCAN_AI_WORKLOADS", value = tostring(var.scan_ai_workloads) },
       { name = "COLLECTOR_SCAN_SECRETS", value = tostring(var.scan_secrets) },
+      { name = "COLLECTOR_SCAN_DATA_VOLUMES", value = tostring(var.scan_data_volumes) },
+      { name = "COLLECTOR_SCAN_KUBERNETES_VOLUMES", value = tostring(var.scan_kubernetes_volumes) },
+      # The task role may tag its snapshots scanned (MarkScannedSnapshots).
+      { name = "COLLECTOR_MARK_SCANNED", value = "true" },
       # Normalized, not raw: the scanner's comma split would otherwise see " ecs".
       { name = "COLLECTOR_WORKLOAD_KINDS", value = join(",", local.workload_kind_list) },
       # Instance shards get false on RunTask; this governs the orchestrator and workload child.

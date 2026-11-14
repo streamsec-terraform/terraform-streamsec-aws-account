@@ -41,6 +41,20 @@ variable "scan_secrets" {
   nullable    = false
 }
 
+variable "scan_data_volumes" {
+  description = "Scan each instance's attached data volumes as well as its root volume. Each one is also snapshotted, and large volumes add scan time. EKS persistent volumes are skipped unless scan_kubernetes_volumes is true."
+  type        = bool
+  default     = true
+  nullable    = false
+}
+
+variable "scan_kubernetes_volumes" {
+  description = "Also scan the EBS volumes that back EKS persistent volumes, which the data-volume scan skips otherwise."
+  type        = bool
+  default     = false
+  nullable    = false
+}
+
 variable "workload_kinds" {
   description = "Workloads to scan besides EC2: \"lambda\", \"ecs\", \"lambda,ecs\", or \"\" to disable. Also gates the matching IAM grants."
   type        = string
