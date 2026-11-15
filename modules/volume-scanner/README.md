@@ -44,6 +44,8 @@ module "volume_scanner_us_east_2" {
 
 Optional scans for secrets, AI/ML frameworks and databases are off by default. Turn them on with `scan_secrets`, `scan_ai_workloads` and `scan_databases`.
 
+Data volumes attached to each instance are scanned along with its root volume, as in the console's deploy. An install from an earlier version scanned root volumes only; set `scan_data_volumes = false` to keep that. Volumes behind EKS persistent volumes are skipped unless `scan_kubernetes_volumes = true`.
+
 ## Good to know
 
 - **Networking.** By default the module creates a VPC with a NAT gateway (about $32/month per region), and the scanner runs with no public IP. To avoid the extra NAT gateway, use your own private subnets. They need a default route to a NAT gateway or similar egress, and the module checks this at plan time. If the subnets are created in the same apply, set `validate_subnet_egress = false`.
@@ -284,8 +286,10 @@ No modules.
 | <a name="input_max_concurrent_shards"></a> [max\_concurrent\_shards](#input\_max\_concurrent\_shards) | Maximum child scanner tasks in flight at once. Each consumes one subnet IP address. | `number` | `10` | no |
 | <a name="input_resource_prefix"></a> [resource\_prefix](#input\_resource\_prefix) | Prefix for all created resource names. Max 9 characters, letters/digits/hyphens — IAM role names consume the rest of the 64-char limit. | `string` | `""` | no |
 | <a name="input_scan_ai_workloads"></a> [scan\_ai\_workloads](#input\_scan\_ai\_workloads) | Detect AI/ML framework installs and surface them as workload metadata. | `bool` | `false` | no |
+| <a name="input_scan_data_volumes"></a> [scan\_data\_volumes](#input\_scan\_data\_volumes) | Scan each instance's attached data volumes as well as its root volume. Each one is also snapshotted, and large volumes add scan time. EKS persistent volumes are skipped unless scan\_kubernetes\_volumes is true. | `bool` | `true` | no |
 | <a name="input_scan_databases"></a> [scan\_databases](#input\_scan\_databases) | Detect installed databases from their on-disk signatures. Adds a filesystem walk per instance. | `bool` | `false` | no |
 | <a name="input_scan_encrypted_volumes"></a> [scan\_encrypted\_volumes](#input\_scan\_encrypted\_volumes) | Grant the KMS permissions needed to read snapshots of encrypted volumes. Off means those instances report no findings, with no error anywhere. | `bool` | `true` | no |
+| <a name="input_scan_kubernetes_volumes"></a> [scan\_kubernetes\_volumes](#input\_scan\_kubernetes\_volumes) | Also scan the EBS volumes that back EKS persistent volumes, which the data-volume scan skips otherwise. | `bool` | `false` | no |
 | <a name="input_scan_language_packages"></a> [scan\_language\_packages](#input\_scan\_language\_packages) | Detect language-level packages on disk (Python, Node, Ruby, Go, Rust, Java). The only toggle on by default. | `bool` | `true` | no |
 | <a name="input_scan_secrets"></a> [scan\_secrets](#input\_scan\_secrets) | Detect secrets and credentials on disk. Significantly increases scan duration. | `bool` | `false` | no |
 | <a name="input_scan_workload_only"></a> [scan\_workload\_only](#input\_scan\_workload\_only) | Scan only the workloads in workload\_kinds and skip EC2 instance disks: no snapshots, no volume reads. Containers on EC2-launch-type ECS are then not scanned. Requires a non-empty workload\_kinds. | `bool` | `false` | no |

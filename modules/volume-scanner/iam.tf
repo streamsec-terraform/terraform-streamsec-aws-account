@@ -219,6 +219,19 @@ resource "aws_iam_role_policy" "task" {
           StringEquals = { "ec2:CreateAction" = "CreateSnapshot" }
         }
       },
+      # After delivering an instance, a worker tags its snapshots with ScannedCycle, so a
+      # shard that runs again (a Spot relaunch or a retry) skips it. That one key only.
+      {
+        Sid      = "MarkScannedSnapshots"
+        Effect   = "Allow"
+        Action   = ["ec2:CreateTags"]
+        Resource = "arn:${local.partition}:ec2:${local.region}::snapshot/*"
+        Condition = {
+          StringEquals                = { "aws:ResourceTag/Purpose" = "ebs-package-collector" }
+          "ForAllValues:StringEquals" = { "aws:TagKeys" = ["ScannedCycle"] }
+          Null                        = { "aws:TagKeys" = "false" }
+        }
+      },
       {
         Sid    = "ReadAndDeleteOwnSnapshots"
         Effect = "Allow"

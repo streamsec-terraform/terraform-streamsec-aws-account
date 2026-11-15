@@ -65,6 +65,9 @@ run "container_environment_matches_the_cloudformation_defaults" {
         "COLLECTOR_SCAN_DATABASES=false",
         "COLLECTOR_SCAN_AI_WORKLOADS=false",
         "COLLECTOR_SCAN_SECRETS=false",
+        "COLLECTOR_SCAN_DATA_VOLUMES=true",
+        "COLLECTOR_SCAN_KUBERNETES_VOLUMES=false",
+        "COLLECTOR_MARK_SCANNED=true",
         "COLLECTOR_WORKLOAD_KINDS=lambda,ecs",
         "COLLECTOR_WORKLOAD_ONLY=false",
         "COLLECTOR_ROLE=orchestrator",
@@ -132,13 +135,15 @@ run "feature_toggles_reach_the_container" {
   command = apply
 
   variables {
-    scan_secrets           = true
-    scan_ai_workloads      = true
-    scan_databases         = true
-    scan_language_packages = false
-    workload_kinds         = ""
-    shard_size             = 250
-    max_concurrent_shards  = 25
+    scan_secrets            = true
+    scan_ai_workloads       = true
+    scan_databases          = true
+    scan_language_packages  = false
+    scan_data_volumes       = false
+    scan_kubernetes_volumes = true
+    workload_kinds          = ""
+    shard_size              = 250
+    max_concurrent_shards   = 25
   }
 
   assert {
@@ -147,12 +152,44 @@ run "feature_toggles_reach_the_container" {
         "COLLECTOR_SCAN_AI_WORKLOADS=true",
         "COLLECTOR_SCAN_DATABASES=true",
         "COLLECTOR_SCAN_LANGUAGE_PACKAGES=false",
+        "COLLECTOR_SCAN_DATA_VOLUMES=false",
+        "COLLECTOR_SCAN_KUBERNETES_VOLUMES=true",
         "COLLECTOR_WORKLOAD_KINDS=",
         "COLLECTOR_SHARD_SIZE=250",
       "COLLECTOR_MAX_CONCURRENT_SHARDS=25"] :
       contains([for e in jsondecode(aws_ecs_task_definition.this.container_definitions)[0].environment : "${e.name}=${e.value}"], pair)
     ])
     error_message = "Scanner toggles and scaling knobs must reach the container environment."
+  }
+}
+
+# Both task roles get it from the one container definition.
+run "workers_mark_their_snapshots_scanned" {
+  command = apply
+
+  assert {
+    condition = alltrue([
+      for td in [aws_ecs_task_definition.this, aws_ecs_task_definition.worker] :
+      contains([for e in jsondecode(td.container_definitions)[0].environment : "${e.name}=${e.value}"], "COLLECTOR_MARK_SCANNED=true")
+    ])
+    error_message = "The orchestrator and the workers must both get COLLECTOR_MARK_SCANNED=true."
+  }
+
+  assert {
+    condition = [
+      for s in jsondecode(aws_iam_role_policy.task.policy).Statement : s if try(s.Sid, "") == "MarkScannedSnapshots"
+      ] == [{
+        Sid      = "MarkScannedSnapshots"
+        Effect   = "Allow"
+        Action   = ["ec2:CreateTags"]
+        Resource = "arn:aws:ec2:us-east-1::snapshot/*"
+        Condition = {
+          StringEquals                = { "aws:ResourceTag/Purpose" = "ebs-package-collector" }
+          "ForAllValues:StringEquals" = { "aws:TagKeys" = ["ScannedCycle"] }
+          Null                        = { "aws:TagKeys" = "false" }
+        }
+    }]
+    error_message = "MarkScannedSnapshots must allow only the ScannedCycle tag, on the scanner's own snapshots."
   }
 }
 
